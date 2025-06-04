@@ -1,4 +1,4 @@
-package org.basaltmc.proxy
+package org.basaltmc.proxy.runtime
 
 /** What the command line asked for. Parsing never exits or prints: [main] decides both. */
 public sealed interface CliCommand {
@@ -49,7 +49,7 @@ public object Cli {
         """
         Basalt Proxy ${BuildInfo.VERSION}
 
-        Usage: basalt-proxy [options]
+        Usage: proxy-runtime [options]
 
         Options:
           --config <dir>   Directory to read configuration from (default: $DEFAULT_CONFIG_DIRECTORY)

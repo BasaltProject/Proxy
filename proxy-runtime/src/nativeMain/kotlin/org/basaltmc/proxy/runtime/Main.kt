@@ -1,4 +1,4 @@
-package org.basaltmc.proxy
+package org.basaltmc.proxy.runtime
 
 import org.basaltmc.wire.common.logging.LogOutput
 import org.basaltmc.wire.common.logging.Logger
