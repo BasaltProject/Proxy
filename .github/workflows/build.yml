@@ -29,7 +29,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build and test
-        run: ./gradlew build --stacktrace
+        # A local build only makes this machine's binary; the matrix is what covers the five.
+        # The run number is the build half of the version: 26.2.<build>.
+        run: ./gradlew build --stacktrace -Pbasalt.targets=all -Pbasalt.build=${{ github.run_number }}
 
       - name: Upload test reports
         if: failure()

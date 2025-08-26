@@ -130,21 +130,31 @@ git clone --recurse-submodules https://github.com/BasaltProject/Proxy.git
 In an existing clone, `git submodule update --init` does the same thing. Without
 it the build fails immediately: most of the modules are missing.
 
-Gradle orchestrates the build; it is not part of the runtime.
-
-Kotlin/Native tasks carry the target in their name; replace `MacosArm64` with the
-one you are building for.
+Then one command, the same on macOS, Linux and Windows:
 
 ```bash
-# Native binary for the current host
-./gradlew :proxy-runtime:linkReleaseExecutableMacosArm64
-
-# Debug build and run
-./gradlew :proxy-runtime:runDebugExecutableMacosArm64
+./gradlew build
 ```
 
-Supported targets: `macosArm64`, `macosX64`, `linuxX64`, `linuxArm64`,
-`mingwX64`.
+It builds and tests a release binary for the machine it runs on and leaves it in
+`build/`, named for what it is:
+
+```
+build/BasaltProxy-26.2.0-dev-macOS-arm64
+build/BasaltProxy-26.2.14-Linux-x64
+build/BasaltProxy-26.2.14-Windows-x64.exe
+```
+
+The version is `<minecraft>.<build>`: which Minecraft the proxy speaks natively,
+and how far along that line the build is. A build made outside the CI has no
+build number, so it is `.0-dev`. Gradle orchestrates the build and needs JDK 25;
+the proxy it produces needs no Java at all.
+
+Kotlin/Native does not cross-compile between host families, so a machine builds
+its own: `macosArm64` and `macosX64` on macOS, `linuxX64` and `linuxArm64` on
+Linux, `mingwX64` on Windows. Of those, the build makes the one it is running on.
+For the rest there is `-Pbasalt.targets`, and for a debug binary in the same
+place, `-Pbasalt.debug`.
 
 ## Testing
 
@@ -155,6 +165,9 @@ Supported targets: `macosArm64`, `macosX64`, `linuxX64`, `linuxArm64`,
 # A single module
 ./gradlew :proxy-runtime:macosArm64Test
 ```
+
+The CI matrix passes `-Pbasalt.targets=all`, so between its three runners it
+covers all five targets.
 
 Native tests only run on their matching host.
 
