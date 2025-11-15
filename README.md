@@ -5,15 +5,15 @@
 <h2 align="center">Basalt Proxy</h2>
 
 <p align="center">
-  <strong>A Minecraft proxy written from scratch in Kotlin/Native. No JVM.</strong>
+  <strong>A Minecraft proxy written from scratch in C++23. No JVM.</strong>
 </p>
 
 <p align="center">
   <img alt="Minecraft" src="https://img.shields.io/badge/Minecraft-26.2-62B47A?logo=minecraft&logoColor=white">
   <img alt="Protocol" src="https://img.shields.io/badge/protocol-776-62B47A">
-  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white">
-  <img alt="Kotlin/Native" src="https://img.shields.io/badge/Kotlin%2FNative-macOS_%7C_Linux_%7C_Windows-7F52FF?logo=kotlin&logoColor=white">
-  <img alt="Build" src="https://img.shields.io/badge/build-Gradle-02303A?logo=gradle&logoColor=white">
+  <img alt="C++" src="https://img.shields.io/badge/C%2B%2B-23-00599C?logo=cplusplus&logoColor=white">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS_%7C_Linux_%7C_Windows-00599C">
+  <img alt="Build" src="https://img.shields.io/badge/build-CMake-064F8C?logo=cmake&logoColor=white">
   <img alt="Plugins" src="https://img.shields.io/badge/plugins-Lua-000080?logo=lua&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-green">
 </p>
@@ -27,7 +27,7 @@
 Basalt Proxy sits in front of a set of Minecraft servers and gives players one
 address to connect to, moving them between backends without a reconnect.
 
-It is written entirely in **Kotlin/Native** and ships as a native binary per
+It is written entirely in **C++23** and ships as a native binary per
 platform. There is no JVM anywhere in the runtime: no bundled JRE, no embedded
 VM, no hidden Java process.
 
@@ -38,7 +38,7 @@ protocol, used by both sides.
 
 | | |
 |---|---|
-| Language | Kotlin/Native, 100 %. No Java, no JVM at runtime |
+| Language | C++23, 100 %. No Java, no JVM at runtime |
 | Target version | Minecraft 26.2 (protocol 776) |
 | Distribution | Native binaries per platform |
 | Backends | Any Minecraft server, Basalt or not |
@@ -130,57 +130,47 @@ git clone --recurse-submodules https://github.com/BasaltProject/Proxy.git
 In an existing clone, `git submodule update --init` does the same thing. Without
 it the build fails immediately: most of the modules are missing.
 
-Then one command, the same on macOS, Linux and Windows:
+You need CMake 3.28 or newer, Ninja and Clang. Then two commands, the same on
+macOS, Linux and Windows:
 
 ```bash
-./gradlew build
+cmake --preset release
+cmake --build build/release
 ```
 
-It builds and tests a release binary for the machine it runs on and leaves it in
-`build/`, named for what it is:
+That leaves the binary in `build/release/bin/`, named for what it is:
 
 ```
-build/BasaltProxy-26.2.0-dev-macOS-arm64
-build/BasaltProxy-26.2.14-Linux-x64
-build/BasaltProxy-26.2.14-Windows-x64.exe
+build/release/bin/BasaltProxy-26.2.0-dev-macOS-arm64
+build/release/bin/BasaltProxy-26.2.14-Linux-x64
+build/release/bin/BasaltProxy-26.2.14-Windows-x64.exe
 ```
 
 The version is `<minecraft>.<build>`: which Minecraft the proxy speaks natively,
 and how far along that line the build is. A build made outside the CI has no
-build number, so it is `.0-dev`. Gradle orchestrates the build and needs JDK 25;
-the proxy it produces needs no Java at all.
-
-Kotlin/Native does not cross-compile between host families, so a machine builds
-its own: `macosArm64` and `macosX64` on macOS, `linuxX64` and `linuxArm64` on
-Linux, `mingwX64` on Windows. Of those, the build makes the one it is running on.
-For the rest there is `-Pbasalt.targets`, and for a debug binary in the same
-place, `-Pbasalt.debug`.
+build number, so it is `.0-dev`.
 
 ## Testing
 
 ```bash
-# Everything CI runs: compile, style and every suite on this host
-./gradlew build
+# Everything CI runs
+cmake --preset debug && cmake --build build/debug
+ctest --preset debug
 
-# A single module
-./gradlew :proxy-runtime:macosArm64Test
+# A single suite
+./build/debug/proxy-runtime/proxy-runtime-cli-test
 ```
 
-The CI matrix passes `-Pbasalt.targets=all`, so between its three runners it
-covers all five targets.
-
-Native tests only run on their matching host.
+`--preset asan` builds the same tree under the address and undefined sanitizers.
 
 ## Requirements
 
 | Component | Requirement |
 |---|---|
-| JDK | 25, for Gradle only. Not needed to run the proxy |
-| Kotlin | 2.4.10 |
-| Gradle | Through the included wrapper |
-| Native toolchain | Required to link or run Kotlin/Native binaries on the host |
-
-Use the included wrapper rather than a system Gradle installation.
+| CMake | 3.28 or newer |
+| Generator | Ninja |
+| Compiler | Clang, with C++23 support |
+| ccache | Optional, but the build is much faster with it |
 
 ## Development Status
 
@@ -205,7 +195,7 @@ Everything below that line is still missing.
 
 | Repository | What it is |
 |---|---|
-| [Server](https://github.com/BasaltProject/Server) | The Minecraft server itself, in Kotlin/Native |
+| [Server](https://github.com/BasaltProject/Server) | The Minecraft server itself, in C++23 |
 | [Wire](https://github.com/BasaltProject/Wire) | The network layer both this and the server build on |
 | [Website](https://github.com/BasaltProject/Website) | The project site, at [basaltmc.org](https://basaltmc.org) |
 
