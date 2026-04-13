@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(basalt-proxy
-    VERSION 26.2.0
+    VERSION 26.3.0
     DESCRIPTION "Basalt Proxy: a Minecraft proxy written from scratch"
     LANGUAGES C CXX
 )
 
-set(BASALT_VERSION "26.2.0-dev" CACHE STRING "Version stamped into the binary and its file name")
+set(BASALT_VERSION "26.3.0-dev" CACHE STRING "Version stamped into the binary and its file name")
 
 option(BASALT_BUILD_TESTS "Build the test executables" ON)
 option(BASALT_WERROR "Treat warnings as errors" OFF)

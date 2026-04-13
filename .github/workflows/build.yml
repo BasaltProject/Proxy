@@ -33,7 +33,7 @@ jobs:
         run: cmake --preset release
 
       - name: Build
-        # The run number is the build half of the version: 26.2.<build>.
+        # The run number is the build half of the version: 26.3.<build>.
         run: cmake --build build/release -- -k 0
 
       - name: Test
