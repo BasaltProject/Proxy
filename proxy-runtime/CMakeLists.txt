@@ -33,3 +33,9 @@ basalt_test(proxy-runtime-cli-test
         test/CliTest.cpp
     DEPENDS basalt::proxy-runtime-core
 )
+
+basalt_test(proxy-runtime-network-test
+    SOURCES
+        test/NetworkTest.cpp
+    DEPENDS basalt::proxy-runtime-core basalt::wire-protocol
+)
