@@ -96,6 +96,6 @@ jobs:
 
       - name: Check formatting
         run: |
-          find proxy-runtime wire/wire-* -name '*.hpp' -o -name '*.cpp' \
+          find proxy-runtime proxy-config wire/wire-* -name '*.hpp' -o -name '*.cpp' \
             | grep -v third_party \
             | xargs clang-format --dry-run --Werror

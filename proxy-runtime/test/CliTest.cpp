@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include <doctest.h>
-
 #include <basalt/proxy/runtime/Cli.hpp>
+
+#include <doctest.h>
 
 #include <string>
 

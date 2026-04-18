@@ -36,4 +36,5 @@ endif()
 # both consumers.
 add_subdirectory(wire)
 
+add_subdirectory(proxy-config)
 add_subdirectory(proxy-runtime)
