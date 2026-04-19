@@ -13,12 +13,17 @@
 
 namespace basalt::proxy::runtime::detail {
 
-BackendLogin::BackendLogin(wire::io::TcpConnection connection) : connection_(std::move(connection)) {}
+BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory)
+    : connection_(std::move(connection)), input_(0, memory), output_(0, memory), frame_(0, memory) {
+    allocationReady_ = input_.tryReserve(kCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
+}
 
 std::expected<void, BackendLoginError> BackendLogin::start(const config::BackendConfig& backend,
                                                            const wire::auth::SessionProfile& profile,
                                                            std::string_view virtualHost, std::uint16_t virtualPort) {
     namespace protocol = wire::protocol;
+    if (!allocationReady_)
+        return std::unexpected(BackendLoginError::kLimit);
     if (started_ || backend.protocol != buildInfo::kProtocolVersion ||
         backend.forwarding != wire::auth::forwarding::ForwardingMode::None)
         return std::unexpected(BackendLoginError::kUnsupported);
@@ -54,23 +59,30 @@ bool BackendLogin::bufferedPacket() const {
     return false;
 }
 
-wire::io::IoInterest BackendLogin::interest() const { return {true, hasOutput() || bufferedPacket()}; }
+wire::io::IoInterest BackendLogin::interest(bool read) const {
+    return {read, hasOutput() || (read && bufferedPacket())};
+}
 
 std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::uint8_t> packet) {
     if (!started_ || packet.empty())
         return std::unexpected(BackendLoginError::kMalformed);
     output_.discardReadBytes();
-    // Covers zlib's worst-case expansion and both VarInt headers without buffer growth.
-    if (packet.size() > kCapacity - 64 || packet.size() + 64 > kCapacity - output_.writerIndex())
+    const auto maximum = compression_ ? wire::protocol::packetFraming::kMaxUncompressedSize
+                                      : wire::protocol::packetFraming::kMaxFrameSize;
+    if (packet.size() > static_cast<std::size_t>(maximum))
+        return std::unexpected(BackendLoginError::kLimit);
+    const auto room = packet.size() + packet.size() / 1000 + 64;
+    if ((login_ && room > kCapacity - output_.writerIndex()) || !output_.tryReserve(room))
         return std::unexpected(BackendLoginError::kLimit);
     auto written = compression_ ? wire::protocol::packetFraming::writeCompressed(output_, packet, *compression_)
                                 : wire::protocol::packetFraming::writeUncompressed(output_, packet);
-    if (!written || allocated() > kBytes)
+    if (!written)
         return std::unexpected(BackendLoginError::kLimit);
     return {};
 }
 
-std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::ready(const wire::io::IoReady& event) {
+std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::ready(const wire::io::IoReady& event,
+                                                                                    bool readEnabled) {
     if (!started_)
         return std::unexpected(BackendLoginError::kMalformed);
     if (output_.readableBytes() != 0 && event.writable) {
@@ -82,12 +94,14 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
         if (output_.readableBytes() == 0)
             output_.clear();
     }
+    if (!readEnabled)
+        return std::span<const std::uint8_t>{};
     if (!bufferedPacket() && (event.readable || event.closed)) {
         std::array<std::uint8_t, kCapacity> chunk{};
-        const auto room = kCapacity - input_.writerIndex();
+        const auto room = input_.capacity() - input_.writerIndex();
         if (room == 0)
             return std::unexpected(BackendLoginError::kLimit);
-        auto read = connection_.read(std::span{chunk}.first(room));
+        auto read = connection_.read(std::span{chunk}.first(std::min(room, chunk.size())));
         if (!read && read.error().kind != wire::io::SocketError::Kind::WouldBlock)
             return std::unexpected(BackendLoginError::kIo);
         if (read && *read == 0)
@@ -97,40 +111,25 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
     }
     // Consume compression control before decoding any coalesced following frame.
     while (true) {
-        std::uint32_t length = 0;
-        std::size_t headerBytes = 0;
-        for (std::size_t i = 0; i < std::min<std::size_t>(3, input_.readableBytes()); ++i) {
-            const auto byte = input_.peekByte(i);
-            length |= static_cast<std::uint32_t>(byte & 0x7fU) << (7 * i);
-            if ((byte & 0x80U) == 0) {
-                headerBytes = i + 1;
-                break;
-            }
-        }
-        if ((headerBytes == 0 && input_.readableBytes() >= 3) ||
-            (headerBytes != 0 && (length == 0 || length > kCapacity - 3)))
-            return std::unexpected(BackendLoginError::kLimit);
-        if (headerBytes == 0)
+        const auto hint = wire::protocol::packetFraming::inspectFrame(
+            input_.readable(), compression_.has_value(),
+            login_ ? kCapacity : wire::protocol::packetFraming::kMaxUncompressedSize, compression_);
+        if (!hint)
+            return std::unexpected(hint.error() == wire::protocol::FramingError::FrameTooBig
+                                       ? BackendLoginError::kLimit
+                                       : BackendLoginError::kMalformed);
+        if (!*hint)
             return std::span<const std::uint8_t>{};
-        if (compression_) {
-            std::uint32_t expanded = 0;
-            bool complete = false;
-            const auto available = std::min<std::size_t>(length, input_.readableBytes() - headerBytes);
-            for (std::size_t i = 0; i < std::min<std::size_t>(5, available); ++i) {
-                const auto byte = input_.peekByte(headerBytes + i);
-                if (i == 4 && (byte & 0xf0U) != 0)
-                    return std::unexpected(BackendLoginError::kMalformed);
-                expanded |= static_cast<std::uint32_t>(byte & 0x7fU) << (7 * i);
-                if ((byte & 0x80U) == 0) {
-                    complete = true;
-                    break;
-                }
-            }
-            if ((!complete && (available >= 5 || available == length)))
-                return std::unexpected(BackendLoginError::kMalformed);
-            if (complete && expanded > kCapacity)
-                return std::unexpected(BackendLoginError::kLimit);
-        }
+        const auto sizes = **hint;
+        if (login_ && sizes.frameBytes > kCapacity)
+            return std::unexpected(BackendLoginError::kLimit);
+        if (sizes.frameBytes > input_.capacity() && !input_.tryReserve(sizes.frameBytes - input_.writerIndex()))
+            return std::unexpected(BackendLoginError::kLimit);
+        if (!sizes.complete)
+            return std::span<const std::uint8_t>{};
+        frame_.clear();
+        if (!sizes.packetBytes || (*sizes.packetBytes > frame_.capacity() && !frame_.tryReserve(*sizes.packetBytes)))
+            return std::unexpected(BackendLoginError::kLimit);
         const auto packet =
             wire::protocol::packetFraming::tryReadFrame(input_, compression_.has_value(), frame_, compression_);
         if (!packet)

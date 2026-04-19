@@ -148,6 +148,23 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     const std::array<std::uint8_t, 3> knownPacks{2, 7, 0};
     REQUIRE(client.write(knownPacks));
     CHECK(receive(*backend, 4) == std::vector<std::uint8_t>{3, 0, 7, 0});
+    // Independent zlib vector for a large, valid minecraft:brand custom payload.
+    const std::vector<std::uint8_t> largeBrand{43, 0xe3, 0x0f, 120, 156, 99,  228, 207, 205, 204, 75, 77,  46,  74,  76,
+                                               43, 177,  74,   42,  74,  204, 75,  185, 192, 95,  49, 10,  70,  193, 40,
+                                               24, 5,    163,  96,  20,  140, 130, 33,  15,  0,   13, 254, 176, 151};
+    REQUIRE(backend->write(largeBrand));
+    std::vector<std::uint8_t> expectedBrand{0xe3, 0x0f, 1, 15};
+    const std::string brandChannel = "minecraft:brand";
+    expectedBrand.insert(expectedBrand.end(), brandChannel.begin(), brandChannel.end());
+    expectedBrand.insert(expectedBrand.end(), {0xd0, 0x0f});
+    expectedBrand.insert(expectedBrand.end(), 2000, 'x');
+    CHECK(receive(client, expectedBrand.size()) == expectedBrand);
+    expectedBrand[2] = 2;
+    REQUIRE(client.write(expectedBrand));
+    const std::vector<std::uint8_t> expectedBackendBrand{
+        43,  0xe3, 0x0f, 120, 156, 99, 226, 207, 205, 204, 75,  77, 46, 74,  76,  43, 177, 74, 42, 74,  204, 75,
+        185, 192,  95,   49,  10,  70, 193, 40,  24,  5,   163, 96, 20, 140, 130, 33, 15,  0,  21, 225, 176, 152};
+    CHECK(receive(*backend, expectedBackendBrand.size()) == expectedBackendBrand);
     const std::array<std::uint8_t, 3> finishConfiguration{2, 0, 3};
     REQUIRE(backend->write(finishConfiguration));
     CHECK(receive(client, 2) == std::vector<std::uint8_t>{1, 3});
@@ -235,6 +252,209 @@ TEST_CASE("online login preserves frontend identity and cipher state across conf
     encryptor->encrypt(ack);
     REQUIRE(client.write(ack));
     CHECK(receive(*backend, 2) == std::vector<std::uint8_t>{1, 3});
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("small session quota rejects routing without blocking another frontend") {
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.runtime.sessionBufferBytes = 8192;
+    config.runtime.highWaterBytes = 4096;
+    config.runtime.lowWaterBytes = 2048;
+    config.backends = {{.name = "limited", .host = "limited.test"}};
+    config.defaultRoute = {"limited"};
+    std::atomic<unsigned> queries{0};
+    runtime::RuntimeServices services;
+    services.resolution = [&](auto, auto, const auto&) -> std::expected<std::vector<io::TcpAddress>, io::DnsError> {
+        queries.fetch_add(1);
+        return std::unexpected(io::DnsError{io::DnsError::Kind::ResolveFailed});
+    };
+    Running proxy{std::move(config), std::move(services)};
+    auto limited = proxy.connect();
+    loginStart(limited, proxy.runtime.port());
+    CHECK(receive(limited, 0, true).empty());
+    CHECK(queries.load() == 0);
+    auto healthy = proxy.connect();
+    REQUIRE(healthy.write(handshake(proxy.runtime.port())));
+    const std::array<std::uint8_t, 2> status{1, 0};
+    REQUIRE(healthy.write(status));
+    CHECK_FALSE(receive(healthy, 1).empty());
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("large configuration payload grows within quota or rejects its header without a body") {
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.runtime.highWaterBytes = 64;
+    config.runtime.lowWaterBytes = 32;
+    bool limited = false;
+    SUBCASE("valid half-megabyte custom payload") {}
+    SUBCASE("local quota stops reservation before receiving the body") {
+        limited = true;
+        config.runtime.sessionBufferBytes = 32768;
+        config.runtime.highWaterBytes = 16384;
+        config.runtime.lowWaterBytes = 8192;
+    }
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "large", .host = "127.0.0.1", .port = *port}};
+    config.defaultRoute = {"large"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    std::vector<std::uint8_t> finished{41,   2,    0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d,
+                                       0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
+    finished.insert(finished.end(), 15, 0);
+    finished.push_back(1);
+    REQUIRE(backend->write(finished));
+    CHECK(receive(client, 42) == finished);
+    const std::array<std::uint8_t, 2> ack{1, 3};
+    REQUIRE(client.write(ack));
+    CHECK(receive(*backend, 2) == std::vector<std::uint8_t>{1, 3});
+    // 524302-byte body: configuration payload id 1, channel fixture:bulk, 512 KiB bytes.
+    std::vector<std::uint8_t> packet{0x8e, 0x80, 0x20};
+    REQUIRE(backend->write(packet));
+    if (limited) {
+        CHECK(receive(client, 0, true).empty());
+        auto healthy = proxy.connect();
+        REQUIRE(healthy.write(handshake(proxy.runtime.port())));
+        const std::array<std::uint8_t, 2> status{1, 0};
+        REQUIRE(healthy.write(status));
+        CHECK_FALSE(receive(healthy, 1).empty());
+    } else {
+        const std::string channel = "fixture:bulk";
+        std::vector<std::uint8_t> body{1, 12};
+        body.insert(body.end(), channel.begin(), channel.end());
+        body.insert(body.end(), 512 * 1024, 42);
+        REQUIRE(backend->write(body));
+        packet.insert(packet.end(), body.begin(), body.end());
+        CHECK(receive(client, packet.size()) == packet);
+        packet[3] = 2;
+        REQUIRE(client.write(packet));
+        CHECK(receive(*backend, packet.size()) == packet);
+        std::vector<std::uint8_t> pipelined;
+        for (unsigned i = 0; i < 2000; ++i)
+            pipelined.insert(pipelined.end(), {2, 7, 0});
+        REQUIRE(client.write(pipelined));
+        CHECK(receive(*backend, pipelined.size()) == pipelined);
+    }
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("frontend compression is negotiated before success independently of backend framing") {
+    using namespace basalt::wire::auth;
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.network.compressionThreshold = 256;
+    bool wrongFraming = false;
+    SUBCASE("under-threshold carrier") {}
+    SUBCASE("threshold zero uses zlib") { config.network.compressionThreshold = 0; }
+    SUBCASE("an uncompressed ACK cannot bypass negotiated framing") { wrongFraming = true; }
+    SUBCASE("cipher wraps compressed frames and negotiation in stream order") {
+        config.network.compressionThreshold = 0;
+        config.network.onlineMode = true;
+    }
+    const bool compressed = config.network.compressionThreshold == 0;
+    const bool online = config.network.onlineMode;
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "plain", .host = "127.0.0.1", .port = *port}};
+    config.defaultRoute = {"plain"};
+    runtime::RuntimeServices services;
+    services.authentication = [](auto, auto, auto) { return std::expected<HttpsResponse, HttpsError>{fakeProfile()}; };
+    Running proxy{std::move(config), std::move(services)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    std::optional<Cfb8Cipher> encryptor, decryptor;
+    if (online) {
+        auto secret = keyResponse(client);
+        encryptor = Cfb8Cipher::create(secret);
+        decryptor = Cfb8Cipher::create(secret);
+        REQUIRE(encryptor);
+        REQUIRE(decryptor);
+    }
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    std::vector<std::uint8_t> finished{41,   2,    0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d,
+                                       0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
+    finished.insert(finished.end(), 15, 0);
+    finished.push_back(1);
+    REQUIRE(backend->write(finished));
+    std::vector<std::uint8_t> expected;
+    if (compressed) {
+        // Python zlib vectors, independent of the Wire encoders.
+        expected = {2,   3,   0,   38,  41,  120, 156, 99, 250, 124, 169, 103, 67, 145,
+                    170, 205, 198, 93,  175, 117, 215, 94, 218, 215, 185, 142, 45, 36,
+                    181, 184, 36,  181, 136, 1,   13,  48, 2,   0,   113, 227, 12, 76};
+    } else {
+        expected = {3, 3, 0x80, 2, 42, 0};
+        expected.insert(expected.end(), finished.begin() + 1, finished.end());
+    }
+    auto received = receive(client, expected.size());
+    if (decryptor)
+        decryptor->decrypt(received);
+    CHECK(received == expected);
+    if (wrongFraming) {
+        const std::array<std::uint8_t, 2> invalidAck{1, 3};
+        REQUIRE(client.write(invalidAck));
+        CHECK(receive(client, 0, true).empty());
+        proxy.stop();
+        CHECK(proxy.runtime.sessionCount() == 0);
+        CHECK(proxy.runtime.bufferedBytes() == 0);
+        return;
+    }
+    auto ack = compressed ? std::vector<std::uint8_t>{10, 1, 120, 156, 99, 6, 0, 0, 4, 0, 4}
+                          : std::vector<std::uint8_t>{2, 0, 3};
+    if (encryptor)
+        encryptor->encrypt(ack);
+    REQUIRE(client.write(ack));
+    CHECK(receive(*backend, 2) == std::vector<std::uint8_t>{1, 3});
+    const std::array<std::uint8_t, 3> packs{2, 15, 0};
+    REQUIRE(backend->write(packs));
+    expected = compressed ? std::vector<std::uint8_t>{11, 2, 120, 156, 227, 103, 0, 0, 0, 32, 0, 16}
+                          : std::vector<std::uint8_t>{3, 0, 15, 0};
+    received = receive(client, expected.size());
+    if (decryptor)
+        decryptor->decrypt(received);
+    CHECK(received == expected);
+    auto response = compressed ? std::vector<std::uint8_t>{11, 2, 120, 156, 99, 103, 0, 0, 0, 16, 0, 8}
+                               : std::vector<std::uint8_t>{3, 0, 7, 0};
+    if (encryptor)
+        encryptor->encrypt(response);
+    REQUIRE(client.write(response));
+    CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 7, 0});
     proxy.stop();
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);

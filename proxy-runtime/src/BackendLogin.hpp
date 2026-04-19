@@ -26,17 +26,20 @@ class BackendLogin {
 public:
     static constexpr std::size_t kCapacity = 1024;
     static constexpr std::size_t kBytes = 3 * kCapacity;
-    explicit BackendLogin(wire::io::TcpConnection connection);
+    BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory);
     [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
                                                                const wire::auth::SessionProfile& profile,
                                                                std::string_view virtualHost, std::uint16_t virtualPort);
     /// Returned packet view expires on the next call. No frontend framing/cipher state is shared.
-    [[nodiscard]] std::expected<std::span<const std::uint8_t>, BackendLoginError> ready(const wire::io::IoReady& event);
+    [[nodiscard]] std::expected<std::span<const std::uint8_t>, BackendLoginError> ready(const wire::io::IoReady& event,
+                                                                                        bool read = true);
     [[nodiscard]] std::expected<void, BackendLoginError> queue(std::span<const std::uint8_t> packet);
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 
-    [[nodiscard]] wire::io::IoInterest interest() const;
+    [[nodiscard]] wire::io::IoInterest interest(bool read = true) const;
+
+    [[nodiscard]] std::size_t pendingBytes() const { return output_.readableBytes(); }
 
     [[nodiscard]] bool hasOutput() const { return output_.readableBytes() != 0; }
 
@@ -47,9 +50,10 @@ public:
 private:
     [[nodiscard]] bool bufferedPacket() const;
     wire::io::TcpConnection connection_;
-    wire::io::ByteBuffer input_{kCapacity};
-    wire::io::ByteBuffer output_{kCapacity};
-    wire::io::ByteBuffer frame_{kCapacity};
+    wire::io::ByteBuffer input_;
+    wire::io::ByteBuffer output_;
+    wire::io::ByteBuffer frame_;
+    bool allocationReady_ = false;
     bool started_ = false;
     bool compressionNegotiated_ = false;
     bool login_ = true;

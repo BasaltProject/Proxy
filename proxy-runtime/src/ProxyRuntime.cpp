@@ -94,7 +94,7 @@ struct ProxyRuntime::Impl {
                 [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
                 runtime.routes,
                 [this, id](std::size_t target, Clock::time_point deadline) { return resolve(id, target, deadline); },
-                runtime.config.backends);
+                runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -154,9 +154,16 @@ struct ProxyRuntime::Impl {
         }
 
         bool refresh(std::uint64_t id, Session& session) {
-            return timers.reschedule(session.timer, session.deadline()) &&
-                   loop.watch(session.handle(), session.interest(), id) &&
-                   (session.backendHandle() < 0 || loop.watch(session.backendHandle(), session.backendInterest(), id));
+            if (session.frontendSuspended())
+                loop.unwatch(session.handle());
+            else if (!loop.watch(session.handle(), session.interest(), id))
+                return false;
+            if (session.backendSuspended())
+                loop.unwatch(session.backendHandle());
+            else if (session.backendHandle() >= 0 &&
+                     !loop.watch(session.backendHandle(), session.backendInterest(), id))
+                return false;
+            return timers.reschedule(session.timer, session.deadline());
         }
 
         void publishResolution(std::uint64_t id, std::size_t target, std::shared_ptr<ResolutionReply> reply) {
