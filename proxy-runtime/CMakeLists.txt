@@ -64,3 +64,11 @@ basalt_test(proxy-runtime-backend-selection-test
     SOURCES test/BackendSelectionTest.cpp
     DEPENDS basalt::proxy-runtime-core
 )
+
+basalt_test(proxy-runtime-backend-login-test
+    SOURCES test/BackendLoginTest.cpp
+    DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
+)
+if(BASALT_BUILD_TESTS)
+    set_tests_properties(proxy-runtime-backend-login-test PROPERTIES TIMEOUT 30)
+endif()

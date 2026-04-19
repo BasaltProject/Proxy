@@ -19,7 +19,8 @@
 </p>
 
 > ⚠️ **Early development.** Basalt Proxy is not ready for any network, public or
-> private. The current listener serves status requests and rejects player login.
+> private. The current listener serves status requests; native login and relay are
+> being tested with synthetic peers.
 > The status table below is
 > the honest state of the project.
 
@@ -41,7 +42,11 @@ Offline mode is explicit. Accepted identities select their configured route,
 resolve destinations on bounded workers and establish a nonblocking TCP connection,
 trying the next destination after DNS or connection failure. For native 26.3 backends
 with forwarding set to `none`, it sends the login handshake and identity and relays
-login disconnects. Successful login, compression, configuration and play remain pending.
+login disconnects, decoding backend compression independently of frontend framing.
+Unknown login queries receive a matching negative response using backend compression.
+Native LoginFinished/ACK and configuration/play transitions relay small packets in
+synthetic tests, retaining the verified frontend UUID. Buffers still have bootstrap
+limits; real registry/chunk traffic, backpressure and frontend compression remain pending.
 
 ## Product goals
 
@@ -114,13 +119,13 @@ ctest --preset debug
 
 | Area | Status |
 |---|---|
-| Build, module layout and cross-platform CI | Working |
+| Build, module layout and cross-platform CI | Configured; platform validation pending |
 | Command line: `--help`, `--version`, `--config` | Working |
 | Network layer, shared with the server | Inherited from Wire |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
 | Initial login crypto and session verification | Implemented; simulated-endpoint tests |
-| Backend login and player routing | Not started |
-| Backend connections and server switching | Not started |
+| Native backend login, configuration and play relay | Small-packet fixtures pass; real game traffic pending |
+| Backend connections and server switching | TCP connection implemented; switching pending |
 | Player forwarding to the backend | Not started |
 | Configuration files | Generated, loaded and validated at startup |
 | Translation handover to a Basalt Server backend | Not started |
@@ -128,8 +133,8 @@ ctest --preset debug
 | Plugins and the Lua runtime | Not started |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
-What that adds up to today: a binary that parses its command line and exits.
-Everything below that line is still missing.
+Tests use synthetic clients and backends on Linux. Bootstrap buffers do not yet
+support full registry/chunk traffic, and no real game client has been validated.
 
 ## Related repositories
 
