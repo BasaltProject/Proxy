@@ -79,6 +79,7 @@ private:
         kResolving,
         kConnecting,
         kBackendLogin,
+        kCookieResponse,
         kLoginAck,
         kConfiguration,
         kPlay
@@ -121,6 +122,8 @@ private:
     Clock::time_point backendWriteDeadline_ = Clock::time_point::max();
     Clock::time_point backendReadDeadline_ = Clock::time_point::max();
     bool finishingConfiguration_ = false;
+    std::optional<std::string> cookie_;
+    bool velocityForwarded_ = false;
     Clock::time_point connectDeadline_;
     std::array<std::uint8_t, 4> challenge_{};
     std::string name_;

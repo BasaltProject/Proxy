@@ -3,6 +3,7 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/auth/forwarding/LegacyForwarding.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
@@ -20,16 +21,40 @@ BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_
 
 std::expected<void, BackendLoginError> BackendLogin::start(const config::BackendConfig& backend,
                                                            const wire::auth::SessionProfile& profile,
-                                                           std::string_view virtualHost, std::uint16_t virtualPort) {
+                                                           std::string_view virtualHost, std::uint16_t virtualPort,
+                                                           std::string_view remoteAddress) {
     namespace protocol = wire::protocol;
     if (!allocationReady_)
         return std::unexpected(BackendLoginError::kLimit);
     if (started_ || backend.protocol != buildInfo::kProtocolVersion ||
-        backend.forwarding != wire::auth::forwarding::ForwardingMode::None)
+        (backend.forwarding != wire::auth::forwarding::ForwardingMode::None &&
+         backend.forwarding != wire::auth::forwarding::ForwardingMode::Velocity &&
+         !wire::auth::forwarding::isLegacyForwarding(backend.forwarding)))
+        return std::unexpected(BackendLoginError::kUnsupported);
+    if (backend.forwarding == wire::auth::forwarding::ForwardingMode::Velocity && backend.secret.empty())
         return std::unexpected(BackendLoginError::kUnsupported);
     if (!wire::auth::validLoginName(profile.name) || virtualHost.empty() || virtualHost.size() > 255 ||
         virtualHost.find('\0') != std::string_view::npos)
         return std::unexpected(BackendLoginError::kMalformed);
+    std::optional<std::string> forwardedHost;
+    if (wire::auth::forwarding::isLegacyForwarding(backend.forwarding)) {
+        using Mode = wire::auth::forwarding::ForwardingMode;
+        std::string_view tokenProperty;
+        if (backend.forwarding == Mode::BungeeGuard)
+            tokenProperty = wire::auth::forwarding::ProxyForwarding::kBungeeGuardProperty;
+        else if (backend.forwarding == Mode::SafeNet)
+            tokenProperty = backend.propertyName;
+        if (backend.forwarding != Mode::BungeeCord && (tokenProperty.empty() || backend.secret.empty()))
+            return std::unexpected(BackendLoginError::kUnsupported);
+        forwardedHost = wire::auth::forwarding::legacy::encodeBounded(
+            virtualHost, remoteAddress, profile.id, profile.properties, 32767, tokenProperty,
+            tokenProperty.empty() ? std::string_view{} : std::string_view{backend.secret});
+        if (!forwardedHost)
+            return std::unexpected(BackendLoginError::kLimit);
+        virtualHost = *forwardedHost;
+    }
+    if (!frame_.tryReserve(virtualHost.size() + 64) || !output_.tryReserve(virtualHost.size() + 128))
+        return std::unexpected(BackendLoginError::kLimit);
     protocol::varInt::write(frame_, protocol::handshake::HandshakePacket::kId);
     protocol::handshake::HandshakePacket{backend.protocol, std::string{virtualHost}, virtualPort,
                                          protocol::handshake::ClientIntent::Login}
@@ -39,7 +64,7 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     frame_.clear();
     protocol::varInt::write(frame_, protocol::login::LoginStartPacket::kId);
     protocol::login::LoginStartPacket{profile.name, profile.id}.write(frame_);
-    if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()) || allocated() > kBytes)
+    if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()))
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
     started_ = true;
@@ -63,7 +88,8 @@ wire::io::IoInterest BackendLogin::interest(bool read) const {
     return {read, hasOutput() || (read && bufferedPacket())};
 }
 
-std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::uint8_t> packet) {
+std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::uint8_t> packet,
+                                                           std::size_t loginLimit) {
     if (!started_ || packet.empty())
         return std::unexpected(BackendLoginError::kMalformed);
     output_.discardReadBytes();
@@ -72,7 +98,8 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
     if (packet.size() > static_cast<std::size_t>(maximum))
         return std::unexpected(BackendLoginError::kLimit);
     const auto room = packet.size() + packet.size() / 1000 + 64;
-    if ((login_ && room > kCapacity - output_.writerIndex()) || !output_.tryReserve(room))
+    if ((login_ && (output_.writerIndex() > loginLimit || room > loginLimit - output_.writerIndex())) ||
+        !output_.tryReserve(room))
         return std::unexpected(BackendLoginError::kLimit);
     auto written = compression_ ? wire::protocol::packetFraming::writeCompressed(output_, packet, *compression_)
                                 : wire::protocol::packetFraming::writeUncompressed(output_, packet);
@@ -113,7 +140,7 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
     while (true) {
         const auto hint = wire::protocol::packetFraming::inspectFrame(
             input_.readable(), compression_.has_value(),
-            login_ ? kCapacity : wire::protocol::packetFraming::kMaxUncompressedSize, compression_);
+            login_ ? kLoginPacketLimit : wire::protocol::packetFraming::kMaxUncompressedSize, compression_);
         if (!hint)
             return std::unexpected(hint.error() == wire::protocol::FramingError::FrameTooBig
                                        ? BackendLoginError::kLimit
@@ -121,7 +148,7 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
         if (!*hint)
             return std::span<const std::uint8_t>{};
         const auto sizes = **hint;
-        if (login_ && sizes.frameBytes > kCapacity)
+        if (login_ && sizes.frameBytes > kLoginPacketLimit + 8)
             return std::unexpected(BackendLoginError::kLimit);
         if (sizes.frameBytes > input_.capacity() && !input_.tryReserve(sizes.frameBytes - input_.writerIndex()))
             return std::unexpected(BackendLoginError::kLimit);
