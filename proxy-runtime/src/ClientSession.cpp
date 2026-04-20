@@ -7,8 +7,6 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
-#include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
-#include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -16,9 +14,6 @@
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
-#include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
-#include <basalt/wire/protocol/play/BorderPackets.hpp>
-#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
 #include <algorithm>
@@ -27,9 +22,9 @@
 
 namespace basalt::proxy::runtime::detail {
 namespace {
-constexpr std::int32_t kConfigurationDisconnectId = 2;
-constexpr std::int32_t kStartConfigurationId = 0x78;
 constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
+constexpr std::size_t kClientSettingsPacketLimit = 96;
+constexpr std::int32_t kLanguageEncodedLimit = 16 * 3;
 } // namespace
 
 ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
@@ -41,12 +36,12 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities)
     : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
-      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), identities_(identities),
-      connection_(std::move(connection)), settings_(settings), status_(status), unavailable_(unavailable),
-      online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
+      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), cookieCache_(memory_),
+      identities_(identities), connection_(std::move(connection)), settings_(settings), status_(status),
+      unavailable_(unavailable), online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
-      input_(0, memory_), frame_(0, memory_), output_(0, memory_),
+      clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
       readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
     buffers.reset();
     allocationReady_ =
@@ -64,7 +59,9 @@ ClientSession::~ClientSession() {
 
 bool ClientSession::accounted() const {
     return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() +
-                                       pendingCookies_.allocated() + (backend_ ? backend_->allocated() : 0) <=
+                                       pendingCookies_.allocated() + cookieCache_.allocated() +
+                                       clientSettings_.capacity() + (activeBackend_ ? activeBackend_->allocated() : 0) +
+                                       (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
                                    localBuffers_.used();
 }
 
@@ -120,6 +117,31 @@ bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
     return true;
 }
 
+bool ClientSession::rememberSettings(std::span<const std::uint8_t> packet) {
+    // parity: ClientInformation bounds the encoded language at 16 * 3 bytes.
+    if (packet.size() > kClientSettingsPacketLimit)
+        return false;
+    const auto payload = frame_.readable();
+    const auto languageBytes = wire::protocol::varInt::read(frame_);
+    if (frame_.failed() || languageBytes < 0 || languageBytes > kLanguageEncodedLimit)
+        return false;
+    (void)frame_.readSpan(static_cast<std::size_t>(languageBytes));
+    (void)frame_.readByte();
+    (void)wire::protocol::varInt::read(frame_);
+    (void)wire::protocol::readBoolean(frame_);
+    (void)frame_.readByte();
+    (void)wire::protocol::varInt::read(frame_);
+    (void)wire::protocol::readBoolean(frame_);
+    (void)wire::protocol::readBoolean(frame_);
+    (void)wire::protocol::varInt::read(frame_);
+    if (frame_.failed() || frame_.readableBytes() != 0 || !clientSettings_.tryReserve(packet.size()))
+        return false;
+    clientSettings_.clear();
+    wire::protocol::varInt::write(clientSettings_, wire::protocol::configuration::ClientInformationPacket::kId);
+    clientSettings_.writeBytes(payload);
+    return true;
+}
+
 bool ClientSession::packet() {
     namespace protocol = wire::protocol;
     const auto raw = frame_.readable();
@@ -127,12 +149,16 @@ bool ClientSession::packet() {
     if (frame_.failed())
         return false;
     if (state_ == State::kCookieResponse) {
-        if (id != protocol::cookie::ResponsePacket::kLoginId || !backend_ || !cookie_)
+        if (id != protocol::cookie::ResponsePacket::kLoginId || !backend() || !cookie_)
             return false;
         auto response = protocol::cookie::ResponsePacket::read(frame_);
         if (!response || frame_.readableBytes() != 0 || response->key != *cookie_)
             return false;
-        if (!backend_->queue(raw, protocol::cookie::kMaxPayloadBytes + 512))
+        if (!cookieCache_.remember(response->key, response->payload
+                                                      ? std::optional{std::span<const std::uint8_t>{*response->payload}}
+                                                      : std::nullopt))
+            return false;
+        if (!backend()->queue(raw, protocol::cookie::kMaxPayloadBytes + 512))
             return false;
         cookie_.reset();
         state_ = State::kBackendLogin;
@@ -143,12 +169,12 @@ bool ClientSession::packet() {
     }
     if (state_ == State::kLoginAck) {
         if (id != protocol::login::kLoginAcknowledgedId || frame_.readableBytes() != 0 ||
-            output_.readableBytes() != 0 || !backend_)
+            output_.readableBytes() != 0 || !backend())
             return false;
-        if (!backend_->queue(raw))
+        if (!backend()->queue(raw))
             return false;
         backpressure();
-        backend_->acknowledgeLogin();
+        backend()->acknowledgeLogin();
         state_ = State::kConfiguration;
         readDeadline_ = backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         backendWriteDeadline_ =
@@ -156,27 +182,48 @@ bool ClientSession::packet() {
         return true;
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
-        if (!backend_ || id < 0)
+        if (!backend() || id < 0)
+            return false;
+        const auto settingsId = state_ == State::kConfiguration ? 0x00 : 0x0e;
+        if (id == settingsId && !rememberSettings(raw))
             return false;
         const auto cookieResponseId = state_ == State::kConfiguration ? 0x01 : 0x15;
         if (id == cookieResponseId) {
             auto response = protocol::cookie::ResponsePacket::read(frame_);
-            if (!response || frame_.readableBytes() != 0 || !pendingCookies_.consume(response->key))
+            if (!response || frame_.readableBytes() != 0)
+                return false;
+            const auto revision = pendingCookies_.consume(response->key);
+            if (!revision)
+                return false;
+            if (cookieCache_.lookup(response->key).storeRevision == *revision &&
+                !cookieCache_.remember(
+                    response->key, response->payload ? std::optional{std::span<const std::uint8_t>{*response->payload}}
+                                                     : std::nullopt))
                 return false;
         }
+        bool enterPlay = false;
+        bool enterConfiguration = false;
         if (state_ == State::kPlay && id == kConfigurationAcknowledgedId) {
             if (!startingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
                 return false;
             startingConfiguration_ = false;
             finishingConfiguration_ = false;
             state_ = State::kConfiguration;
+            enterConfiguration = true;
         } else if (state_ == State::kConfiguration && id == protocol::configuration::kFinishConfigurationId) {
             if (!finishingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
                 return false;
+            enterPlay = true;
+        }
+        if (!backend()->queue(raw))
+            return false;
+        if (enterConfiguration && clientSettings_.readableBytes() != 0 && !backend()->queue(clientSettings_.readable()))
+            return false;
+        if (enterPlay) {
+            if (!activeBackend_)
+                activeBackend_ = std::move(candidateBackend_);
             state_ = State::kPlay;
         }
-        if (!backend_->queue(raw))
-            return false;
         backpressure();
         if (backendWriteDeadline_ == Clock::time_point::max())
             backendWriteDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
@@ -408,6 +455,7 @@ bool ClientSession::timedOut(Clock::time_point now) {
 }
 
 bool ClientSession::route() {
+    attempts_.clear();
     dial_.reset();
     resolutionStorage_.reset();
     resolutionLocal_.reset();
@@ -441,20 +489,24 @@ bool ClientSession::route() {
     resolutionLocal_ = localBuffers_.acquire(kResolutionBytes);
     if (!resolutionLocal_)
         return false;
-    resolution_ = resolve_(targets_[nextTarget_++], connectDeadline_);
+    auto attempt = attempts_.begin(targets_[nextTarget_++]);
+    if (!attempt)
+        return false;
+    resolution_ = resolve_(*attempt, connectDeadline_);
     if (!resolution_)
         return false;
     state_ = State::kResolving;
     return true;
 }
 
-bool ClientSession::resolved(std::size_t target, std::vector<wire::io::TcpAddress> addresses,
+bool ClientSession::resolved(BackendAttempt attempt, std::vector<wire::io::TcpAddress> addresses,
                              wire::io::ResourceBudget::Reservation storage) {
-    // A canceled lookup can publish after another target is already active. Routes contain no duplicates.
-    if (state_ != State::kResolving || nextTarget_ == 0 || targets_[nextTarget_ - 1] != target)
+    // A canceled lookup can finish after the same backend has been selected again.
+    if (state_ != State::kResolving || !attempts_.matches(attempt))
         return true;
     if (Clock::now() >= deadline())
         return timedOut(Clock::now());
+    attempts_.clear();
     resolution_.reset();
     if (addresses.empty()) {
         storage.reset();
@@ -483,10 +535,10 @@ bool ClientSession::dial() {
     dial_.reset();
     resolutionStorage_.reset();
     resolutionLocal_.reset();
-    backend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_);
-    if (!profile_ || !backend_->start(backends_[targets_[nextTarget_ - 1]], *profile_, virtualHost_, virtualPort_,
-                                      connection_.remoteAddress())) {
-        backend_.reset();
+    candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_);
+    if (!profile_ || !candidateBackend_->start(backends_[targets_[nextTarget_ - 1]], *profile_, virtualHost_,
+                                               virtualPort_, connection_.remoteAddress())) {
+        closeBackends();
         closing_ = true;
         return queue(unavailable_);
     }
@@ -496,215 +548,30 @@ bool ClientSession::dial() {
     return true;
 }
 
-bool ClientSession::backendReady(const wire::io::IoReady& event) {
-    if (Clock::now() >= deadline())
-        return false;
-    if (state_ == State::kConnecting && dial_)
-        return dial();
-    if ((state_ != State::kBackendLogin && state_ != State::kCookieResponse && state_ != State::kLoginAck &&
-         state_ != State::kConfiguration && state_ != State::kPlay) ||
-        !backend_)
-        return false;
-    if (backendPaused_ && event.closed && backend_->hasOutput())
-        return false;
-    if ((state_ == State::kCookieResponse || state_ == State::kLoginAck || startingConfiguration_) && event.closed)
-        return false;
-    auto packet = backend_->ready(event, !backendPaused_ && !startingConfiguration_ && state_ != State::kLoginAck &&
-                                             state_ != State::kCookieResponse);
-    backpressure();
-    if (!packet)
-        return false;
-    if (!backend_->hasOutput())
-        backendWriteDeadline_ = Clock::time_point::max();
-    if (packet->empty())
-        return true;
-    const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
-    if (!relay && packet->size() > BackendLogin::kLoginPacketLimit)
-        return false;
-    frame_.clear();
-    if (!frame_.tryReserve(packet->size()))
-        return false;
-    frame_.writeBytes(*packet);
-    const auto id = wire::protocol::varInt::read(frame_);
-    if (frame_.failed())
-        return false;
-    if (state_ == State::kLoginAck)
-        return false;
-    if (id == wire::protocol::cookie::RequestPacket::kLoginId && state_ == State::kBackendLogin) {
-        auto request = wire::protocol::cookie::RequestPacket::read(frame_);
-        if (!request || frame_.readableBytes() != 0 || request->key.size() > 256 || cookie_)
-            return false;
-        cookie_ = std::move(request->key);
-        if (!queuePacket(*packet))
-            return false;
-        state_ = State::kCookieResponse;
-        return true;
-    }
-    if (state_ == State::kConfiguration || state_ == State::kPlay) {
-        if (id < 0)
-            return false;
-        const bool transfer =
-            id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
-        const bool terminal = transfer || (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||
-                              (state_ == State::kPlay && id == wire::protocol::play::PlayDisconnectPacket::kId);
-        if (transfer) {
-            if (packet->size() > 512)
-                return false;
-            auto destination = wire::protocol::play::TransferPacket::read(frame_);
-            if (!destination || frame_.readableBytes() != 0 || destination->host.empty() ||
-                destination->host.size() > 255 || destination->port < 1 || destination->port > 65535 ||
-                std::ranges::any_of(destination->host, [](unsigned char c) { return c <= 32 || c == 127; }))
-                return false;
-        } else if (terminal) {
-            if (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0)
-                return false;
-        } else if (state_ == State::kPlay && id == kStartConfigurationId) {
-            if (startingConfiguration_ || frame_.readableBytes() != 0)
-                return false;
-            startingConfiguration_ = true;
-        } else if (state_ == State::kConfiguration && id == wire::protocol::configuration::kFinishConfigurationId) {
-            if (finishingConfiguration_ || frame_.readableBytes() != 0)
-                return false;
-            finishingConfiguration_ = true;
-        } else if (state_ == State::kConfiguration && finishingConfiguration_) {
-            return false;
-        }
-        const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
-        const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
-        if (id == cookieRequestId) {
-            auto request = wire::protocol::cookie::RequestPacket::read(frame_);
-            if (!request || frame_.readableBytes() != 0 || !pendingCookies_.add(request->key))
-                return false;
-        } else if (id == cookieStoreId) {
-            auto store = wire::protocol::cookie::StorePacket::read(frame_);
-            if (!store || frame_.readableBytes() != 0 || store->key.size() > 256)
-                return false;
-        }
-        if (!queuePacket(*packet))
-            return false;
-        if (terminal) {
-            closing_ = true;
-            backend_.reset();
-        }
-        backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
-        return true;
-    }
-    if (id == wire::protocol::login::LoginFinishedPacket::kId) {
-        const auto mode = backends_[targets_[nextTarget_ - 1]].forwarding;
-        if (mode == wire::auth::forwarding::ForwardingMode::Velocity && !velocityForwarded_)
-            return false;
-        // Bound collection allocation before the shared decoder materializes properties.
-        (void)wire::protocol::readUuid(frame_);
-        (void)wire::protocol::readString(frame_, 16);
-        const auto propertyCount = wire::protocol::varInt::read(frame_);
-        if (frame_.failed() || propertyCount < 0 || propertyCount > 64)
-            return false;
-        frame_.clear();
-        frame_.writeBytes(*packet);
-        (void)wire::protocol::varInt::read(frame_);
-        auto finished = wire::protocol::login::LoginFinishedPacket::read(frame_);
-        if (!finished || frame_.readableBytes() != 0 || !profile_ || finished->gameProfile.name != profile_->name ||
-            (finished->gameProfile.id != profile_->id &&
-             (mode != wire::auth::forwarding::ForwardingMode::None ||
-              finished->gameProfile.id != wire::common::Uuid::offlinePlayer(profile_->name))))
-            return false;
-        // Tokens are backend credentials and must never be exposed as client profile properties.
-        std::string_view tokenProperty;
-        if (mode == wire::auth::forwarding::ForwardingMode::BungeeGuard)
-            tokenProperty = wire::auth::forwarding::ProxyForwarding::kBungeeGuardProperty;
-        else if (mode == wire::auth::forwarding::ForwardingMode::SafeNet)
-            tokenProperty = backends_[targets_[nextTarget_ - 1]].propertyName;
-        if (!tokenProperty.empty())
-            std::erase_if(finished->gameProfile.properties,
-                          [tokenProperty](const auto& entry) { return entry.name == tokenProperty; });
-        // The backend's explicit offline identity must not replace the verified frontend UUID.
-        finished->gameProfile.id = profile_->id;
-        frame_.clear();
-        if (compressionThreshold_ >= 0) {
-            wire::protocol::varInt::write(frame_, wire::protocol::login::LoginCompressionPacket::kId);
-            wire::protocol::login::LoginCompressionPacket{compressionThreshold_}.write(frame_);
-            if (!queuePacket(frame_.readable()))
-                return false;
-            compression_ = compressionThreshold_;
-            frame_.clear();
-        }
-        wire::protocol::varInt::write(frame_, wire::protocol::login::LoginFinishedPacket::kId);
-        finished->write(frame_);
-        if (!queuePacket(frame_.readable()))
-            return false;
-        state_ = State::kLoginAck;
-        return true;
-    }
-    if (id == wire::protocol::login::LoginPluginRequestPacket::kId) {
-        auto request = wire::protocol::login::LoginPluginRequestPacket::read(frame_);
-        if (!request || frame_.readableBytes() != 0)
-            return false;
-        namespace velocity = wire::auth::forwarding::velocity;
-        const auto& target = backends_[targets_[nextTarget_ - 1]];
-        if (target.forwarding == wire::auth::forwarding::ForwardingMode::Velocity &&
-            request->channel == velocity::kChannel) {
-            if (velocityForwarded_ || !profile_ || request->payload.size() > 1)
-                return false;
-            const auto requested = request->payload.empty() ? 1 : request->payload[0];
-            if (requested == 0)
-                return false;
-            const auto version = requested >= 4 ? 4 : 1;
-            frame_.clear();
-            if (!frame_.tryReserve(kAuthenticationBytes))
-                return false;
-            wire::protocol::varInt::write(frame_, wire::protocol::login::LoginPluginResponsePacket::kId);
-            wire::protocol::varInt::write(frame_, request->transactionId);
-            wire::protocol::writeBoolean(frame_, true);
-            if (!velocity::signInto(frame_, target.secret, connection_.remoteAddress(), profile_->id, profile_->name,
-                                    profile_->properties, version) ||
-                !backend_->queue(frame_.readable(), kAuthenticationBytes))
-                return false;
-            velocityForwarded_ = true;
-            backpressure();
-            if (backendWriteDeadline_ == Clock::time_point::max())
-                backendWriteDeadline_ =
-                    std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
-            return true;
-        }
-        frame_.clear();
-        wire::protocol::varInt::write(frame_, wire::protocol::login::LoginPluginResponsePacket::kId);
-        wire::protocol::login::LoginPluginResponsePacket{request->transactionId, std::nullopt}.write(frame_);
-        if (!backend_->queue(frame_.readable()))
-            return false;
-        if (backendWriteDeadline_ == Clock::time_point::max())
-            backendWriteDeadline_ =
-                std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
-        return true;
-    }
-    closing_ = true;
-    if (id != wire::protocol::login::LoginDisconnectPacket::kId) {
-        backend_.reset();
-        return queue(unavailable_);
-    }
-    const auto reason = wire::protocol::readString(frame_);
-    if (frame_.failed() || frame_.readableBytes() != 0 || !wire::common::parseJson(reason))
-        return false;
-    frame_.clear();
-    if (!wire::protocol::packetFraming::writeUncompressed(frame_, *packet))
-        return false;
-    backend_.reset();
-    return queue(frame_.readable());
+BackendLogin* ClientSession::backend() const {
+    // Frontend traffic remains attached to the active backend during candidate preparation.
+    return activeBackend_ ? activeBackend_.get() : candidateBackend_.get();
+}
+
+void ClientSession::closeBackends() {
+    candidateBackend_.reset();
+    activeBackend_.reset();
 }
 
 std::int64_t ClientSession::backendHandle() const {
-    return dial_ ? dial_->handle() : (backend_ ? backend_->handle() : -1);
+    return dial_ ? dial_->handle() : (backend() ? backend()->handle() : -1);
 }
 
 wire::io::IoInterest ClientSession::backendInterest() const {
-    if (backend_ && (state_ == State::kLoginAck || state_ == State::kCookieResponse || startingConfiguration_))
-        return {false, backend_->hasOutput()};
-    return backend_ ? backend_->interest(!backendPaused_) : wire::io::IoInterest{false, true};
+    if (backend() && (state_ == State::kLoginAck || state_ == State::kCookieResponse || startingConfiguration_))
+        return {false, backend()->hasOutput()};
+    return backend() ? backend()->interest(!backendPaused_) : wire::io::IoInterest{false, true};
 }
 
 void ClientSession::backpressure() {
-    if (backend_ && backend_->pendingBytes() >= settings_.highWaterBytes)
+    if (backend() && backend()->pendingBytes() >= settings_.highWaterBytes)
         frontendPaused_ = true;
-    else if (frontendPaused_ && (!backend_ || backend_->pendingBytes() <= settings_.lowWaterBytes)) {
+    else if (frontendPaused_ && (!backend() || backend()->pendingBytes() <= settings_.lowWaterBytes)) {
         frontendPaused_ = false;
         if (state_ == State::kConfiguration || state_ == State::kPlay)
             readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
@@ -726,5 +593,5 @@ bool ClientSession::bufferedPacket() const {
     return !hint || (*hint && (**hint).complete);
 }
 
-bool ClientSession::backendSuspended() const { return backendPaused_ && backend_ && !backend_->hasOutput(); }
+bool ClientSession::backendSuspended() const { return backendPaused_ && backend() && !backend()->hasOutput(); }
 } // namespace basalt::proxy::runtime::detail

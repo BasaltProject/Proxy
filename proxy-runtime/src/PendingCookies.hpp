@@ -2,6 +2,7 @@
 
 #include <basalt/wire/io/ByteBuffer.hpp>
 
+#include <optional>
 #include <string_view>
 
 namespace basalt::proxy::runtime::detail {
@@ -11,8 +12,8 @@ class PendingCookies {
 public:
     explicit PendingCookies(std::pmr::memory_resource& memory) : keys_(0, memory) {}
 
-    [[nodiscard]] bool add(std::string_view key);
-    [[nodiscard]] bool consume(std::string_view key);
+    [[nodiscard]] bool add(std::string_view key, std::uint64_t storeRevision);
+    [[nodiscard]] std::optional<std::uint64_t> consume(std::string_view key);
 
     [[nodiscard]] std::size_t allocated() const { return keys_.capacity(); }
 

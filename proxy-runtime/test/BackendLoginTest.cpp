@@ -549,10 +549,15 @@ TEST_CASE("backend login cookie request is matched to a bounded frontend respons
         rejected = true;
     }
     REQUIRE(client.write(response));
-    if (rejected)
+    if (rejected) {
         CHECK(receive(client, 0, true).empty());
-    else
+    } else {
         CHECK(receive(*backend, response.size()) == response);
+        REQUIRE(backend->write(request));
+        CHECK(receive(*backend, response.size()) == response);
+        REQUIRE(backend->write(std::array<std::uint8_t, 5>{4, 0, 2, '{', '}'}));
+        CHECK(receive(client, 0, true) == std::vector<std::uint8_t>{4, 0, 2, '{', '}'});
+    }
     proxy.stop();
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);

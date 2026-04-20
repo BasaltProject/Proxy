@@ -23,7 +23,7 @@ std::vector<std::uint8_t> cookieFrame(std::uint8_t id, std::string_view key,
 } // namespace
 
 TEST_CASE("configuration and play cookies are bounded and correlated before relay") {
-    enum class Scenario { kValid, kWrongKey, kUnsolicited, kMalformedStore, kTooMany, kMaximum, kReplay };
+    enum class Scenario { kValid, kWrongKey, kUnsolicited, kMalformedStore, kTooMany, kMaximum, kReplay, kCacheLimit };
     auto scenario = Scenario::kValid;
     SUBCASE("multiple outstanding requests accept responses in reverse order") {}
     SUBCASE("response with unrelated key is rejected") { scenario = Scenario::kWrongKey; }
@@ -32,6 +32,7 @@ TEST_CASE("configuration and play cookies are bounded and correlated before rela
     SUBCASE("outstanding requests have a fixed limit") { scenario = Scenario::kTooMany; }
     SUBCASE("maximum cookie response and store pass") { scenario = Scenario::kMaximum; }
     SUBCASE("a consumed request cannot authorize a replayed response") { scenario = Scenario::kReplay; }
+    SUBCASE("stored values cannot exceed the cache byte ceiling") { scenario = Scenario::kCacheLimit; }
     for (const bool play : {false, true}) {
         INFO("play = " << play);
         auto address = io::TcpAddress::literal("127.0.0.1", 0);
@@ -82,6 +83,23 @@ TEST_CASE("configuration and play cookies are bounded and correlated before rela
         } else if (scenario == Scenario::kMalformedStore) {
             const std::array<std::uint8_t, 2> oversized{0x81, 0x28};
             REQUIRE(backend->write(cookieFrame(storeId, "fixture:test", oversized)));
+            CHECK(receive(client, 0, true).empty());
+        } else if (scenario == Scenario::kCacheLimit) {
+            const auto oldRequest = cookieFrame(requestId, "fixture:stored0");
+            REQUIRE(backend->write(oldRequest));
+            REQUIRE(receive(client, oldRequest.size()) == oldRequest);
+            std::vector<std::uint8_t> payload{0x80, 0x28};
+            payload.insert(payload.end(), 5120, 0x42);
+            for (unsigned i = 0; i < 12; ++i) {
+                const auto store = cookieFrame(storeId, "fixture:stored" + std::to_string(i), payload);
+                REQUIRE(backend->write(store));
+                CHECK(receive(client, store.size()) == store);
+            }
+            // This reply was computed before Store; it must not erase the newer cached value.
+            const auto staleResponse = cookieFrame(responseId, "fixture:stored0", absent);
+            REQUIRE(client.write(staleResponse));
+            CHECK(receive(*backend, staleResponse.size()) == staleResponse);
+            REQUIRE(backend->write(cookieFrame(storeId, "fixture:overflow", payload)));
             CHECK(receive(client, 0, true).empty());
         } else if (scenario == Scenario::kTooMany) {
             for (unsigned i = 0; i < 32; ++i) {
