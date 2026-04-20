@@ -98,7 +98,13 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     bool malformedAck = false;
     bool prematureFinishAck = false;
     bool configurationDisconnect = false;
+    bool malformedStart = false;
+    bool prematureReconfigurationAck = false;
+    bool malformedReconfigurationAck = false;
     SUBCASE("valid native transition") {}
+    SUBCASE("start configuration cannot carry trailing fields") { malformedStart = true; }
+    SUBCASE("play configuration acknowledgement requires a request") { prematureReconfigurationAck = true; }
+    SUBCASE("play configuration acknowledgement cannot carry trailing fields") { malformedReconfigurationAck = true; }
     SUBCASE("unrelated backend identity is rejected") {
         finished[2] ^= 1;
         wrongProfile = true;
@@ -176,6 +182,39 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     const std::vector<std::uint8_t> keepAliveResponse{9, 0x1c, 0, 0, 0, 0, 0, 0, 0, 99};
     REQUIRE(client.write(keepAliveResponse));
     CHECK(receive(*backend, 11) == std::vector<std::uint8_t>{10, 0, 0x1c, 0, 0, 0, 0, 0, 0, 0, 99});
+    if (prematureReconfigurationAck) {
+        REQUIRE(client.write(std::array<std::uint8_t, 2>{1, 0x10}));
+        CHECK(receive(client, 0, true).empty());
+        proxy.stop();
+        return;
+    }
+    if (malformedStart) {
+        REQUIRE(backend->write(std::array<std::uint8_t, 4>{3, 0, 0x78, 0}));
+        CHECK(receive(client, 0, true).empty());
+        proxy.stop();
+        return;
+    }
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        std::vector<std::uint8_t> reconfiguration{2, 0, 0x78};
+        reconfiguration.insert(reconfiguration.end(), configuration.begin(), configuration.end());
+        REQUIRE(backend->write(reconfiguration));
+        CHECK(receive(client, 2) == std::vector<std::uint8_t>{1, 0x78});
+        if (malformedReconfigurationAck) {
+            REQUIRE(client.write(std::array<std::uint8_t, 3>{2, 0x10, 0}));
+            CHECK(receive(client, 0, true).empty());
+            proxy.stop();
+            return;
+        }
+        REQUIRE(client.write(std::array<std::uint8_t, 2>{1, 0x10}));
+        CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 0x10});
+        CHECK(receive(client, frontendConfiguration.size()) == frontendConfiguration);
+        REQUIRE(backend->write(finishConfiguration));
+        CHECK(receive(client, 2) == std::vector<std::uint8_t>{1, 3});
+        REQUIRE(client.write(ack));
+        CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 3});
+        REQUIRE(backend->write(playKeepAlive));
+        CHECK(receive(client, 10) == std::vector<std::uint8_t>{9, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99});
+    }
     const std::vector<std::uint8_t> disconnect{8, 0, 0x20, 8, 0, 3, 'b', 'y', 'e'};
     REQUIRE(backend->write(disconnect));
     backend->close();

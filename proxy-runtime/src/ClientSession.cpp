@@ -17,6 +17,7 @@
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
+#include <basalt/wire/protocol/play/BorderPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
@@ -27,7 +28,9 @@
 namespace basalt::proxy::runtime::detail {
 namespace {
 constexpr std::int32_t kConfigurationDisconnectId = 2;
-}
+constexpr std::int32_t kStartConfigurationId = 0x78;
+constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
+} // namespace
 
 ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
                              wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
@@ -36,10 +39,11 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
                              AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
                              const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                             std::int32_t compressionThreshold)
+                             std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities)
     : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
-      memory_(std::move(globalBuffers), localBuffers_), connection_(std::move(connection)), settings_(settings),
-      status_(status), unavailable_(unavailable), online_(online), checkAddress_(checkAddress),
+      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), identities_(identities),
+      connection_(std::move(connection)), settings_(settings), status_(status), unavailable_(unavailable),
+      online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
       input_(0, memory_), frame_(0, memory_), output_(0, memory_),
@@ -50,6 +54,8 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
 }
 
 ClientSession::~ClientSession() {
+    if (identityClaimed_)
+        identities_.release(profile_->id);
     if (authentication_)
         authentication_->request_stop();
     if (resolution_)
@@ -57,9 +63,9 @@ ClientSession::~ClientSession() {
 }
 
 bool ClientSession::accounted() const {
-    return allocationReady_ &&
-           input_.capacity() + frame_.capacity() + output_.capacity() + (backend_ ? backend_->allocated() : 0) <=
-               localBuffers_.used();
+    return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() +
+                                       pendingCookies_.allocated() + (backend_ ? backend_->allocated() : 0) <=
+                                   localBuffers_.used();
 }
 
 ClientSession::Clock::time_point ClientSession::deadline() const {
@@ -152,7 +158,19 @@ bool ClientSession::packet() {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend_ || id < 0)
             return false;
-        if (state_ == State::kConfiguration && id == protocol::configuration::kFinishConfigurationId) {
+        const auto cookieResponseId = state_ == State::kConfiguration ? 0x01 : 0x15;
+        if (id == cookieResponseId) {
+            auto response = protocol::cookie::ResponsePacket::read(frame_);
+            if (!response || frame_.readableBytes() != 0 || !pendingCookies_.consume(response->key))
+                return false;
+        }
+        if (state_ == State::kPlay && id == kConfigurationAcknowledgedId) {
+            if (!startingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
+                return false;
+            startingConfiguration_ = false;
+            finishingConfiguration_ = false;
+            state_ = State::kConfiguration;
+        } else if (state_ == State::kConfiguration && id == protocol::configuration::kFinishConfigurationId) {
             if (!finishingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
                 return false;
             state_ = State::kPlay;
@@ -174,7 +192,8 @@ bool ClientSession::packet() {
             return false;
         if (hello->intent == protocol::handshake::ClientIntent::Status) {
             state_ = State::StatusRequest;
-        } else if (hello->intent == protocol::handshake::ClientIntent::Login &&
+        } else if ((hello->intent == protocol::handshake::ClientIntent::Login ||
+                    (acceptTransfers_ && hello->intent == protocol::handshake::ClientIntent::Transfer)) &&
                    hello->protocolVersion == buildInfo::kProtocolVersion) {
             state_ = State::LoginStart;
             virtualHost_ = hello->hostName;
@@ -378,6 +397,16 @@ bool ClientSession::authenticated(
     return queue(authFailure_);
 }
 
+bool ClientSession::timedOut(Clock::time_point now) {
+    if (now < deadline())
+        return true;
+    if (!closing_ && (state_ == State::kResolving || state_ == State::kConnecting) && now >= connectDeadline_ &&
+        now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ && now < backendWriteDeadline_ &&
+        now < backendReadDeadline_)
+        return route();
+    return false;
+}
+
 bool ClientSession::route() {
     dial_.reset();
     resolutionStorage_.reset();
@@ -385,6 +414,22 @@ bool ClientSession::route() {
     if (resolution_)
         resolution_->request_stop();
     resolution_.reset();
+    if (Clock::now() >= loginDeadline_)
+        return false;
+    if (!profile_)
+        return false;
+    if (!identityClaimed_) {
+        if (!identities_.claim(profile_->id)) {
+            closing_ = true;
+            frame_.clear();
+            wire::protocol::varInt::write(frame_, wire::protocol::login::LoginDisconnectPacket::kId);
+            wire::protocol::login::LoginDisconnectPacket{
+                wire::text::Component::text("This player is already connected.")}
+                .write(frame_);
+            return queuePacket(frame_.readable());
+        }
+        identityClaimed_ = true;
+    }
     if (nextTarget_ == targets_.size()) {
         closing_ = true;
         return queue(unavailable_);
@@ -405,9 +450,11 @@ bool ClientSession::route() {
 
 bool ClientSession::resolved(std::size_t target, std::vector<wire::io::TcpAddress> addresses,
                              wire::io::ResourceBudget::Reservation storage) {
-    if (state_ != State::kResolving || nextTarget_ == 0 || targets_[nextTarget_ - 1] != target ||
-        Clock::now() >= deadline())
-        return false;
+    // A canceled lookup can publish after another target is already active. Routes contain no duplicates.
+    if (state_ != State::kResolving || nextTarget_ == 0 || targets_[nextTarget_ - 1] != target)
+        return true;
+    if (Clock::now() >= deadline())
+        return timedOut(Clock::now());
     resolution_.reset();
     if (addresses.empty()) {
         storage.reset();
@@ -460,10 +507,10 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         return false;
     if (backendPaused_ && event.closed && backend_->hasOutput())
         return false;
-    if ((state_ == State::kCookieResponse || state_ == State::kLoginAck) && event.closed)
+    if ((state_ == State::kCookieResponse || state_ == State::kLoginAck || startingConfiguration_) && event.closed)
         return false;
-    auto packet =
-        backend_->ready(event, !backendPaused_ && state_ != State::kLoginAck && state_ != State::kCookieResponse);
+    auto packet = backend_->ready(event, !backendPaused_ && !startingConfiguration_ && state_ != State::kLoginAck &&
+                                             state_ != State::kCookieResponse);
     backpressure();
     if (!packet)
         return false;
@@ -496,17 +543,42 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (id < 0)
             return false;
-        const bool terminal = (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||
+        const bool transfer =
+            id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
+        const bool terminal = transfer || (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||
                               (state_ == State::kPlay && id == wire::protocol::play::PlayDisconnectPacket::kId);
-        if (terminal) {
+        if (transfer) {
+            if (packet->size() > 512)
+                return false;
+            auto destination = wire::protocol::play::TransferPacket::read(frame_);
+            if (!destination || frame_.readableBytes() != 0 || destination->host.empty() ||
+                destination->host.size() > 255 || destination->port < 1 || destination->port > 65535 ||
+                std::ranges::any_of(destination->host, [](unsigned char c) { return c <= 32 || c == 127; }))
+                return false;
+        } else if (terminal) {
             if (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0)
                 return false;
+        } else if (state_ == State::kPlay && id == kStartConfigurationId) {
+            if (startingConfiguration_ || frame_.readableBytes() != 0)
+                return false;
+            startingConfiguration_ = true;
         } else if (state_ == State::kConfiguration && id == wire::protocol::configuration::kFinishConfigurationId) {
             if (finishingConfiguration_ || frame_.readableBytes() != 0)
                 return false;
             finishingConfiguration_ = true;
         } else if (state_ == State::kConfiguration && finishingConfiguration_) {
             return false;
+        }
+        const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
+        const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
+        if (id == cookieRequestId) {
+            auto request = wire::protocol::cookie::RequestPacket::read(frame_);
+            if (!request || frame_.readableBytes() != 0 || !pendingCookies_.add(request->key))
+                return false;
+        } else if (id == cookieStoreId) {
+            auto store = wire::protocol::cookie::StorePacket::read(frame_);
+            if (!store || frame_.readableBytes() != 0 || store->key.size() > 256)
+                return false;
         }
         if (!queuePacket(*packet))
             return false;
@@ -624,7 +696,7 @@ std::int64_t ClientSession::backendHandle() const {
 }
 
 wire::io::IoInterest ClientSession::backendInterest() const {
-    if (backend_ && (state_ == State::kLoginAck || state_ == State::kCookieResponse))
+    if (backend_ && (state_ == State::kLoginAck || state_ == State::kCookieResponse || startingConfiguration_))
         return {false, backend_->hasOutput()};
     return backend_ ? backend_->interest(!backendPaused_) : wire::io::IoInterest{false, true};
 }

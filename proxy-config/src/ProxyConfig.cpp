@@ -12,14 +12,15 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy, {"network", "runtime", "admission", "translation"}, "");
     const auto* network = reader.child(proxy, "network");
-    reader.keys(
-        network,
-        {"bind", "port", "dual-stack", "online-mode", "prevent-client-proxy-connections", "compression-threshold"},
-        "network.");
+    reader.keys(network,
+                {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
+                 "compression-threshold"},
+                "network.");
     reader.scalar(network, "bind", result.network.bind, "network.");
     reader.integer(network, "port", result.network.port, 1, 65535, "network.");
     reader.scalar(network, "dual-stack", result.network.dualStack, "network.");
     reader.scalar(network, "online-mode", result.network.onlineMode, "network.");
+    reader.scalar(network, "accept-transfers", result.network.acceptTransfers, "network.");
     reader.scalar(network, "prevent-client-proxy-connections", result.network.preventClientProxyConnections,
                   "network.");
     reader.integer(network, "compression-threshold", result.network.compressionThreshold, -1, 8 * 1024 * 1024,

@@ -204,9 +204,16 @@ TEST_CASE("online key exchange runs session lookup on a worker and encrypts subs
         fetched.store(true);
         return std::expected<HttpsResponse, HttpsError>{fakeProfile()};
     }};
-    Running server{settings(), std::move(services)};
+    auto config = settings();
+    bool transfer = false;
+    SUBCASE("normal login") {}
+    SUBCASE("accepted transfer still performs Mojang authentication") {
+        config.network.acceptTransfers = true;
+        transfer = true;
+    }
+    Running server{config, std::move(services)};
     auto client = server.connect();
-    loginStart(client, server.runtime.port());
+    loginStart(client, server.runtime.port(), transfer ? 3 : 2);
     const auto secret = keyResponse(client);
     auto response = receive(client, 1, true);
     auto decrypt = Cfb8Cipher::create(secret);
@@ -579,4 +586,111 @@ TEST_CASE("backend compression is decoded independently of uncompressed frontend
     proxy.stop();
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("DNS deadline advances the route and late canceled results cannot close the replacement") {
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    const auto port = listener->localPort();
+    REQUIRE(port);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.runtime.connectTimeoutMs = 150;
+    config.runtime.workers = 2;
+    config.backends = {{.name = "slow", .host = "slow.test", .port = *port},
+                       {.name = "live", .host = "live.test", .port = *port}};
+    config.defaultRoute = {"slow", "live"};
+    bool exhausted = false;
+    bool loginExpired = false;
+    SUBCASE("next destination survives the stale reply") {}
+    SUBCASE("last destination timeout drains an unavailable response") {
+        config.defaultRoute = {"slow"};
+        exhausted = true;
+    }
+    SUBCASE("global login deadline cannot be extended by fallback") {
+        config.runtime.loginTimeoutMs = 75;
+        loginExpired = true;
+    }
+    std::promise<void> canceled;
+    auto cancellation = canceled.get_future();
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::atomic<unsigned> queries{0};
+    runtime::RuntimeServices services;
+    services.resolution = [&](auto host, auto destinationPort,
+                              const auto& options) -> std::expected<std::vector<io::TcpAddress>, io::DnsError> {
+        queries.fetch_add(1);
+        if (host == "slow.test") {
+            std::mutex mutex;
+            std::condition_variable_any condition;
+            std::unique_lock lock{mutex};
+            condition.wait(lock, options.stop, [] { return false; });
+            canceled.set_value();
+            // Simulate a resolver that finishes after its cancellation has been requested.
+            (void)released.wait_for(2s);
+        }
+        return std::vector{*io::TcpAddress::literal("127.0.0.1", destinationPort)};
+    };
+    Running proxy{std::move(config), std::move(services)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    REQUIRE(cancellation.wait_for(2s) == std::future_status::ready);
+    if (exhausted || loginExpired) {
+        release.set_value();
+        const auto response = receive(client, 0, true);
+        CHECK(response.empty() == loginExpired);
+        proxy.stop();
+        CHECK(queries.load() == 1);
+        CHECK(proxy.runtime.sessionCount() == 0);
+        CHECK(proxy.runtime.bufferedBytes() == 0);
+        return;
+    }
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    const auto event = loop.wait(2000);
+    REQUIRE(event);
+    REQUIRE_FALSE(event->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    const auto before = proxy.runtime.bufferedBytes();
+    REQUIRE(before >= 16384);
+    release.set_value();
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (proxy.runtime.bufferedBytes() > before - 16384 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(proxy.runtime.bufferedBytes() <= before - 16384);
+    // The canceled reply has released its reservation on the owner; the live backend still relays.
+    REQUIRE(backend->write(std::array<std::uint8_t, 5>{4, 0, 2, '{', '}'}));
+    CHECK_FALSE(receive(client, 1, true).empty());
+    proxy.stop();
+    CHECK(queries.load() == 2);
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("incoming transfer handshake is rejected unless explicitly enabled") {
+    for (const bool enabled : {false, true}) {
+        auto config = settings();
+        config.network.onlineMode = false;
+        config.network.acceptTransfers = enabled;
+        Running proxy{config};
+        auto client = proxy.connect();
+        if (enabled) {
+            loginStart(client, proxy.runtime.port(), 3);
+            const auto response = receive(client, 1, true);
+            CHECK(std::string(response.begin(), response.end()).find("Player routing is unavailable") !=
+                  std::string::npos);
+        } else {
+            REQUIRE(client.write(handshake(proxy.runtime.port(), 3)));
+            CHECK(receive(client, 0, true).empty());
+        }
+        proxy.stop();
+        CHECK(proxy.runtime.sessionCount() == 0);
+        CHECK(proxy.runtime.bufferedBytes() == 0);
+    }
 }
