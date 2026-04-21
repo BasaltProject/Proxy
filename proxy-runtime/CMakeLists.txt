@@ -6,6 +6,9 @@ basalt_module(proxy-runtime-core
         src/BackendAttempts.cpp
         src/BackendDial.cpp
         src/BackendLogin.cpp
+        src/BackendLoginQueries.cpp
+        src/BackendLoginIdentity.cpp
+        src/BackendLoginCookies.cpp
         src/ClientSession.cpp
         src/ClientSessionBackend.cpp
         src/PendingCookies.cpp
@@ -71,7 +74,13 @@ basalt_test(proxy-runtime-backend-selection-test
 )
 
 basalt_test(proxy-runtime-backend-login-test
-    SOURCES test/BackendLoginTest.cpp test/CookieRelayTest.cpp test/TransferRelayTest.cpp test/CookieCacheTest.cpp test/ClientSettingsTest.cpp
+    SOURCES
+        test/BackendLoginTest.cpp
+        test/CookieRelayTest.cpp
+        test/TransferRelayTest.cpp
+        test/CookieCacheTest.cpp
+        test/ClientSettingsTest.cpp
+        test/BackendCookiesTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
 )
 if(BASALT_BUILD_TESTS)

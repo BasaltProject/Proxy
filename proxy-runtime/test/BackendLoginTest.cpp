@@ -94,6 +94,8 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
                                        0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
     finished.insert(finished.end(), 15, 0);
     finished.push_back(1);
+    bool loginEof = false;
+    bool reconfigurationEof = false;
     bool wrongProfile = false;
     bool malformedAck = false;
     bool prematureFinishAck = false;
@@ -102,6 +104,8 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     bool prematureReconfigurationAck = false;
     bool malformedReconfigurationAck = false;
     SUBCASE("valid native transition") {}
+    SUBCASE("backend EOF while waiting for login ACK closes promptly") { loginEof = true; }
+    SUBCASE("backend EOF while waiting for reconfiguration ACK closes promptly") { reconfigurationEof = true; }
     SUBCASE("start configuration cannot carry trailing fields") { malformedStart = true; }
     SUBCASE("play configuration acknowledgement requires a request") { prematureReconfigurationAck = true; }
     SUBCASE("play configuration acknowledgement cannot carry trailing fields") { malformedReconfigurationAck = true; }
@@ -121,6 +125,12 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
         return;
     }
     CHECK(receive(client, finished.size()) == finished);
+    if (loginEof) {
+        backend->close();
+        CHECK(receive(client, 0, true).empty());
+        proxy.stop();
+        return;
+    }
     if (malformedAck) {
         const std::array<std::uint8_t, 3> badAck{2, 3, 0};
         REQUIRE(client.write(badAck));
@@ -199,6 +209,12 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
         reconfiguration.insert(reconfiguration.end(), configuration.begin(), configuration.end());
         REQUIRE(backend->write(reconfiguration));
         CHECK(receive(client, 2) == std::vector<std::uint8_t>{1, 0x78});
+        if (reconfigurationEof) {
+            backend->close();
+            CHECK(receive(client, 0, true).empty());
+            proxy.stop();
+            return;
+        }
         if (malformedReconfigurationAck) {
             REQUIRE(client.write(std::array<std::uint8_t, 3>{2, 0x10, 0}));
             CHECK(receive(client, 0, true).empty());

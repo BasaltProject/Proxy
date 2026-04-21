@@ -17,6 +17,7 @@
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <exception>
 #include <stdexcept>
@@ -66,12 +67,20 @@ struct ProxyRuntime::Impl {
             ready.reserve(parent.config.runtime.maxSessions + 1);
         }
 
+        void unwatchBackends(Session& session) {
+            for (auto& handle : session.watchedBackends) {
+                if (handle >= 0)
+                    loop.unwatch(handle);
+                handle = -1;
+            }
+        }
+
         void close(std::uint64_t id) {
             const auto found = sessions.find(id);
             if (found == sessions.end())
                 return;
             loop.unwatch(found->second->handle());
-            loop.unwatch(found->second->backendHandle());
+            unwatchBackends(*found->second);
             (void)timers.cancel(found->second->timer);
             sessions.erase(found);
         }
@@ -161,11 +170,25 @@ struct ProxyRuntime::Impl {
                 loop.unwatch(session.handle());
             else if (!loop.watch(session.handle(), session.interest(), id))
                 return false;
-            if (session.backendSuspended())
-                loop.unwatch(session.backendHandle());
-            else if (session.backendHandle() >= 0 &&
-                     !loop.watch(session.backendHandle(), session.backendInterest(), id))
-                return false;
+            const auto endpoints = session.backendWatches();
+            for (auto old : session.watchedBackends) {
+                if (old >= 0 && std::ranges::none_of(endpoints, [old](const auto& next) { return next.handle == old; }))
+                    loop.unwatch(old);
+            }
+            session.watchedBackends.fill(-1);
+            for (std::size_t i = 0; i < endpoints.size(); ++i) {
+                const auto& endpoint = endpoints[i];
+                if (endpoint.handle < 0)
+                    continue;
+                if (!loop.watch(endpoint.handle, endpoint.interest, id)) {
+                    for (const auto& pending : endpoints)
+                        if (pending.handle >= 0)
+                            loop.unwatch(pending.handle);
+                    session.watchedBackends.fill(-1);
+                    return false;
+                }
+                session.watchedBackends[i] = endpoint.handle;
+            }
             return timers.reschedule(session.timer, session.deadline());
         }
 
@@ -255,7 +278,7 @@ struct ProxyRuntime::Impl {
                         if (found == sessions.end())
                             continue;
                         auto& session = *found->second;
-                        loop.unwatch(session.backendHandle());
+                        unwatchBackends(session);
                         if (!session.timedOut(now)) {
                             close(timer.token);
                             continue;
@@ -286,11 +309,12 @@ struct ProxyRuntime::Impl {
                         auto& session = *found->second;
                         bool healthy = false;
                         if (Clock::now() >= session.deadline()) {
-                            loop.unwatch(session.backendHandle());
+                            unwatchBackends(session);
                             healthy = session.timedOut(Clock::now());
                         } else if (event.handle == session.handle()) {
                             healthy = session.ready(event);
-                        } else if (event.handle == session.backendHandle()) {
+                        } else if (std::ranges::find(session.watchedBackends, event.handle) !=
+                                   session.watchedBackends.end()) {
                             loop.unwatch(event.handle);
                             healthy = session.backendReady(event);
                         } else {

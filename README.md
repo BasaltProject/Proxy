@@ -54,7 +54,8 @@ Legacy handshakes carry the verified UUID/IP and configured token, with a bounde
 host. Credential properties echoed by a backend are removed before frontend login success.
 These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
 Unknown login queries receive a matching negative response using backend compression.
-Login cookie requests are relayed to the client; matching responses are bounded to 5,120 bytes.
+Login cookie requests are tracked by their backend and relayed to the client when uncached;
+matching responses are bounded to 5,120 bytes.
 Configuration/play cookie requests, responses and stores are validated before relay, with up to
 32 pending requests and 256-byte keys. Unsolicited or mismatched responses close the session.
 A session-local cookie cache retains up to 32 entries and 64 KiB of encoded content under
