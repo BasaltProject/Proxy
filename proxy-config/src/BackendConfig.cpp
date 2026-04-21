@@ -50,9 +50,11 @@ std::expected<void, std::string> readBackends(ProxyConfig& config, const TomlTab
             if (!table)
                 continue;
             const auto prefix = "backends." + name + ".";
-            reader.keys(table, {"host", "port", "protocol", "forwarding", "secret", "property-name"}, prefix);
+            reader.keys(table, {"host", "port", "protocol", "forwarding", "secret", "property-name", "bungee-messages"},
+                        prefix);
             BackendConfig backend;
             backend.name = name;
+            reader.scalar(table, "bungee-messages", backend.bungeeMessages, prefix);
             reader.scalar(table, "host", backend.host, prefix);
             reader.integer(table, "port", backend.port, 1, 65535, prefix);
             reader.integer(table, "protocol", backend.protocol, 1, std::numeric_limits<std::int32_t>::max(), prefix);

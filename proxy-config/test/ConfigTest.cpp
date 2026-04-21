@@ -35,6 +35,7 @@ TEST_CASE("commented defaults produce online authentication, bounded owners "
     CHECK(defaults->translation == TranslationMode::Auto);
     REQUIRE(defaults->backends.size() == 1);
     CHECK(defaults->backends.front().forwarding == basalt::wire::auth::forwarding::ForwardingMode::None);
+    CHECK_FALSE(defaults->backends.front().bungeeMessages);
     CHECK(defaults->defaultRoute == std::vector<std::string>{"lobby"});
 }
 
@@ -150,4 +151,15 @@ TEST_CASE("incoming transfers require an explicit boolean network option") {
     CHECK(enabled->network.acceptTransfers);
     CHECK(enabled->network.onlineMode);
     CHECK_FALSE(decode("[network]\naccept-transfers = 'true'"));
+}
+
+TEST_CASE("Bungee control messages require an explicit backend boolean") {
+    const std::string document = "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = 'localhost'\n"
+                                 "forwarding = 'none'\n";
+    const auto enabled = decode("", document + "bungee-messages = true\n");
+    REQUIRE(enabled);
+    CHECK(enabled->backends.front().bungeeMessages);
+    const auto invalid = decode("", document + "bungee-messages = 'true'\n");
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().find("bungee-messages") != std::string::npos);
 }

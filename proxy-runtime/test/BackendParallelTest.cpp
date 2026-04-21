@@ -5,6 +5,7 @@
 #include <basalt/wire/io/BudgetMemoryResource.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 
 using namespace basalt::proxy;
@@ -151,6 +152,23 @@ TEST_CASE("two live backend transports keep play and Velocity login configuratio
         CHECK(candidate.phase() == BackendLogin::Phase::kConfiguration);
         CHECK_FALSE(active.velocityForwarded());
         CHECK(candidate.velocityForwarded());
+        packets[0].clear();
+        packets[1].clear();
+        constexpr std::string_view key = "fixture:key";
+        REQUIRE_FALSE(candidate.relayCookie(
+            {std::string{key}, std::vector<std::uint8_t>(basalt::wire::protocol::cookie::kMaxPayloadBytes + 1, 0)}));
+        CHECK_FALSE(candidate.hasOutput());
+        REQUIRE(active.relayCookie({std::string{key}, std::nullopt}));
+        REQUIRE(candidate.relayCookie({std::string{key}, std::vector<std::uint8_t>{}}));
+        drain();
+        std::vector<std::uint8_t> playCookie{14, 0x15, 11};
+        playCookie.insert(playCookie.end(), key.begin(), key.end());
+        playCookie.push_back(0);
+        std::vector<std::uint8_t> configurationCookie{15, 1, 11};
+        configurationCookie.insert(configurationCookie.end(), key.begin(), key.end());
+        configurationCookie.insert(configurationCookie.end(), {1, 0});
+        CHECK(receive(peers[0], playCookie.size()) == playCookie);
+        CHECK(receive(peers[1], configurationCookie.size()) == configurationCookie);
         CHECK(local.used() >= active.allocated() + candidate.allocated());
     }
     CHECK(global.used() == 0);

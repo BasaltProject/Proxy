@@ -49,11 +49,17 @@ with explicit `none`, `velocity`, `bungeecord`, `bungeeguard` or `safenet` forwa
 it sends the login handshake and identity and relays
 login disconnects, decoding backend compression independently of frontend framing.
 Velocity modern queries receive signed v1/v4 identity responses; missing or duplicate forwarding
-queries are rejected. This path has synthetic coverage, not a verified Paper interoperability gate.
+queries are rejected. Offline bot gates against Paper and Basalt pass; real online-profile
+interoperability remains pending.
 Legacy handshakes carry the verified UUID/IP and configured token, with a bounded 32,767-byte
 host. Credential properties echoed by a backend are removed before frontend login success.
 These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
 Unknown login queries receive a matching negative response using backend compression.
+A backend may enable `bungee-messages = true` in its `backends.toml` table to use
+`GetServer`, `GetServers` and `UUID` on `bungeecord:main`. The default is false.
+The legacy `BungeeCord` alias is recognized and replies use the native channel.
+Client control messages are discarded. Other subcommands, including administrative actions,
+are currently ignored. Responses use bounded session buffers and the verified player UUID.
 Login cookie requests are tracked by their backend and relayed to the client when uncached;
 matching responses are bounded to 5,120 bytes.
 Configuration/play cookie requests, responses and stores are validated before relay, with up to

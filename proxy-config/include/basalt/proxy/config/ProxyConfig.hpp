@@ -53,6 +53,7 @@ struct AdmissionConfig {
 };
 
 struct BackendConfig {
+    bool bungeeMessages = false;
     std::string name;
     std::string host;
     std::uint16_t port = 25566;

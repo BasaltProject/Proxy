@@ -20,6 +20,10 @@ namespace basalt::wire::auth {
 struct SessionProfile;
 }
 
+namespace basalt::wire::protocol::cookie {
+struct ResponsePacket;
+}
+
 namespace basalt::wire::protocol::login {
 struct LoginFinishedPacket;
 }
@@ -56,9 +60,17 @@ public:
 
     [[nodiscard]] bool hasCookieRequest() const { return cookieKey_.readableBytes() != 0; }
 
+    [[nodiscard]] std::span<const std::uint8_t> pendingCookieKey() const { return cookieKey_.readable(); }
+
     [[nodiscard]] std::expected<CookieAction, BackendLoginError> requestCookie(wire::io::ByteBuffer& packet,
                                                                                const CookieCache& cache);
     [[nodiscard]] std::expected<void, BackendLoginError> answerCookie(wire::io::ByteBuffer& packet, CookieCache& cache);
+
+    [[nodiscard]] std::expected<void, BackendLoginError>
+    answerCookie(const wire::protocol::cookie::ResponsePacket& response, CookieCache& cache);
+    /// Caller correlates and validates the response before relay.
+    [[nodiscard]] std::expected<void, BackendLoginError>
+    relayCookie(const wire::protocol::cookie::ResponsePacket& response);
 
     /// Configuration, profile and address must remain valid until login acknowledgement or closure.
     [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
