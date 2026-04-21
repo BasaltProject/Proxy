@@ -27,7 +27,7 @@ constexpr std::int32_t kStartConfigurationId = 0x78;
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
     if (Clock::now() >= deadline())
         return false;
-    if (state_ == State::kConnecting && dial_ && event.handle == dial_->handle())
+    if (connectionStage_ == ConnectionStage::kConnecting && dial_ && event.handle == dial_->handle())
         return dial();
     if ((state_ != State::kBackendLogin && state_ != State::kCookieResponse && state_ != State::kLoginAck &&
          state_ != State::kConfiguration && state_ != State::kPlay) ||
@@ -42,8 +42,6 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
     backpressure();
     if (!packet)
         return false;
-    if (!backend()->hasOutput())
-        backendWriteDeadline_ = Clock::time_point::max();
     if (packet->empty())
         return true;
     const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
@@ -63,9 +61,8 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         if (!action)
             return false;
         if (*action == BackendLogin::CookieAction::kCached) {
-            if (backendWriteDeadline_ == Clock::time_point::max())
-                backendWriteDeadline_ =
-                    std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+            backend()->expectWriteUntil(
+                std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs}));
             backpressure();
             return true;
         }
@@ -118,17 +115,17 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         }
         if (!queuePacket(*packet))
             return false;
+        backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
         if (terminal) {
             closing_ = true;
             closeBackends();
         }
-        backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         return true;
     }
     if (id == wire::protocol::login::LoginFinishedPacket::kId) {
         if (!profile_)
             return false;
-        auto finished = backend()->acceptLogin(frame_, backends_[backend()->attempt().target], *profile_);
+        auto finished = backend()->acceptLogin(frame_);
         if (!finished)
             return false;
         frame_.clear();
@@ -148,13 +145,11 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         return true;
     }
     if (id == wire::protocol::login::LoginPluginRequestPacket::kId) {
-        if (!profile_ || !backend()->answerPluginQuery(frame_, backends_[backend()->attempt().target], *profile_,
-                                                       connection_.remoteAddress()))
+        if (!backend()->answerPluginQuery(frame_))
             return false;
         backpressure();
-        if (backendWriteDeadline_ == Clock::time_point::max())
-            backendWriteDeadline_ =
-                std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        backend()->expectWriteUntil(
+            std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs}));
         return true;
     }
     closing_ = true;

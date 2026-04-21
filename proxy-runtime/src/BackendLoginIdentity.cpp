@@ -12,12 +12,14 @@
 namespace basalt::proxy::runtime::detail {
 
 std::expected<wire::protocol::login::LoginFinishedPacket, BackendLoginError>
-BackendLogin::acceptLogin(wire::io::ByteBuffer& packet, const config::BackendConfig& backend,
-                          const wire::auth::SessionProfile& profile) {
+BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
     using Mode = wire::auth::forwarding::ForwardingMode;
     namespace protocol = wire::protocol;
-    if (phase_ != Phase::kLogin || hasCookieRequest() || packet.readableBytes() > kLoginPacketLimit ||
-        (backend.forwarding == Mode::Velocity && !velocityForwarded_))
+    if (phase_ != Phase::kLogin || hasCookieRequest() || packet.readableBytes() > kLoginPacketLimit)
+        return std::unexpected(BackendLoginError::kMalformed);
+    const auto& backend = *backendConfig_;
+    const auto& profile = *profile_;
+    if (backend.forwarding == Mode::Velocity && !velocityForwarded_)
         return std::unexpected(BackendLoginError::kMalformed);
     const auto body = packet.readable();
     (void)protocol::readUuid(packet);

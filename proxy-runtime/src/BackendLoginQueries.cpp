@@ -11,14 +11,13 @@
 
 namespace basalt::proxy::runtime::detail {
 
-std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io::ByteBuffer& query,
-                                                                       const config::BackendConfig& backend,
-                                                                       const wire::auth::SessionProfile& profile,
-                                                                       std::string_view remoteAddress) {
+std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io::ByteBuffer& query) {
     namespace protocol = wire::protocol;
     namespace velocity = wire::auth::forwarding::velocity;
     if (phase_ != Phase::kLogin || hasCookieRequest() || query.readableBytes() > kLoginPacketLimit)
         return std::unexpected(BackendLoginError::kMalformed);
+    const auto& backend = *backendConfig_;
+    const auto& profile = *profile_;
     const auto transaction = protocol::varInt::read(query);
     const auto channelBytes = protocol::varInt::read(query);
     if (query.failed() || channelBytes < 0 || channelBytes > 32767 * 3)
@@ -38,7 +37,7 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
     protocol::varInt::write(frame_, protocol::login::LoginPluginResponsePacket::kId);
     protocol::varInt::write(frame_, transaction);
     protocol::writeBoolean(frame_, forwarding);
-    if (forwarding && !velocity::signInto(frame_, backend.secret, remoteAddress, profile.id, profile.name,
+    if (forwarding && !velocity::signInto(frame_, backend.secret, remoteAddress_, profile.id, profile.name,
                                           profile.properties, requested >= 4 ? 4 : 1))
         return std::unexpected(BackendLoginError::kMalformed);
     if (auto result = queue(frame_.readable(), forwarding ? kForwardingPacketLimit : kCapacity); !result)

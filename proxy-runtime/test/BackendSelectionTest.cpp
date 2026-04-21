@@ -149,7 +149,7 @@ TEST_CASE("backend transport retains its own attempt and forwarding state across
         io::ByteBuffer query{64};
         query.writeBytes(std::array<std::uint8_t, 23>{42,  20,  'v', 'e', 'l', 'o', 'c', 'i', 't', 'y', ':', 'p',
                                                       'l', 'a', 'y', 'e', 'r', '_', 'i', 'n', 'f', 'o', 4});
-        REQUIRE(endpoint.answerPluginQuery(query, config, profile, "127.0.0.1"));
+        REQUIRE(endpoint.answerPluginQuery(query));
     };
     BackendAttempts attempts;
     const auto firstA = attempts.begin(0);
@@ -209,16 +209,22 @@ TEST_CASE("active and candidate backend phases advance independently and reject 
             finished.gameProfile.id = profile.id;
             finished.gameProfile.name = profile.name;
             finished.write(packet);
-            return endpoint.acceptLogin(packet, config, profile);
+            return endpoint.acceptLogin(packet);
         };
         CHECK_FALSE(accept(active));
         REQUIRE(active.start(config, profile, "localhost", 25565, "127.0.0.1"));
         CHECK(active.phase() == Phase::kLogin);
+        const auto preparation = BackendLogin::Clock::now() + 1s;
+        active.boundPreparation(preparation);
+        active.boundPreparation(preparation + 1s);
+        CHECK(active.deadline(true) == preparation);
         CHECK_FALSE(active.acknowledgeLogin());
         REQUIRE(accept(active));
         REQUIRE(active.acknowledgeLogin());
         CHECK_FALSE(active.acknowledgeLogin());
+        CHECK(active.deadline(true) == preparation);
         REQUIRE(active.finishConfiguration());
+        CHECK(active.deadline() == BackendLogin::Clock::time_point::max());
         REQUIRE(candidate.start(config, profile, "localhost", 25565, "127.0.0.1"));
         CHECK_FALSE(candidate.finishConfiguration());
         CHECK(candidate.phase() == Phase::kLogin);
@@ -227,7 +233,9 @@ TEST_CASE("active and candidate backend phases advance independently and reject 
         REQUIRE(candidate.acknowledgeLogin());
         CHECK(candidate.phase() == Phase::kConfiguration);
         CHECK(active.phase() == Phase::kPlay);
+        active.boundPreparation(preparation);
         REQUIRE(active.beginConfiguration());
+        CHECK(active.deadline() == BackendLogin::Clock::time_point::max());
         CHECK_FALSE(active.beginConfiguration());
         REQUIRE(active.finishConfiguration());
         CHECK(candidate.phase() == Phase::kConfiguration);
@@ -273,11 +281,11 @@ TEST_CASE("backend query failure cannot grant forwarding authority or exceed buf
             finished.gameProfile.id = profile.id;
             finished.gameProfile.name = profile.name;
             finished.write(login);
-            REQUIRE(endpoint.acceptLogin(login, config, profile));
+            REQUIRE(endpoint.acceptLogin(login));
         }
         const auto pending = endpoint.pendingBytes();
         const auto reserved = local.used();
-        const auto response = endpoint.answerPluginQuery(query, config, profile, "127.0.0.1");
+        const auto response = endpoint.answerPluginQuery(query);
         REQUIRE_FALSE(response);
         CHECK(response.error() ==
               (malformed || wrongPhase ? BackendLoginError::kMalformed : BackendLoginError::kLimit));
@@ -322,7 +330,7 @@ TEST_CASE("backend identity validation preserves login phase on rejection and ve
         finished.write(packet);
         if (trailing)
             packet.writeByte(0);
-        const auto accepted = endpoint.acceptLogin(packet, config, profile);
+        const auto accepted = endpoint.acceptLogin(packet);
         if (wrongName || wrongId || missingForwarding || trailing) {
             CHECK_FALSE(accepted);
             CHECK(endpoint.phase() == BackendLogin::Phase::kLogin);
@@ -332,6 +340,56 @@ TEST_CASE("backend identity validation preserves login phase on rejection and ve
             CHECK(accepted->sessionId == finished.sessionId);
             CHECK(endpoint.phase() == BackendLogin::Phase::kLoginAccepted);
         }
+    }
+    CHECK(global.used() == 0);
+    CHECK(local.used() == 0);
+}
+
+TEST_CASE("backend login cannot rebind the identity or forwarding policy of a started transport") {
+    io::ResourceBudget global{512 * 1024};
+    io::ResourceBudget local{512 * 1024};
+    io::BudgetMemoryResource memory{global, local};
+    {
+        basalt::wire::auth::SessionProfile first;
+        first.name = "Tester";
+        first.id = basalt::wire::common::Uuid::offlinePlayer(first.name);
+        basalt::wire::auth::SessionProfile second;
+        second.name = "Other";
+        second.id = basalt::wire::common::Uuid::offlinePlayer(second.name);
+        config::BackendConfig plain;
+        config::BackendConfig modern;
+        modern.forwarding = basalt::wire::auth::forwarding::ForwardingMode::Velocity;
+        modern.secret = "candidate-secret";
+        BackendLogin active{io::TcpConnection{}, memory, {1, 0}};
+        BackendLogin candidate{io::TcpConnection{}, memory, {2, 1}};
+        const auto accept = [](BackendLogin& endpoint, const basalt::wire::auth::SessionProfile& profile) {
+            io::ByteBuffer packet{128};
+            basalt::wire::protocol::login::LoginFinishedPacket finished;
+            finished.gameProfile.id = profile.id;
+            finished.gameProfile.name = profile.name;
+            finished.write(packet);
+            return endpoint.acceptLogin(packet);
+        };
+        REQUIRE(active.start(plain, first, "localhost", 25565, "127.0.0.1"));
+        REQUIRE(accept(active, first));
+        REQUIRE(active.acknowledgeLogin());
+        REQUIRE(active.finishConfiguration());
+        REQUIRE(candidate.start(modern, second, "localhost", 25565, "127.0.0.2"));
+        CHECK_FALSE(candidate.start(plain, first, "localhost", 25565, "127.0.0.1"));
+        CHECK_FALSE(accept(candidate, second));
+        CHECK(candidate.phase() == BackendLogin::Phase::kLogin);
+        io::ByteBuffer query{64};
+        query.writeBytes(std::array<std::uint8_t, 23>{42,  20,  'v', 'e', 'l', 'o', 'c', 'i', 't', 'y', ':', 'p',
+                                                      'l', 'a', 'y', 'e', 'r', '_', 'i', 'n', 'f', 'o', 4});
+        REQUIRE(candidate.answerPluginQuery(query));
+        CHECK_FALSE(accept(candidate, first));
+        const auto accepted = accept(candidate, second);
+        REQUIRE(accepted);
+        CHECK(accepted->gameProfile.id == second.id);
+        CHECK(candidate.phase() == BackendLogin::Phase::kLoginAccepted);
+        CHECK(active.phase() == BackendLogin::Phase::kPlay);
+        CHECK_FALSE(active.velocityForwarded());
+        CHECK(candidate.velocityForwarded());
     }
     CHECK(global.used() == 0);
     CHECK(local.used() == 0);

@@ -6,6 +6,7 @@
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 
+#include <chrono>
 #include <expected>
 #include <optional>
 #include <span>
@@ -32,6 +33,12 @@ enum class BackendLoginError { kUnsupported, kMalformed, kIo, kLimit };
 /// Native backend packet transport; all buffers and calls belong to the session's I/O owner.
 class BackendLogin {
 public:
+    using Clock = std::chrono::steady_clock;
+    [[nodiscard]] Clock::time_point deadline(bool readingPaused = false) const;
+    void expectWriteUntil(Clock::time_point deadline);
+    void expectReadUntil(Clock::time_point deadline);
+    void boundPreparation(Clock::time_point deadline);
+
     enum class CookieAction { kCached, kRequestClient };
     enum class Phase { kUnstarted, kLogin, kLoginAccepted, kConfiguration, kPlay };
 
@@ -53,15 +60,13 @@ public:
                                                                                const CookieCache& cache);
     [[nodiscard]] std::expected<void, BackendLoginError> answerCookie(wire::io::ByteBuffer& packet, CookieCache& cache);
 
+    /// Configuration, profile and address must remain valid until login acknowledgement or closure.
     [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
                                                                const wire::auth::SessionProfile& profile,
                                                                std::string_view virtualHost, std::uint16_t virtualPort,
                                                                std::string_view remoteAddress);
     /// Query begins after its packet ID. Replies affect only this transport.
-    [[nodiscard]] std::expected<void, BackendLoginError> answerPluginQuery(wire::io::ByteBuffer& query,
-                                                                           const config::BackendConfig& backend,
-                                                                           const wire::auth::SessionProfile& profile,
-                                                                           std::string_view remoteAddress);
+    [[nodiscard]] std::expected<void, BackendLoginError> answerPluginQuery(wire::io::ByteBuffer& query);
 
     /// Returned packet view expires on the next call. No frontend framing/cipher state is shared.
     [[nodiscard]] std::expected<std::span<const std::uint8_t>, BackendLoginError> ready(const wire::io::IoReady& event,
@@ -79,8 +84,7 @@ public:
 
     /// Packet begins after its ID. Identity is checked before this transport accepts login.
     [[nodiscard]] std::expected<wire::protocol::login::LoginFinishedPacket, BackendLoginError>
-    acceptLogin(wire::io::ByteBuffer& packet, const config::BackendConfig& backend,
-                const wire::auth::SessionProfile& profile);
+    acceptLogin(wire::io::ByteBuffer& packet);
     [[nodiscard]] bool acknowledgeLogin();
     [[nodiscard]] bool beginConfiguration();
     [[nodiscard]] bool finishConfiguration();
@@ -93,6 +97,12 @@ private:
     [[nodiscard]] std::expected<void, BackendLoginError>
     queueCookie(std::string_view key, std::optional<std::span<const std::uint8_t>> payload);
     [[nodiscard]] bool advance(Phase from, Phase to);
+    Clock::time_point preparationDeadline_ = Clock::time_point::max();
+    Clock::time_point readDeadline_ = Clock::time_point::max();
+    Clock::time_point writeDeadline_ = Clock::time_point::max();
+    const config::BackendConfig* backendConfig_ = nullptr;
+    const wire::auth::SessionProfile* profile_ = nullptr;
+    std::string_view remoteAddress_;
     const BackendAttempt attempt_;
     bool velocityForwarded_ = false;
     wire::io::TcpConnection connection_;
