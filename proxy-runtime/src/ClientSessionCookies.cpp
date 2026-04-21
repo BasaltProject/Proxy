@@ -10,15 +10,15 @@
 
 namespace basalt::proxy::runtime::detail {
 
-bool ClientSession::publishCookieRequest(BackendLogin& source) {
+ClientSession::CookiePublication ClientSession::publishCookieRequest(BackendLogin& source) {
     const auto keyBytes = source.pendingCookieKey();
     if (source.phase() != BackendLogin::Phase::kLogin || keyBytes.empty() || keyBytes.size() > 256 ||
         backendFor(source.attempt()) != &source)
-        return false;
+        return CookiePublication::kFatal;
     const bool initial = state_ == State::kBackendLogin;
     if ((!initial && state_ != State::kConfiguration && state_ != State::kPlay) ||
         (initial && &source != candidateBackend_.get()))
-        return false;
+        return CookiePublication::kFatal;
     std::array<char, 256> keyStorage{};
     for (std::size_t i = 0; i < keyBytes.size(); ++i)
         keyStorage[i] = static_cast<char>(keyBytes[i]);
@@ -26,16 +26,16 @@ bool ClientSession::publishCookieRequest(BackendLogin& source) {
     frame_.clear();
     if (!frame_.tryReserve(key.size() + 8) ||
         !pendingCookies_.add(key, cookieCache_.lookup(key).storeRevision, source.attempt()))
-        return false;
+        return CookiePublication::kUnavailable;
     const auto id =
         initial ? wire::protocol::cookie::RequestPacket::kLoginId : (state_ == State::kConfiguration ? 0x00 : 0x15);
     wire::protocol::varInt::write(frame_, id);
     wire::protocol::writeString(frame_, key);
     if (!queuePacket(frame_.readable()))
-        return false;
+        return CookiePublication::kFatal;
     if (initial)
         state_ = State::kCookieResponse;
-    return true;
+    return CookiePublication::kPublished;
 }
 
 bool ClientSession::cookieResponse() {

@@ -25,10 +25,16 @@ constexpr std::int32_t kStartConfigurationId = 0x78;
 } // namespace
 
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
+    return backendEvent(event) && advancePreparedChange();
+}
+
+bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     if (Clock::now() >= deadline())
-        return false;
+        return timedOut(Clock::now());
     if (connectionStage_ == ConnectionStage::kConnecting && dial_ && event.handle == dial_->handle())
         return dial();
+    if (activeBackend_ && candidateBackend_ && event.handle == candidateBackend_->handle())
+        return candidateReady(event);
     if ((state_ != State::kBackendLogin && state_ != State::kCookieResponse && state_ != State::kLoginAck &&
          state_ != State::kConfiguration && state_ != State::kPlay) ||
         !backend() || event.handle != backend()->handle())
@@ -66,7 +72,7 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
             backpressure();
             return true;
         }
-        return publishCookieRequest(*backend());
+        return publishCookieRequest(*backend()) == CookiePublication::kPublished;
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (id < 0)
@@ -89,6 +95,8 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         } else if (state_ == State::kPlay && id == kStartConfigurationId) {
             if (startingConfiguration_ || frame_.readableBytes() != 0)
                 return false;
+            if (candidateBackend_ || connectionStage_ != ConnectionStage::kIdle)
+                discardCandidate();
             startingConfiguration_ = true;
         } else if (state_ == State::kConfiguration && id == wire::protocol::configuration::kFinishConfigurationId) {
             if (finishingConfiguration_ || frame_.readableBytes() != 0)
@@ -106,6 +114,10 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
                 return true;
             }
         }
+        const auto packPushId = state_ == State::kConfiguration ? 0x09 : 0x51;
+        const auto packPopId = state_ == State::kConfiguration ? 0x08 : 0x50;
+        if (id == packPushId || id == packPopId)
+            return backendResourcePack(id == packPushId);
         const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
         const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
         if (id == cookieRequestId) {

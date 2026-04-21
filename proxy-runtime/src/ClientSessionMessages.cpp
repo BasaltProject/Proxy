@@ -44,6 +44,21 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
     const auto command = frame_.readSpan(commandBytes);
     if (frame_.failed())
         return PluginMessageResult::kInvalid;
+    if (std::ranges::equal(command, std::string_view{"Connect"})) {
+        const auto length = static_cast<std::uint16_t>(frame_.readShort());
+        if (frame_.failed() || length == 0 || length > 64)
+            return PluginMessageResult::kInvalid;
+        const auto target = frame_.readSpan(length);
+        if (frame_.failed() || frame_.readableBytes() != 0 ||
+            !std::ranges::all_of(target, [](std::uint8_t c) { return c >= 32 && c < 127; }))
+            return PluginMessageResult::kInvalid;
+        for (std::size_t i = 0; i < backends_.size(); ++i)
+            if (std::ranges::equal(target, backends_[i].name)) {
+                (void)requestBackendChange(i);
+                break;
+            }
+        return PluginMessageResult::kConsumed;
+    }
     std::string_view name;
     for (const auto known : {std::string_view{"GetServer"}, std::string_view{"GetServers"}, std::string_view{"UUID"}})
         if (std::ranges::equal(command, known))
