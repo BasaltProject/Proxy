@@ -26,8 +26,6 @@ namespace {
 /// Stable, so orchestrators and scripts can tell a bad command line from a crash.
 constexpr int kUsageExitCode = 2;
 
-/// Where a crash report goes. The proxy's own: the server has its own tracker and its own half of
-/// the code.
 constexpr std::string_view kIssuesUrl = "https://github.com/BasaltProject/Proxy/issues";
 
 static_assert(std::atomic<bool>::is_always_lock_free);
@@ -35,8 +33,7 @@ std::atomic<bool> signalStop{false};
 
 void stopSignal(int) { signalStop.store(true, std::memory_order_relaxed); }
 
-// Raw string, and deliberately not indented: the art is full of backslashes, and every leading
-// space in it is significant.
+// Raw string, deliberately unindented: leading spaces in the art are significant.
 constexpr std::string_view kBanner = R"(
   ____                  _ _     _____
  |  _ \                | | |   |  __ \

@@ -185,23 +185,4 @@ inline basalt::wire::auth::HttpsResponse fakeProfile() {
     const std::string json = "{\"id\":\"" + id + "\",\"name\":\"Tester\"}";
     return {200, {json.begin(), json.end()}};
 }
-
-inline std::vector<std::uint8_t> rejectBackendLogin(io::TcpConnection& backend, std::uint16_t virtualPort) {
-    REQUIRE(backend.setNonBlocking());
-    const auto bootstrap = receive(backend, 42);
-    const auto expectedHandshake = handshake(virtualPort, 2);
-    REQUIRE(bootstrap.size() == 42);
-    CHECK(std::equal(expectedHandshake.begin(), expectedHandshake.end(), bootstrap.begin()));
-    const std::array<std::uint8_t, 25> expectedLogin{24,   0,    6,    'T',  'e',  's',  't',  'e',  'r',
-                                                     0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba,
-                                                     0xeb, 0x2d, 0xad, 0xd2, 0xbe, 0x89, 0xae};
-    CHECK(std::equal(expectedLogin.begin(), expectedLogin.end(), bootstrap.begin() + 17));
-    const std::string reason = "{\"text\":\"Backend denied this login\"}";
-    std::vector<std::uint8_t> disconnect{static_cast<std::uint8_t>(reason.size() + 2), 0,
-                                         static_cast<std::uint8_t>(reason.size())};
-    disconnect.insert(disconnect.end(), reason.begin(), reason.end());
-    REQUIRE(backend.writeSome(std::span{disconnect}.first(1)));
-    REQUIRE(backend.writeSome(std::span{disconnect}.subspan(1)));
-    return disconnect;
-}
 } // namespace basalt::proxy::test

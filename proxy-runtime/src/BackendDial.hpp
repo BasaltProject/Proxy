@@ -18,8 +18,7 @@ struct DialError {
     int platformCode = 0;
 };
 
-/// Owner-only TCP connection across resolved endpoints. DNS belongs to a bounded worker.
-/// Unwatch the old handle before advancing; re-register the current handle if still connecting.
+/// Owner-only TCP connection across resolved endpoints; DNS belongs to a bounded worker.
 class BackendDial {
 public:
     using Clock = std::chrono::steady_clock;

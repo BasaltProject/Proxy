@@ -13,8 +13,7 @@ namespace basalt::proxy::runtime {
 
 enum class AdmissionResult { Accepted, GlobalRate, OriginRate, OriginCapacity, InvalidOrigin };
 
-/// Shared admission gate for connection owners. Exhausted origin entries cannot be evicted
-/// before refilling; rotating addresses cannot grow storage past the configured ceiling.
+/// Shared admission gate; rotating addresses cannot grow storage past the configured ceiling.
 class Admission {
 public:
     using Clock = std::chrono::steady_clock;

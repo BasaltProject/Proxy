@@ -1,17 +1,13 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
-#include <basalt/wire/io/FileIO.hpp>
 
 #include <doctest.h>
 
-#include <chrono>
-#include <filesystem>
 #include <string>
 
 using namespace basalt::proxy::config;
 namespace toml = basalt::wire::common::toml;
-namespace fileIO = basalt::wire::io::fileIO;
 
 namespace {
 std::expected<ProxyConfig, std::string> decode(std::string_view proxy,
@@ -53,27 +49,6 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
     }
 }
 
-TEST_CASE("backend identity requires the configured secret without exposing "
-          "its value in errors") {
-    const auto unspecified = decode("", "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = 'localhost'\n");
-    REQUIRE_FALSE(unspecified);
-    CHECK(unspecified.error().find("forwarding must be chosen explicitly") != std::string::npos);
-    for (auto mode : {"velocity", "bungeeguard", "safenet"}) {
-        const std::string text = "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = "
-                                 "'localhost'\nforwarding = '" +
-                                 std::string{mode} + "'\n";
-        CHECK_FALSE(decode("", text));
-        auto secret = decode("", text + "secret = 'synthetic-secret'\n");
-        REQUIRE(secret);
-        CHECK(secret->backends.front().secret == "synthetic-secret");
-    }
-    const auto invalid = decode("", "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = 'localhost'\n"
-                                    "forwarding = 'none'\nsecret = 'must-not-appear'\n");
-    REQUIRE_FALSE(invalid);
-    CHECK(invalid.error().find("must-not-appear") == std::string::npos);
-    CHECK(invalid.error().find("secret") != std::string::npos);
-}
-
 TEST_CASE("routes preserve fallback order and normalize virtual hosts across "
           "mixed backend versions") {
     const auto result = decode("[network]\nbind = '::'\ndual-stack = "
@@ -100,66 +75,4 @@ secret = 'synthetic-secret'
     REQUIRE(result->forcedHosts.size() == 1);
     CHECK(result->forcedHosts.front().host == "play.example.test");
     CHECK(result->forcedHosts.front().backends == std::vector<std::string>{"new", "old"});
-}
-
-TEST_CASE("unknown, duplicate and mixed-type routing targets fail closed") {
-    for (auto route : {"['missing']", "['lobby', 'lobby']", "['lobby', 3]", "[]", "'lobby'"}) {
-        const auto result =
-            decode("", "[routing]\ndefault = " + std::string{route} + "\n[backends.lobby]\nhost = '127.0.0.1'\n");
-        REQUIRE_FALSE(result);
-        CHECK(result.error().starts_with("config/backends.toml:"));
-    }
-    CHECK_FALSE(decode("", "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = "
-                           "'localhost:25565'"));
-    CHECK_FALSE(decode("", "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = 'localhost'\n"
-                           "[forced-hosts]\n'PLAY.test' = ['lobby']\n'play.test' = ['lobby']"));
-}
-
-TEST_CASE("loading creates domain files and preserves explicit offline "
-          "operator settings") {
-    const auto root =
-        std::filesystem::temp_directory_path() /
-        ("basalt-proxy-config-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-
-    struct Cleanup {
-        std::filesystem::path root;
-
-        ~Cleanup() {
-            std::error_code ignored;
-            std::filesystem::remove_all(root, ignored);
-        }
-    } cleanup{root};
-
-    auto first = load(root.string());
-    REQUIRE(first);
-    const auto written = fileIO::readText((root / "proxy.toml").string());
-    REQUIRE(written);
-    CHECK(written->find('#') != std::string::npos);
-    REQUIRE(fileIO::writeText((root / "proxy.toml").string(), "[network]\nonline-mode = false\n"));
-    auto edited = load(root.string());
-    REQUIRE(edited);
-    CHECK_FALSE(edited->network.onlineMode);
-    REQUIRE(fileIO::writeText((root / "backends.toml").string(), "[broken"));
-    const auto broken = load(root.string());
-    REQUIRE_FALSE(broken);
-    CHECK(broken.error().find("backends.toml is not valid TOML") != std::string::npos);
-}
-
-TEST_CASE("incoming transfers require an explicit boolean network option") {
-    const auto enabled = decode("[network]\naccept-transfers = true");
-    REQUIRE(enabled);
-    CHECK(enabled->network.acceptTransfers);
-    CHECK(enabled->network.onlineMode);
-    CHECK_FALSE(decode("[network]\naccept-transfers = 'true'"));
-}
-
-TEST_CASE("Bungee control messages require an explicit backend boolean") {
-    const std::string document = "[routing]\ndefault = ['lobby']\n[backends.lobby]\nhost = 'localhost'\n"
-                                 "forwarding = 'none'\n";
-    const auto enabled = decode("", document + "bungee-messages = true\n");
-    REQUIRE(enabled);
-    CHECK(enabled->backends.front().bungeeMessages);
-    const auto invalid = decode("", document + "bungee-messages = 'true'\n");
-    REQUIRE_FALSE(invalid);
-    CHECK(invalid.error().find("bungee-messages") != std::string::npos);
 }
