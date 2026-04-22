@@ -12,7 +12,15 @@ using namespace basalt::proxy::test;
 using namespace basalt::proxy::runtime::detail;
 
 namespace {
-const std::vector<std::uint8_t> clearedBackendMetadata{2, 0x08, 0, 2, 0x10, 0, 2, 0x11, 0, 1, 0x12};
+constexpr char kBackendMetadata[] = "\x02\x08\x00\x02\x10\x00\x02\x11\x00\x01\x12"
+                                    "\x1e\x01\x0f"
+                                    "minecraft:brand"
+                                    "\x0c"
+                                    "Basalt Proxy"
+                                    "\x14\x0d\x01\x11"
+                                    "minecraft:vanilla";
+const std::vector<std::uint8_t> clearedBackendMetadata{kBackendMetadata,
+                                                       kBackendMetadata + sizeof(kBackendMetadata) - 1};
 
 struct CandidateFixture {
     config::ProxyConfig config = settings();
@@ -243,11 +251,14 @@ TEST_CASE("a session prepares a second backend while its public connection remai
     const std::vector<std::uint8_t> keepalive{9, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99};
     const auto relayActive = [&] {
         REQUIRE(active.write(keepalive));
-        REQUIRE(fixture.read(fixture.client, keepalive.size()) == keepalive);
-        auto reply = keepalive;
+        auto reply = fixture.read(fixture.client, keepalive.size());
+        REQUIRE(reply.size() == keepalive.size());
+        REQUIRE(reply[1] == 0x2d);
         reply[1] = 0x1c;
         REQUIRE(fixture.client.write(reply));
-        REQUIRE(fixture.read(active, reply.size()) == reply);
+        auto expected = keepalive;
+        expected[1] = 0x1c;
+        REQUIRE(fixture.read(active, expected.size()) == expected);
     };
     CHECK_FALSE(session.prepareBackend(0));
     REQUIRE(session.prepareBackend(1));
@@ -298,10 +309,12 @@ TEST_CASE("a session prepares a second backend while its public connection remai
         auto marker = keepalive;
         marker.back() = 100;
         REQUIRE(active.write(marker));
-        REQUIRE(fixture.read(fixture.client, marker.size()) == marker);
+        auto published = fixture.read(fixture.client, marker.size());
+        REQUIRE(published.size() == marker.size());
+        published[1] = 0x1c;
         marker[1] = 0x1c;
         auto late = response;
-        late.insert(late.end(), marker.begin(), marker.end());
+        late.insert(late.end(), published.begin(), published.end());
         REQUIRE(fixture.client.write(late));
         REQUIRE(fixture.read(active, marker.size()) == marker);
         relayActive();
@@ -488,11 +501,14 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         const std::vector<std::uint8_t> keepalive{9, 0x2d, 0, 0, 0,
                                                   0, 0,    0, 0, static_cast<std::uint8_t>(100 + target)};
         REQUIRE(next.write(keepalive));
-        REQUIRE(fixture.read(fixture.client, keepalive.size()) == keepalive);
-        auto response = keepalive;
+        auto response = fixture.read(fixture.client, keepalive.size());
+        REQUIRE(response.size() == keepalive.size());
+        REQUIRE(response[1] == 0x2d);
         response[1] = 0x1c;
         REQUIRE(fixture.client.write(response));
-        REQUIRE(fixture.read(next, response.size()) == response);
+        auto expectedResponse = keepalive;
+        expectedResponse[1] = 0x1c;
+        REQUIRE(fixture.read(next, expectedResponse.size()) == expectedResponse);
         std::vector<std::uint8_t> removal{18, 0x50, 1};
         removal.insert(removal.end(), originalPackId.begin(), originalPackId.end());
         REQUIRE(next.write(removal));
@@ -508,10 +524,14 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         const std::vector<std::uint8_t> removeAll{2, 0x50, 0};
         REQUIRE(next.write(removeAll));
         REQUIRE(fixture.read(fixture.client, removeAll.size()) == removeAll);
+        REQUIRE(next.write(keepalive));
+        response = fixture.read(fixture.client, keepalive.size());
+        REQUIRE(response.size() == keepalive.size());
+        response[1] = 0x1c;
         auto lateRemoval = responseForPack(replacementPack, false, 7);
         lateRemoval.insert(lateRemoval.end(), response.begin(), response.end());
         REQUIRE(fixture.client.write(lateRemoval));
-        REQUIRE(fixture.read(next, response.size()) == response);
+        REQUIRE(fixture.read(next, expectedResponse.size()) == expectedResponse);
         previousPack = publishPack(next, false);
         CHECK(previousPack != replacementPack);
         active = std::move(next);

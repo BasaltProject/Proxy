@@ -42,9 +42,10 @@ public:
     void expectWriteUntil(Clock::time_point deadline);
     void expectReadUntil(Clock::time_point deadline);
     void boundPreparation(Clock::time_point deadline);
+    void retire();
 
     enum class CookieAction { kCached, kRequestClient };
-    enum class Phase { kUnstarted, kLogin, kLoginAccepted, kConfiguration, kPlay };
+    enum class Phase { kUnstarted, kLogin, kLoginAccepted, kConfiguration, kPlay, kRetired };
 
     [[nodiscard]] Phase phase() const { return phase_; }
 
@@ -57,6 +58,8 @@ public:
     [[nodiscard]] BackendAttempt attempt() const { return attempt_; }
 
     [[nodiscard]] bool velocityForwarded() const { return velocityForwarded_; }
+
+    void cancelCookieRequest();
 
     [[nodiscard]] bool hasCookieRequest() const { return cookieKey_.readableBytes() != 0; }
 
@@ -109,6 +112,7 @@ private:
     [[nodiscard]] std::expected<void, BackendLoginError>
     queueCookie(std::string_view key, std::optional<std::span<const std::uint8_t>> payload);
     [[nodiscard]] bool advance(Phase from, Phase to);
+    std::pmr::memory_resource& memory_;
     Clock::time_point preparationDeadline_ = Clock::time_point::max();
     Clock::time_point readDeadline_ = Clock::time_point::max();
     Clock::time_point writeDeadline_ = Clock::time_point::max();

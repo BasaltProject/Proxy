@@ -4,6 +4,7 @@
 #include "CookieCache.hpp"
 #include "IdentityRegistry.hpp"
 #include "PendingCookies.hpp"
+#include "PendingResponses.hpp"
 #include "ResourcePacks.hpp"
 
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
@@ -15,6 +16,7 @@
 #include <basalt/wire/io/TcpSocket.hpp>
 
 #include <array>
+#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -110,11 +112,15 @@ private:
     enum class CookiePublication { kPublished, kUnavailable, kFatal };
     [[nodiscard]] CookiePublication publishCookieRequest(BackendLogin& source);
     [[nodiscard]] bool cookieResponse();
+    [[nodiscard]] bool backendChallenge(bool ping = false);
+    [[nodiscard]] bool challengeResponse(bool pong = false);
     [[nodiscard]] bool backendResourcePack(bool push);
     [[nodiscard]] bool resourcePackResponse();
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
     [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
+    [[nodiscard]] bool recoverBackend();
+    [[nodiscard]] bool recoveryFailed();
     [[nodiscard]] bool route();
     [[nodiscard]] bool routeNext();
     [[nodiscard]] bool candidateReady(const wire::io::IoReady& event);
@@ -134,6 +140,8 @@ private:
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;
     PendingCookies pendingCookies_;
+    PendingResponses pendingKeepAlives_;
+    PendingResponses pendingPings_;
     CookieCache cookieCache_;
     ResourcePacks resourcePacks_;
     IdentityRegistry& identities_;
@@ -172,6 +180,8 @@ private:
     bool startingConfiguration_ = false;
     bool switchingBackend_ = false;
     bool changeWhenPrepared_ = false;
+    bool recovering_ = false;
+    std::bitset<256> recoveryVisited_;
     Clock::time_point connectDeadline_;
     std::array<std::uint8_t, 4> challenge_{};
     std::string name_;

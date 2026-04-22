@@ -13,6 +13,8 @@ constexpr std::size_t kCookiePacketLimit = wire::protocol::cookie::kMaxPayloadBy
 constexpr std::size_t kCookieKeyLimit = 256;
 } // namespace
 
+void BackendLogin::cancelCookieRequest() { cookieKey_.clear(); }
+
 std::expected<void, BackendLoginError> BackendLogin::queueCookie(std::string_view key,
                                                                  std::optional<std::span<const std::uint8_t>> payload) {
     namespace protocol = wire::protocol;

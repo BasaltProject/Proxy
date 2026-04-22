@@ -7,6 +7,10 @@
 
 namespace basalt::proxy::runtime::detail {
 namespace {
+constexpr std::int32_t kPackSuccessfullyLoaded = 0;
+constexpr std::int32_t kPackAccepted = 3;
+constexpr std::int32_t kPackDownloaded = 4;
+
 void replaceUuid(wire::io::ByteBuffer& packet, std::size_t offset, wire::common::Uuid id) {
     auto destination = packet.mutableSpan(offset).first(16);
     std::size_t at = 0;
@@ -58,11 +62,13 @@ bool ClientSession::resourcePackResponse() {
     if (frame_.failed() || frame_.readableBytes() != 0 || action < 0 || action > 7)
         return false;
     const auto origin = resourcePacks_.origin(publicId);
-    if (!origin || !backend() || origin->backend != backend()->attempt())
+    if (!origin || !backend() || recovering_ || origin->backend != backend()->attempt())
         return true;
     replaceUuid(frame_, offset, origin->id);
     if (!backend()->queue(frame_.mutableSpan(0)))
         return false;
+    if (action != kPackSuccessfullyLoaded && action != kPackAccepted && action != kPackDownloaded)
+        (void)resourcePacks_.remove(origin->id, origin->backend);
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
     backpressure();

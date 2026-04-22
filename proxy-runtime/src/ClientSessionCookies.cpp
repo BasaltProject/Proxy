@@ -49,8 +49,13 @@ bool ClientSession::cookieResponse() {
     if (!request)
         return false;
     auto* destination = backendFor(request->backend);
-    if (!destination)
-        return !initial;
+    if (!destination) {
+        if (initial) {
+            state_ = State::kBackendLogin;
+            return route();
+        }
+        return true;
+    }
     if (initial && (destination != candidateBackend_.get() || destination->phase() != BackendLogin::Phase::kLogin))
         return false;
     if (destination->phase() == BackendLogin::Phase::kLogin) {

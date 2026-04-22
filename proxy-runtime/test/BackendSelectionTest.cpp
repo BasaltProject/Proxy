@@ -3,6 +3,7 @@
 #include "../src/BackendDial.hpp"
 #include "../src/BackendLogin.hpp"
 #include "../src/BackendRoutes.hpp"
+#include "../src/PendingResponses.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
@@ -136,4 +137,24 @@ TEST_CASE("backend identity validation preserves login phase on rejection and ve
     }
     CHECK(global.used() == 0);
     CHECK(local.used() == 0);
+}
+
+TEST_CASE("clearing keepalives cannot alias a later backend's token") {
+    io::ResourceBudget global{4096};
+    io::ResourceBudget local{4096};
+    io::BudgetMemoryResource memory{global, local};
+    PendingResponses pending{memory};
+    const auto first = pending.publish(-42, {1, 0});
+    REQUIRE(first);
+    pending.clear();
+    const BackendAttempt replacement{2, 1};
+    const auto second = pending.publish(-42, replacement);
+    REQUIRE(second);
+    CHECK(*first != *second);
+    CHECK_FALSE(pending.consume(*first));
+    const auto origin = pending.consume(*second);
+    REQUIRE(origin);
+    CHECK(origin->token == -42);
+    CHECK(origin->backend == replacement);
+    CHECK_FALSE(pending.consume(*second));
 }

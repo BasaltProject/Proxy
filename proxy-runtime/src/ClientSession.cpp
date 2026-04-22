@@ -14,6 +14,7 @@
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
 #include <algorithm>
@@ -36,12 +37,13 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities)
     : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
-      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), cookieCache_(memory_),
-      resourcePacks_(memory_), identities_(identities), connection_(std::move(connection)), settings_(settings),
-      status_(status), unavailable_(unavailable), online_(online), checkAddress_(checkAddress),
-      acceptTransfers_(acceptTransfers), compressionThreshold_(compressionThreshold), publicKey_(publicKey),
-      authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)),
-      backends_(backends), clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
+      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), pendingKeepAlives_(memory_),
+      pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_), resourcePacks_(memory_), identities_(identities),
+      connection_(std::move(connection)), settings_(settings), status_(status), unavailable_(unavailable),
+      online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
+      compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
+      authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
+      clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
       readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
     buffers.reset();
     allocationReady_ =
@@ -62,7 +64,8 @@ std::string_view ClientSession::playerName() const {
 
 bool ClientSession::accounted() const {
     return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() +
-                                       pendingCookies_.allocated() + cookieCache_.allocated() +
+                                       pendingCookies_.allocated() + pendingKeepAlives_.allocated() +
+                                       pendingPings_.allocated() + cookieCache_.allocated() +
                                        resourcePacks_.allocated() + clientSettings_.capacity() +
                                        (activeBackend_ ? activeBackend_->allocated() : 0) +
                                        (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
@@ -75,6 +78,8 @@ ClientSession::Clock::time_point ClientSession::deadline() const {
     if (!closing_ &&
         (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting))
         result = std::min(result, connectDeadline_);
+    if (!closing_ && recovering_)
+        result = std::min(result, loginDeadline_);
     return closing_ ? result : std::min(result, backendDeadline());
 }
 
@@ -170,6 +175,11 @@ bool ClientSession::packet() {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend() || id < 0 || (state_ == State::kConfiguration && id == kConfigurationAcknowledgedId))
             return false;
+        if (id == (state_ == State::kConfiguration ? protocol::configuration::KeepAlivePacket::kId
+                                                   : protocol::play::PlayKeepAlivePacket::kServerboundId))
+            return challengeResponse();
+        if (id == (state_ == State::kConfiguration ? 0x05 : 0x2d))
+            return challengeResponse(true);
         if (id == (state_ == State::kConfiguration ? 0x02 : 0x16)) {
             const auto result = pluginMessage(false);
             if (result != PluginMessageResult::kRelay)
@@ -190,6 +200,8 @@ bool ClientSession::packet() {
                 return false;
             if (switchingBackend_)
                 return acknowledgePreparedChange();
+            pendingKeepAlives_.clear();
+            pendingPings_.clear();
             startingConfiguration_ = false;
             finishingConfiguration_ = false;
             state_ = State::kConfiguration;
@@ -199,6 +211,8 @@ bool ClientSession::packet() {
                 return false;
             enterPlay = true;
         }
+        if (recovering_)
+            return true;
         if (!backend()->queue(raw))
             return false;
         if (enterConfiguration && !backend()->beginConfiguration())
@@ -206,6 +220,8 @@ bool ClientSession::packet() {
         if (enterConfiguration && clientSettings_.readableBytes() != 0 && !backend()->queue(clientSettings_.readable()))
             return false;
         if (enterPlay) {
+            pendingKeepAlives_.clear();
+            pendingPings_.clear();
             if (!backend()->finishConfiguration())
                 return false;
             if (!activeBackend_)
@@ -439,6 +455,17 @@ bool ClientSession::timedOut(Clock::time_point now) {
         now < backendDeadline())
         return route();
     if (!closing_ && activeBackend_ && state_ == State::kPlay && !startingConfiguration_ &&
+        now < (frontendPaused_ ? Clock::time_point::max() : readDeadline_) && now < writeDeadline_) {
+        if (!recovering_ && now >= activeBackend_->deadline(backendPaused_))
+            return recoverBackend();
+        if (recovering_ && candidateBackend_ && now < loginDeadline_ && now >= candidateBackend_->deadline()) {
+            candidateBackend_.reset();
+            return route();
+        }
+    }
+    if (!closing_ && recovering_ && now >= loginDeadline_)
+        return !startingConfiguration_ && recoveryFailed();
+    if (!closing_ && !recovering_ && activeBackend_ && state_ == State::kPlay && !startingConfiguration_ &&
         (candidateBackend_ || connectionStage_ != ConnectionStage::kIdle) &&
         now < (frontendPaused_ ? Clock::time_point::max() : readDeadline_) && now < writeDeadline_ &&
         now < activeBackend_->deadline(backendPaused_)) {
@@ -463,6 +490,8 @@ void ClientSession::cancelConnectionAttempt() {
 bool ClientSession::route() {
     if (routeNext())
         return true;
+    if (recovering_)
+        return recoveryFailed();
     if (activeBackend_ && state_ == State::kPlay && !closing_) {
         discardCandidate();
         return true;
@@ -488,7 +517,11 @@ bool ClientSession::routeNext() {
         }
         identityClaimed_ = true;
     }
+    while (recovering_ && nextTarget_ < targets_.size() && recoveryVisited_.test(targets_[nextTarget_]))
+        ++nextTarget_;
     if (nextTarget_ == targets_.size()) {
+        if (recovering_)
+            return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {
             discardCandidate();
             return true;
@@ -503,7 +536,10 @@ bool ClientSession::routeNext() {
     resolutionLocal_ = localBuffers_.acquire(kResolutionBytes);
     if (!resolutionLocal_)
         return false;
-    auto attempt = attempts_.begin(targets_[nextTarget_++]);
+    const auto target = targets_[nextTarget_++];
+    if (recovering_)
+        recoveryVisited_.set(target);
+    auto attempt = attempts_.begin(target);
     if (!attempt)
         return false;
     resolution_ = resolve_(*attempt, connectDeadline_);
@@ -559,6 +595,8 @@ bool ClientSession::dial() {
     dialAttempt_.reset();
     if (!profile_ || !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_,
                                                virtualPort_, connection_.remoteAddress())) {
+        if (recovering_)
+            return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {
             discardCandidate();
             return true;
@@ -582,7 +620,7 @@ BackendLogin* ClientSession::backend() const {
 
 BackendLogin* ClientSession::backendFor(BackendAttempt attempt) const {
     for (auto* endpoint : {activeBackend_.get(), candidateBackend_.get()})
-        if (endpoint && endpoint->attempt() == attempt)
+        if (endpoint && !(recovering_ && endpoint == activeBackend_.get()) && endpoint->attempt() == attempt)
             return endpoint;
     return nullptr;
 }
@@ -591,7 +629,7 @@ ClientSession::Clock::time_point ClientSession::backendDeadline() const {
     auto result = Clock::time_point::max();
     const std::array endpoints{activeBackend_.get(), candidateBackend_.get()};
     for (const auto* endpoint : endpoints)
-        if (endpoint)
+        if (endpoint && !(recovering_ && endpoint == activeBackend_.get()))
             result = std::min(result, endpoint->deadline(endpoint == backend() && backendPaused_));
     return result;
 }

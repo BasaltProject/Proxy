@@ -158,8 +158,10 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
 
     const std::vector<std::uint8_t> configuration{3, 0, 15, 0, 10, 0, 4, 0, 0, 0, 0, 0, 0, 0, 42};
     REQUIRE(backend->write(configuration));
-    const std::vector<std::uint8_t> frontendConfiguration{2, 15, 0, 9, 4, 0, 0, 0, 0, 0, 0, 0, 42};
-    CHECK(receive(client, frontendConfiguration.size()) == frontendConfiguration);
+    const std::array<std::uint8_t, 5> configurationPrefix{2, 15, 0, 9, 4};
+    const auto frontendConfiguration = receive(client, 13);
+    REQUIRE(frontendConfiguration.size() == 13);
+    CHECK(std::equal(configurationPrefix.begin(), configurationPrefix.end(), frontendConfiguration.begin()));
     const std::array<std::uint8_t, 3> knownPacks{2, 7, 0};
     REQUIRE(client.write(knownPacks));
     CHECK(receive(*backend, 4) == std::vector<std::uint8_t>{3, 0, 7, 0});
@@ -187,8 +189,10 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 3});
     const std::vector<std::uint8_t> playKeepAlive{10, 0, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99};
     REQUIRE(backend->write(playKeepAlive));
-    CHECK(receive(client, 10) == std::vector<std::uint8_t>{9, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99});
-    const std::vector<std::uint8_t> keepAliveResponse{9, 0x1c, 0, 0, 0, 0, 0, 0, 0, 99};
+    auto keepAliveResponse = receive(client, 10);
+    REQUIRE(keepAliveResponse.size() == 10);
+    REQUIRE(keepAliveResponse[1] == 0x2d);
+    keepAliveResponse[1] = 0x1c;
     REQUIRE(client.write(keepAliveResponse));
     CHECK(receive(*backend, 11) == std::vector<std::uint8_t>{10, 0, 0x1c, 0, 0, 0, 0, 0, 0, 0, 99});
     if (prematureReconfigurationAck) {
@@ -222,13 +226,18 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
         }
         REQUIRE(client.write(std::array<std::uint8_t, 2>{1, 0x10}));
         CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 0x10});
-        CHECK(receive(client, frontendConfiguration.size()) == frontendConfiguration);
+        const auto reconfigured = receive(client, frontendConfiguration.size());
+        REQUIRE(reconfigured.size() == frontendConfiguration.size());
+        CHECK(std::equal(configurationPrefix.begin(), configurationPrefix.end(), reconfigured.begin()));
+        CHECK_FALSE(std::equal(reconfigured.end() - 8, reconfigured.end(), frontendConfiguration.end() - 8));
         REQUIRE(backend->write(finishConfiguration));
         CHECK(receive(client, 2) == std::vector<std::uint8_t>{1, 3});
         REQUIRE(client.write(ack));
         CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 3});
         REQUIRE(backend->write(playKeepAlive));
-        CHECK(receive(client, 10) == std::vector<std::uint8_t>{9, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99});
+        const auto published = receive(client, 10);
+        REQUIRE(published.size() == 10);
+        CHECK(published[1] == 0x2d);
     }
     const std::vector<std::uint8_t> disconnect{8, 0, 0x20, 8, 0, 3, 'b', 'y', 'e'};
     REQUIRE(backend->write(disconnect));
