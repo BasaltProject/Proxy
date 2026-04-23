@@ -38,8 +38,8 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
                              const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
-                             const NativeForwarding* nativeForwarding)
-    : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
+                             const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology)
+    : topology_(std::move(topology)), slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
       memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), pendingKeepAlives_(memory_),
       pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_), resourcePacks_(memory_), identities_(identities),
       nativeForwarding_(nativeForwarding), connection_(std::move(connection)), settings_(settings), status_(status),

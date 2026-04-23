@@ -10,7 +10,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                                                  std::string_view directory) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
-    reader.keys(&proxy, {"network", "runtime", "admission", "forwarding", "translation"}, "");
+    reader.keys(&proxy, {"network", "runtime", "admission", "forwarding", "logging", "translation"}, "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
                 {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
@@ -75,6 +75,35 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("forwarding.proxy-id", "must contain 1..64 bytes");
     if (result.forwarding.keyFile.empty() || result.forwarding.keyFile.size() > 4096)
         reader.fail("forwarding.key-file", "must be a path of 1..4096 bytes");
+
+    const auto* logging = reader.child(proxy, "logging");
+    reader.keys(logging, {"level", "file", "keep-days", "color"}, "logging.");
+    std::string level = "info";
+    std::string color = "auto";
+    reader.scalar(logging, "level", level, "logging.");
+    reader.scalar(logging, "file", result.logging.file, "logging.");
+    reader.integer(logging, "keep-days", result.logging.keepDays, 0, 3650, "logging.");
+    reader.scalar(logging, "color", color, "logging.");
+    if (level == "trace")
+        result.logging.level = wire::common::LogLevel::Trace;
+    else if (level == "debug")
+        result.logging.level = wire::common::LogLevel::Debug;
+    else if (level == "info")
+        result.logging.level = wire::common::LogLevel::Info;
+    else if (level == "warn")
+        result.logging.level = wire::common::LogLevel::Warn;
+    else if (level == "error")
+        result.logging.level = wire::common::LogLevel::Error;
+    else
+        reader.fail("logging.level", "must be trace, debug, info, warn or error");
+    if (color == "auto")
+        result.logging.color = ColorMode::Auto;
+    else if (color == "always")
+        result.logging.color = ColorMode::Always;
+    else if (color == "never")
+        result.logging.color = ColorMode::Never;
+    else
+        reader.fail("logging.color", "must be auto, always or never");
 
     const auto* translation = reader.child(proxy, "translation");
     reader.keys(translation, {"mode"}, "translation.");

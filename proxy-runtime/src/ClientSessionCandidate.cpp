@@ -1,4 +1,5 @@
 #include "BackendLogin.hpp"
+#include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -32,6 +33,11 @@ bool ClientSession::requestBackendChange(std::size_t target) {
         return false;
     changeWhenPrepared_ = true;
     return true;
+}
+
+bool ClientSession::requestBackendChange(std::string_view backend) {
+    const auto target = routes_.named(backend);
+    return target && requestBackendChange(*target);
 }
 
 bool ClientSession::advancePreparedChange() {

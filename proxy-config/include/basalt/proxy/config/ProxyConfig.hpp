@@ -1,6 +1,7 @@
 #pragma once
 
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
+#include <basalt/wire/common/logging/LogLevel.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@ class TomlTable;
 namespace basalt::proxy::config {
 
 enum class TranslationMode { Auto, Proxy, Off };
+enum class ColorMode { Auto, Always, Never };
 
 struct NetworkConfig {
     std::string bind = "0.0.0.0";
@@ -25,6 +27,8 @@ struct NetworkConfig {
     bool acceptTransfers = false;
     bool preventClientProxyConnections = false;
     std::int32_t compressionThreshold = 256;
+
+    friend bool operator==(const NetworkConfig&, const NetworkConfig&) = default;
 };
 
 struct RuntimeConfig {
@@ -41,6 +45,8 @@ struct RuntimeConfig {
     std::uint32_t connectTimeoutMs = 10000;
     std::uint32_t readTimeoutMs = 30000;
     std::uint32_t writeTimeoutMs = 10000;
+
+    friend bool operator==(const RuntimeConfig&, const RuntimeConfig&) = default;
 };
 
 struct AdmissionConfig {
@@ -50,11 +56,24 @@ struct AdmissionConfig {
     std::uint32_t originBurst = 20;
     std::size_t maxOrigins = 65536;
     std::uint32_t originExpiryMs = 60000;
+
+    friend bool operator==(const AdmissionConfig&, const AdmissionConfig&) = default;
 };
 
 struct ForwardingConfig {
     std::string proxyId = "proxy";
     std::string keyFile = ".basalt/forwarding.key";
+
+    friend bool operator==(const ForwardingConfig&, const ForwardingConfig&) = default;
+};
+
+struct LoggingConfig {
+    wire::common::LogLevel level = wire::common::LogLevel::Info;
+    bool file = true;
+    std::int32_t keepDays = 14;
+    ColorMode color = ColorMode::Auto;
+
+    friend bool operator==(const LoggingConfig&, const LoggingConfig&) = default;
 };
 
 struct BackendConfig {
@@ -78,6 +97,7 @@ struct ProxyConfig {
     RuntimeConfig runtime;
     AdmissionConfig admission;
     ForwardingConfig forwarding;
+    LoggingConfig logging;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;

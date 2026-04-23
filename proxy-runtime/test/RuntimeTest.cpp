@@ -155,5 +155,26 @@ TEST_CASE("online key exchange runs session lookup on a worker and encrypts subs
     REQUIRE(decrypt);
     decrypt->decrypt(response);
     CHECK(fetched.load());
-    CHECK(std::string(response.begin(), response.end()).find("Player routing is unavailable") != std::string::npos);
+    CHECK(std::string(response.begin(), response.end()).find("No server is available right now") != std::string::npos);
+}
+
+TEST_CASE("reload swaps backends and routes together and refuses fixed settings") {
+    auto config = settings();
+    config.backends = {{.name = "a", .host = "127.0.0.1", .port = 1, .forwarding = {}}};
+    config.defaultRoute = {"a"};
+    Running proxy{config};
+    CHECK(proxy.runtime.backendNames() == std::vector<std::string>{"a"});
+
+    auto fresh = config;
+    fresh.backends.push_back({.name = "b", .host = "127.0.0.1", .port = 2, .forwarding = {}});
+    REQUIRE(proxy.runtime.reload(fresh) == 2);
+    CHECK(proxy.runtime.backendNames() == std::vector<std::string>{"a", "b"});
+
+    auto broken = fresh;
+    broken.defaultRoute = {"missing"};
+    CHECK_FALSE(proxy.runtime.reload(broken));
+    auto moved = fresh;
+    moved.network.compressionThreshold = 1;
+    CHECK_FALSE(proxy.runtime.reload(moved));
+    CHECK(proxy.runtime.backendNames() == std::vector<std::string>{"a", "b"});
 }

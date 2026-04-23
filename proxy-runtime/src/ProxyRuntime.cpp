@@ -31,6 +31,13 @@
 
 namespace basalt::proxy::runtime {
 namespace {
+struct Topology {
+    std::vector<config::BackendConfig> backends;
+    detail::BackendRoutes routes;
+};
+} // namespace
+
+namespace {
 using Session = detail::ClientSession;
 using Clock = Session::Clock;
 using wire::io::ResourceBudget;
@@ -97,6 +104,7 @@ struct ProxyRuntime::Impl {
             const auto id = runtime.nextId.fetch_add(1);
             if (id == 0)
                 throw std::runtime_error("session identity exhausted");
+            const auto snapshot = runtime.topology.load();
             auto session = std::make_unique<Session>(
                 std::move(incoming->connection), std::move(incoming->slot), std::move(incoming->buffers),
                 runtime.config.runtime, runtime.status, runtime.unavailable, incoming->acceptedAt,
@@ -104,13 +112,13 @@ struct ProxyRuntime::Impl {
                 runtime.key ? runtime.key->publicKeyDer() : std::span<const std::uint8_t>{},
                 runtime.authenticationFailure,
                 [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
-                runtime.routes,
-                [this, id](detail::BackendAttempt attempt, Clock::time_point deadline) {
-                    return resolve(id, attempt, deadline);
+                snapshot->routes,
+                [this, id, snapshot](detail::BackendAttempt attempt, Clock::time_point deadline) {
+                    return resolve(id, attempt, deadline, snapshot);
                 },
-                runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold,
+                snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
                 runtime.config.network.acceptTransfers, runtime.identities,
-                runtime.nativeForwarding ? &*runtime.nativeForwarding : nullptr);
+                runtime.nativeForwarding ? &*runtime.nativeForwarding : nullptr, snapshot);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -216,16 +224,17 @@ struct ProxyRuntime::Impl {
         }
 
         std::optional<std::stop_source> resolve(std::uint64_t id, detail::BackendAttempt attempt,
-                                                Clock::time_point deadline) {
-            if (!runtime.workers || attempt.target >= runtime.config.backends.size())
+                                                Clock::time_point deadline,
+                                                const std::shared_ptr<const Topology>& snapshot) {
+            if (!runtime.workers || attempt.target >= snapshot->backends.size())
                 return std::nullopt;
             auto storage = runtime.buffers.acquire(Session::kResolutionBytes);
             if (!storage)
                 return std::nullopt;
             auto reply = std::make_shared<ResolutionReply>(ResolutionReply{std::move(*storage), {}});
             auto submitted = runtime.workers->submit(
-                [this, id, attempt, deadline, reply](std::stop_token stop) {
-                    const auto& backend = runtime.config.backends[attempt.target];
+                [this, id, attempt, deadline, reply, snapshot](std::stop_token stop) {
+                    const auto& backend = snapshot->backends[attempt.target];
                     const wire::io::DnsOptions options{deadline, stop, {}};
                     auto addresses = runtime.services.resolution
                                          ? runtime.services.resolution(backend.host, backend.port, options)
@@ -250,13 +259,18 @@ struct ProxyRuntime::Impl {
                     throw std::runtime_error("listener accept failed");
                 }
                 const auto now = Clock::now();
-                if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted)
+                if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted) {
+                    runtime.rejected.fetch_add(1, std::memory_order_relaxed);
                     continue;
+                }
                 auto slot = runtime.slots.acquire(1);
                 auto allocation = runtime.buffers.acquire(Session::kBufferBytes);
                 auto handoff = runtime.handoffs.acquire(1);
-                if (!slot || !allocation || !handoff || !connection->setNonBlocking())
+                if (!slot || !allocation || !handoff || !connection->setNonBlocking()) {
+                    runtime.rejected.fetch_add(1, std::memory_order_relaxed);
                     continue;
+                }
+                runtime.accepted.fetch_add(1, std::memory_order_relaxed);
                 auto incoming = std::make_shared<Incoming>(Incoming{std::move(*slot), std::move(*allocation),
                                                                     std::move(*handoff), std::move(*connection), now});
                 auto& target = *runtime.owners[runtime.nextOwner++ % runtime.owners.size()];
@@ -343,7 +357,7 @@ struct ProxyRuntime::Impl {
     };
 
     config::ProxyConfig config;
-    detail::BackendRoutes routes;
+    std::atomic<std::shared_ptr<const Topology>> topology;
     Admission admission;
     ResourceBudget slots;
     ResourceBudget buffers;
@@ -367,6 +381,8 @@ struct ProxyRuntime::Impl {
     std::atomic<bool> failed{false};
     std::atomic<bool> started{false};
     std::atomic<std::uint64_t> nextId{1};
+    std::atomic<std::uint64_t> accepted{0};
+    std::atomic<std::uint64_t> rejected{0};
     std::size_t nextOwner = 0;
 
     explicit Impl(config::ProxyConfig settings)
@@ -417,7 +433,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         auto routes = detail::BackendRoutes::create(impl->config);
         if (!routes)
             return std::unexpected(routes.error());
-        impl->routes = std::move(*routes);
+        impl->topology.store(std::make_shared<const Topology>(Topology{impl->config.backends, std::move(*routes)}));
         impl->services = std::move(services);
         if (impl->config.network.onlineMode) {
             impl->key = wire::auth::SessionKeyPair::generate();
@@ -456,7 +472,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         frame.clear();
         protocol::varInt::write(packet, protocol::login::LoginDisconnectPacket::kId);
         protocol::login::LoginDisconnectPacket{
-            wire::text::Component::text("Player routing is unavailable in this build.")}
+            wire::text::Component::text("No server is available right now. Please try again shortly.")}
             .write(packet);
         if (!protocol::packetFraming::writeUncompressed(frame, packet.readable()))
             return std::unexpected("login rejection encoding failed");
@@ -522,8 +538,7 @@ std::expected<BackendChangeRequest, BackendChangeError> ProxyRuntime::sendPlayer
         return std::unexpected(BackendChangeError::kNotRunning);
     if (!wire::auth::validLoginName(player))
         return std::unexpected(BackendChangeError::kInvalidPlayer);
-    const auto target = std::ranges::find(impl_->config.backends, backend, &config::BackendConfig::name);
-    if (target == impl_->config.backends.end())
+    if (!impl_->topology.load()->routes.named(backend))
         return std::unexpected(BackendChangeError::kUnknownBackend);
     auto control = impl_->controls.acquire(1);
     auto storage = impl_->buffers.acquire(1024 + impl_->owners.size() * 128);
@@ -531,7 +546,7 @@ std::expected<BackendChangeRequest, BackendChangeError> ProxyRuntime::sendPlayer
         return std::unexpected(BackendChangeError::kBusy);
     auto request = std::make_shared<detail::BackendChangeState>(std::move(*control), std::move(*storage));
     request->player = player;
-    request->target = static_cast<std::size_t>(target - impl_->config.backends.begin());
+    request->backend = backend;
     request->remaining.store(impl_->owners.size(), std::memory_order_relaxed);
     request->stopped = impl_->controlStopped;
     std::lock_guard publication{request->publication};
@@ -548,7 +563,7 @@ std::expected<BackendChangeRequest, BackendChangeError> ProxyRuntime::sendPlayer
                         continue;
                     if (request->claimed.exchange(true, std::memory_order_relaxed))
                         break;
-                    const bool accepted = session->requestBackendChange(request->target);
+                    const bool accepted = session->requestBackendChange(request->backend);
                     auto result = accepted ? BackendChangeResult::kAccepted : BackendChangeResult::kUnavailable;
                     if (accepted && !destination->refresh(id, *session)) {
                         destination->close(id);
@@ -566,7 +581,49 @@ std::expected<BackendChangeRequest, BackendChangeError> ProxyRuntime::sendPlayer
     return BackendChangeRequest{std::move(request)};
 }
 
+std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig fresh) {
+    const auto& current = impl_->config;
+    std::string fixed;
+    const auto compare = [&fixed](bool same, std::string_view section) {
+        if (!same)
+            fixed += (fixed.empty() ? "" : ", ") + std::string{section};
+    };
+    compare(current.network == fresh.network, "[network]");
+    compare(current.runtime == fresh.runtime, "[runtime]");
+    compare(current.admission == fresh.admission, "[admission]");
+    compare(current.forwarding == fresh.forwarding, "[forwarding]");
+    compare(current.logging == fresh.logging, "[logging]");
+    compare(current.translation == fresh.translation, "[translation]");
+    if (!fixed.empty())
+        return std::unexpected("changing " + fixed + " requires a restart");
+    if (!impl_->nativeForwarding && std::ranges::any_of(fresh.backends, [](const config::BackendConfig& backend) {
+            return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+        }))
+        return std::unexpected("a basalt backend needs a restart so its forwarding key is loaded");
+    auto routes = detail::BackendRoutes::create(fresh);
+    if (!routes)
+        return std::unexpected(routes.error());
+    const auto count = fresh.backends.size();
+    impl_->topology.store(std::make_shared<const Topology>(Topology{std::move(fresh.backends), std::move(*routes)}));
+    return count;
+}
+
+std::vector<std::string> ProxyRuntime::backendNames() const {
+    std::vector<std::string> names;
+    for (const auto& backend : impl_->topology.load()->backends)
+        names.push_back(backend.name);
+    return names;
+}
+
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }
+
+std::uint64_t ProxyRuntime::acceptedConnections() const noexcept {
+    return impl_->accepted.load(std::memory_order_relaxed);
+}
+
+std::uint64_t ProxyRuntime::rejectedConnections() const noexcept {
+    return impl_->rejected.load(std::memory_order_relaxed);
+}
 
 std::size_t ProxyRuntime::sessionCount() const noexcept { return impl_->slots.used(); }
 

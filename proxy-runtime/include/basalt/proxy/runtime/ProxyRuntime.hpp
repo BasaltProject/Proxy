@@ -43,10 +43,17 @@ public:
     /// Thread-safe; matches the verified name exactly. Ticket retains bounded resources until released.
     [[nodiscard]] std::expected<BackendChangeRequest, BackendChangeError> sendPlayer(std::string_view player,
                                                                                      std::string_view backend);
+    /// Thread-safe. Validates everything first, then swaps backends, routes and forced hosts atomically.
+    /// Sessions keep the snapshot they started with; fixed settings (network, limits, forwarding) need a restart.
+    [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
+    [[nodiscard]] std::vector<std::string> backendNames() const;
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;
     [[nodiscard]] std::size_t bufferedBytes() const noexcept;
+    /// Connections admitted to a session owner, and those turned away by rate limits or exhausted budgets.
+    [[nodiscard]] std::uint64_t acceptedConnections() const noexcept;
+    [[nodiscard]] std::uint64_t rejectedConnections() const noexcept;
 
 private:
     struct Impl;

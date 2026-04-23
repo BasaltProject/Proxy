@@ -53,6 +53,16 @@ origin-expiry-ms = 60000
 proxy-id = "proxy"
 key-file = ".basalt/forwarding.key"
 
+[logging]
+# One of: trace, debug, info, warn, error.
+level = "info"
+# Mirror the console into .basalt/logs/latest.log, archiving the previous run as .basalt/logs/archive/<date>-<n>.log.gz.
+file = true
+# How many days of archived logs to keep. 0 keeps them forever.
+keep-days = 14
+# Colour the console output: auto (only on a terminal), always or never.
+color = "auto"
+
 [translation]
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.
