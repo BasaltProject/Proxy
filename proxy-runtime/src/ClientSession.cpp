@@ -61,6 +61,16 @@ ClientSession::~ClientSession() {
         authentication_->request_stop();
 }
 
+bool ClientSession::inPlay() const {
+    return state_ == State::kPlay && activeBackend_ && !recovering_ && !closing_ && profile_;
+}
+
+std::string_view ClientSession::activeBackendName() const {
+    return activeBackend_ && activeBackend_->attempt().target < backends_.size()
+               ? std::string_view{backends_[activeBackend_->attempt().target].name}
+               : std::string_view{};
+}
+
 std::string_view ClientSession::playerName() const {
     return profile_ ? std::string_view{profile_->name} : std::string_view{};
 }

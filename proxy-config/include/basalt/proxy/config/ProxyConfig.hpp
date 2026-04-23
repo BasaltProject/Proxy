@@ -76,6 +76,17 @@ struct LoggingConfig {
     friend bool operator==(const LoggingConfig&, const LoggingConfig&) = default;
 };
 
+struct PluginsConfig {
+    bool enabled = false;
+    std::string directory = "plugins";
+    std::string database = ".basalt/proxy.db";
+    std::int64_t instructionsPerTurn = 250000;
+    std::size_t memoryMib = 32;
+    std::size_t queueSize = 256;
+
+    friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
+};
+
 struct BackendConfig {
     bool bungeeMessages = false;
     std::string name;
@@ -98,6 +109,7 @@ struct ProxyConfig {
     AdmissionConfig admission;
     ForwardingConfig forwarding;
     LoggingConfig logging;
+    PluginsConfig plugins;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;
@@ -106,9 +118,11 @@ struct ProxyConfig {
 
 [[nodiscard]] std::string_view defaultProxyToml() noexcept;
 [[nodiscard]] std::string_view defaultBackendsToml() noexcept;
+[[nodiscard]] std::string_view defaultPluginsToml() noexcept;
 [[nodiscard]] std::expected<ProxyConfig, std::string> fromToml(const wire::common::toml::TomlTable& proxy,
                                                                const wire::common::toml::TomlTable& backends,
-                                                               std::string_view directory);
+                                                               std::string_view directory,
+                                                               const wire::common::toml::TomlTable* plugins = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 } // namespace basalt::proxy::config

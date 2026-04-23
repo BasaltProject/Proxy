@@ -70,6 +70,20 @@ mode = "auto"
 )";
 }
 
+std::string_view defaultPluginsToml() noexcept {
+    return R"(# Lua plugins, one folder per plugin under directory, each with a main.lua. Off by default.
+enabled = false
+directory = "plugins"
+# The proxy's own SQLite file for plugin data. It is state, not configuration, and is never shared with a server.
+database = ".basalt/proxy.db"
+# Instruction budget for one run of a plugin handler, and the ceiling for one plugin's Lua memory.
+instructions-per-turn = 250000
+memory-mib = 32
+# Events waiting for the plugin thread. A full queue drops the newest event and counts it.
+queue-size = 256
+)";
+}
+
 std::string_view defaultBackendsToml() noexcept {
     return R"(# Ordered routing targets. Names must refer to entries in [backends].
 [routing]

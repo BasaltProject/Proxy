@@ -38,3 +38,4 @@ add_subdirectory(wire)
 
 add_subdirectory(proxy-config)
 add_subdirectory(proxy-runtime)
+add_subdirectory(proxy-plugins)

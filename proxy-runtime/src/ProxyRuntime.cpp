@@ -89,6 +89,9 @@ struct ProxyRuntime::Impl {
             const auto found = sessions.find(id);
             if (found == sessions.end())
                 return;
+            if (found->second->announced && runtime.services.playerEvents)
+                runtime.services.playerEvents({PlayerEventKind::kLeave, std::string{found->second->playerName()},
+                                               found->second->announcedBackend});
             loop.unwatch(found->second->handle());
             unwatchBackends(*found->second);
             (void)timers.cancel(found->second->timer);
@@ -177,7 +180,24 @@ struct ProxyRuntime::Impl {
             return *submitted;
         }
 
+        void announce(Session& session) {
+            if (!runtime.services.playerEvents || !session.inPlay())
+                return;
+            const auto backend = session.activeBackendName();
+            if (!session.announced) {
+                session.announced = true;
+                session.announcedBackend = backend;
+                runtime.services.playerEvents(
+                    {PlayerEventKind::kJoin, std::string{session.playerName()}, session.announcedBackend});
+            } else if (backend != session.announcedBackend) {
+                session.announcedBackend = backend;
+                runtime.services.playerEvents(
+                    {PlayerEventKind::kSwitch, std::string{session.playerName()}, session.announcedBackend});
+            }
+        }
+
         bool refresh(std::uint64_t id, Session& session) {
+            announce(session);
             if (session.frontendSuspended())
                 loop.unwatch(session.handle());
             else if (!loop.watch(session.handle(), session.interest(), id))
@@ -593,6 +613,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.admission == fresh.admission, "[admission]");
     compare(current.forwarding == fresh.forwarding, "[forwarding]");
     compare(current.logging == fresh.logging, "[logging]");
+    compare(current.plugins == fresh.plugins, "plugins.toml");
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
         return std::unexpected("changing " + fixed + " requires a restart");

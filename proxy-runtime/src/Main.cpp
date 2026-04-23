@@ -1,6 +1,7 @@
 #include "Console.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
@@ -15,6 +16,7 @@
 #include <csignal>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -83,7 +85,13 @@ int run(const cliCommand::Run& command) {
     logger.info([&configuration] {
         return "Configuration validated: " + std::to_string(configuration->backends.size()) + " backend(s).";
     });
-    auto runtime = ProxyRuntime::create(*configuration);
+    std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
+    RuntimeServices services;
+    services.playerEvents = [&pluginHost](PlayerEvent event) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post(std::move(event));
+    };
+    auto runtime = ProxyRuntime::create(*configuration, std::move(services));
     if (!runtime) {
         logger.error([&runtime] { return runtime.error(); });
         return 1;
@@ -104,6 +112,31 @@ int run(const cliCommand::Run& command) {
             return "Reload rejected, nothing changed: " + applied.error();
         return "Reloaded " + std::to_string(*applied) + " backend(s); sessions in progress keep their snapshot.";
     };
+    std::unique_ptr<proxy::plugins::PluginHost> plugins;
+    if (configuration->plugins.enabled) {
+        proxy::plugins::PluginSettings settings;
+        settings.directory = configuration->plugins.directory;
+        settings.database = configuration->plugins.database;
+        settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
+        settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
+        settings.queueSize = configuration->plugins.queueSize;
+        proxy::plugins::PluginHooks hooks;
+        hooks.servers = [&runtime] { return runtime->backendNames(); };
+        hooks.send = [&runtime](std::string_view player, std::string_view backend) {
+            return runtime->sendPlayer(player, backend).has_value();
+        };
+        hooks.log = [](std::string_view plugin, std::string_view line) {
+            wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
+        };
+        auto started = proxy::plugins::PluginHost::start(std::move(settings), std::move(hooks));
+        if (!started) {
+            logger.error([&started] { return started.error(); });
+            return 1;
+        }
+        plugins = std::move(*started);
+        pluginHost.store(plugins.get(), std::memory_order_release);
+        logger.info([&plugins] { return "Loaded " + std::to_string(plugins->loaded()) + " plugin(s)."; });
+    }
     std::stop_source stopping;
 #if !defined(_WIN32)
     const auto oldReload = std::signal(SIGHUP, reloadSignal);
@@ -122,11 +155,17 @@ int run(const cliCommand::Run& command) {
         return std::string{"Proxy is under development; only verified protocol/backend combinations are supported."};
     });
     std::jthread console{[&](std::stop_token stop) {
-        detail::runConsole(*runtime, configuration->backends, stopping, stop, reloadConfiguration);
+        detail::runConsole(*runtime, configuration->backends, stopping, stop, reloadConfiguration,
+                           [&pluginHost](std::string_view line) {
+                               auto* host = pluginHost.load(std::memory_order_acquire);
+                               return host != nullptr && host->command(line);
+                           });
     }};
     const auto result = runtime->run(stopping.get_token());
     console.request_stop();
     console.join();
+    pluginHost.store(nullptr, std::memory_order_release);
+    plugins.reset();
     signals.request_stop();
     signals.join();
     std::signal(SIGINT, oldInterrupt);

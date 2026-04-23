@@ -21,8 +21,10 @@ struct ConsoleReply {
 
 [[nodiscard]] ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
                                           const std::vector<config::BackendConfig>& backends, std::stop_token stop,
-                                          const std::function<std::string()>& reload = {});
+                                          const std::function<std::string()>& reload = {},
+                                          const std::function<bool(std::string_view)>& pluginCommand = {});
 void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>& backends, std::stop_source& stopping,
-                std::stop_token stop, const std::function<std::string()>& reload = {});
+                std::stop_token stop, const std::function<std::string()>& reload = {},
+                const std::function<bool(std::string_view)>& pluginCommand = {});
 } // namespace detail
 } // namespace basalt::proxy::runtime
