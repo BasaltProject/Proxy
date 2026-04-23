@@ -4,6 +4,7 @@
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -23,6 +24,18 @@ namespace {
 constexpr std::int32_t kConfigurationDisconnectId = 2;
 constexpr std::int32_t kStartConfigurationId = 0x78;
 } // namespace
+
+bool ClientSession::answerKnownPacks() {
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, wire::protocol::configuration::SelectKnownPacksPacket::kServerboundId);
+    wire::protocol::configuration::SelectKnownPacksPacket{}.write(frame_);
+    if (!backend()->queue(frame_.readable()))
+        return false;
+    backpressure();
+    backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+    return true;
+}
 
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
     return backendEvent(event) && advancePreparedChange();
@@ -130,6 +143,10 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         } else if (state_ == State::kConfiguration && finishingConfiguration_) {
             return false;
         }
+        if (state_ == State::kConfiguration && translation_ &&
+            clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5 &&
+            id == wire::protocol::configuration::SelectKnownPacksPacket::kClientboundId)
+            return answerKnownPacks();
         if (id == (state_ == State::kConfiguration ? 0x01 : 0x18)) {
             const auto result = pluginMessage(true);
             if (result != PluginMessageResult::kRelay) {
@@ -160,6 +177,9 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         if (!queuePacket(*packet))
             return false;
         backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+        if (legacyClient() && state_ == State::kConfiguration && finishingConfiguration_ &&
+            id == wire::protocol::configuration::kFinishConfigurationId)
+            return synthesizeClientPacket(wire::protocol::configuration::kFinishConfigurationId);
         if (terminal) {
             closing_ = true;
             closeBackends();
@@ -186,6 +206,8 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         if (!queuePacket(frame_.readable()))
             return false;
         state_ = State::kLoginAck;
+        if (legacyClient())
+            return synthesizeClientPacket(wire::protocol::login::kLoginAcknowledgedId);
         return true;
     }
     if (id == wire::protocol::login::LoginPluginRequestPacket::kId) {

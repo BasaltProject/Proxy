@@ -1,5 +1,7 @@
 #include "BackendLogin.hpp"
+
 #include "NativeForwarding.hpp"
+#include "RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
@@ -30,7 +32,7 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     namespace protocol = wire::protocol;
     if (!allocationReady_)
         return std::unexpected(BackendLoginError::kLimit);
-    if (phase_ != Phase::kUnstarted || backend.protocol != buildInfo::kProtocolVersion ||
+    if (phase_ != Phase::kUnstarted || !resolveRoute(buildInfo::kProtocolVersion, backend.protocol) ||
         (backend.forwarding != wire::auth::forwarding::ForwardingMode::None &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Velocity &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Basalt &&

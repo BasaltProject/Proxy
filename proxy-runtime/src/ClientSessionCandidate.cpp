@@ -53,16 +53,19 @@ bool ClientSession::beginPreparedChange() {
         return false;
     startingConfiguration_ = true;
     switchingBackend_ = true;
-    return true;
+    constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
+    return !legacyClient() || synthesizeClientPacket(kConfigurationAcknowledgedId);
 }
 
 bool ClientSession::acknowledgePreparedChange() {
-    if (!switchingBackend_ || !startingConfiguration_ || !candidatePrepared() || output_.readableBytes() != 0)
+    if (!switchingBackend_ || !startingConfiguration_ || !candidatePrepared() ||
+        (output_.readableBytes() != 0 && !synthesizing_))
         return false;
     constexpr std::array<std::uint8_t, 1> ack{wire::protocol::login::kLoginAcknowledgedId};
     if (!candidateBackend_->queue(ack) || !candidateBackend_->acknowledgeLogin() ||
         (clientSettings_.readableBytes() != 0 && !candidateBackend_->queue(clientSettings_.readable())))
         return false;
+    state_ = State::kConfiguration;
     constexpr std::array<std::uint8_t, 2> removePacks{0x08, 0};
     constexpr std::array<std::uint8_t, 2> clearReportDetails{0x10, 0};
     constexpr std::array<std::uint8_t, 2> clearServerLinks{0x11, 0};
@@ -100,7 +103,6 @@ bool ClientSession::acknowledgePreparedChange() {
     finishingConfiguration_ = false;
     frontendPaused_ = false;
     backendPaused_ = false;
-    state_ = State::kConfiguration;
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
     activeBackend_->expectReadUntil(readDeadline_);
     activeBackend_->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});

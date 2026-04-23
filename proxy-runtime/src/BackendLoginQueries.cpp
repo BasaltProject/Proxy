@@ -30,7 +30,8 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
         return std::unexpected(BackendLoginError::kMalformed);
     using Mode = wire::auth::forwarding::ForwardingMode;
     namespace basalt = wire::auth::forwarding::native;
-    const bool velocityChannel = backend.forwarding == Mode::Velocity && std::ranges::equal(channel, velocity::kChannel);
+    const bool velocityChannel =
+        backend.forwarding == Mode::Velocity && std::ranges::equal(channel, velocity::kChannel);
     const bool nativeChannel = backend.forwarding == Mode::Basalt && std::ranges::equal(channel, basalt::kChannel);
     const bool forwarding = velocityChannel || nativeChannel;
     const auto requested = payload.empty() ? 1 : payload[0];
