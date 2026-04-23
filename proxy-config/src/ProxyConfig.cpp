@@ -10,7 +10,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                                                  std::string_view directory) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
-    reader.keys(&proxy, {"network", "runtime", "admission", "translation"}, "");
+    reader.keys(&proxy, {"network", "runtime", "admission", "forwarding", "translation"}, "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
                 {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
@@ -66,6 +66,15 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     reader.integer(admission, "origin-burst", result.admission.originBurst, 1, 1000000, "admission.");
     reader.integer(admission, "max-origins", result.admission.maxOrigins, 1, 1000000, "admission.");
     reader.integer(admission, "origin-expiry-ms", result.admission.originExpiryMs, 1000, 3600000, "admission.");
+
+    const auto* forwarding = reader.child(proxy, "forwarding");
+    reader.keys(forwarding, {"proxy-id", "key-file"}, "forwarding.");
+    reader.scalar(forwarding, "proxy-id", result.forwarding.proxyId, "forwarding.");
+    reader.scalar(forwarding, "key-file", result.forwarding.keyFile, "forwarding.");
+    if (result.forwarding.proxyId.empty() || result.forwarding.proxyId.size() > 64)
+        reader.fail("forwarding.proxy-id", "must contain 1..64 bytes");
+    if (result.forwarding.keyFile.empty() || result.forwarding.keyFile.size() > 4096)
+        reader.fail("forwarding.key-file", "must be a path of 1..4096 bytes");
 
     const auto* translation = reader.child(proxy, "translation");
     reader.keys(translation, {"mode"}, "translation.");

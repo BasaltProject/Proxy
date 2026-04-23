@@ -1,6 +1,11 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "RuntimeFixture.hpp"
 
+#include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
+
+#include <filesystem>
+#include <fstream>
+
 using namespace basalt::proxy;
 using namespace basalt::proxy::test;
 namespace io = basalt::wire::io;
@@ -355,6 +360,83 @@ TEST_CASE("Velocity modern forwarding signs verified identity and requires query
     proxy.stop();
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("basalt forwarding answers the backend challenge with a verifiable signature") {
+    namespace native = basalt::wire::auth::forwarding::native;
+    const std::string keyFile = "basalt-forwarding-login-test.key";
+    std::filesystem::remove(keyFile);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.forwarding.keyFile = keyFile;
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "native",
+                        .host = "127.0.0.1",
+                        .port = *port,
+                        .forwarding = basalt::wire::auth::forwarding::ForwardingMode::Basalt}};
+    config.defaultRoute = {"native"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+
+    const native::Request issued = *native::newRequest("lobby");
+    const auto payload = native::encodeRequest(issued);
+    const std::string channel{native::kChannel};
+    std::vector<std::uint8_t> body{4, 42, static_cast<std::uint8_t>(channel.size())};
+    body.insert(body.end(), channel.begin(), channel.end());
+    body.insert(body.end(), payload.begin(), payload.end());
+    std::vector<std::uint8_t> request{static_cast<std::uint8_t>(body.size())};
+    request.insert(request.end(), body.begin(), body.end());
+    REQUIRE(backend->write(request));
+
+    native::Identity probe;
+    probe.name = "Tester";
+    probe.address = "127.0.0.1";
+    probe.proxyId = "proxy";
+    probe.virtualHost = "localhost";
+    const std::size_t responseBytes =
+        native::sign(native::SigningKey::fromSeed(std::array<std::uint8_t, 32>{}), issued, native::kVersion1, probe)
+            .size();
+    const std::size_t packetBytes = 1 + 1 + 1 + responseBytes;
+    const std::size_t prefixBytes = packetBytes > 127 ? 2 : 1;
+    const auto received = receive(*backend, prefixBytes + packetBytes);
+    REQUIRE(received.size() == prefixBytes + packetBytes);
+    CHECK(received[prefixBytes] == 2);
+    CHECK(received[prefixBytes + 1] == 42);
+    CHECK(received[prefixBytes + 2] == 1);
+
+    std::ifstream stored{keyFile};
+    std::string text;
+    stored >> text;
+    REQUIRE(text.size() == 64);
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(std::stoi(text.substr(2 * i, 2), nullptr, 16));
+    const std::array<native::PublicKey, 1> trusted = {native::SigningKey::fromSeed(seed).publicKey()};
+    const auto verified = native::verify(std::span{received}.subspan(prefixBytes + 3), issued, trusted);
+    REQUIRE(std::holds_alternative<native::Verified>(verified));
+    const auto& identity = std::get<native::Verified>(verified).identity;
+    CHECK(identity.name == "Tester");
+    CHECK(identity.address == "127.0.0.1");
+    CHECK(identity.proxyId == "proxy");
+    CHECK(identity.port != 0);
+    CHECK_FALSE(identity.onlineMode);
+    proxy.stop();
+    std::filesystem::remove(keyFile);
 }
 
 TEST_CASE("legacy forwarding handshakes carry the configured identity and token") {

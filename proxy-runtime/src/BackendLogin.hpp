@@ -31,6 +31,7 @@ struct LoginFinishedPacket;
 namespace basalt::proxy::runtime::detail {
 
 class CookieCache;
+struct NativeForwarding;
 
 enum class BackendLoginError { kUnsupported, kMalformed, kIo, kLimit };
 
@@ -57,7 +58,7 @@ public:
 
     [[nodiscard]] BackendAttempt attempt() const { return attempt_; }
 
-    [[nodiscard]] bool velocityForwarded() const { return velocityForwarded_; }
+    [[nodiscard]] bool forwarded() const { return forwarded_; }
 
     void cancelCookieRequest();
 
@@ -79,7 +80,9 @@ public:
     [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
                                                                const wire::auth::SessionProfile& profile,
                                                                std::string_view virtualHost, std::uint16_t virtualPort,
-                                                               std::string_view remoteAddress);
+                                                               std::string_view remoteAddress,
+                                                               std::uint16_t remotePort = 0,
+                                                               const NativeForwarding* native = nullptr);
     /// Query begins after its packet ID. Replies affect only this transport.
     [[nodiscard]] std::expected<void, BackendLoginError> answerPluginQuery(wire::io::ByteBuffer& query);
 
@@ -120,7 +123,11 @@ private:
     const wire::auth::SessionProfile* profile_ = nullptr;
     std::string_view remoteAddress_;
     const BackendAttempt attempt_;
-    bool velocityForwarded_ = false;
+    bool forwarded_ = false;
+    const NativeForwarding* native_ = nullptr;
+    std::string_view virtualHost_;
+    std::uint16_t virtualPort_ = 0;
+    std::uint16_t remotePort_ = 0;
     wire::io::TcpConnection connection_;
     wire::io::ByteBuffer cookieKey_;
     std::uint64_t cookieRevision_ = 0;

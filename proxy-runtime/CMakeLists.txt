@@ -12,6 +12,7 @@ basalt_module(proxy-runtime-core
         src/BackendLoginIdentity.cpp
         src/BackendLoginCookies.cpp
         src/ClientSession.cpp
+        src/ForwardingKey.cpp
         src/ClientSessionBackend.cpp
         src/ClientSessionMessages.cpp
         src/ClientSessionResourcePacks.cpp
@@ -26,7 +27,7 @@ basalt_module(proxy-runtime-core
         src/IdentityRegistry.cpp
         src/ProxyRuntime.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
-            basalt::wire-multiversion
+            basalt::wire-multiversion basalt::wire-auth
 )
 
 target_compile_definitions(proxy-runtime-core PUBLIC BASALT_VERSION="${BASALT_VERSION}")

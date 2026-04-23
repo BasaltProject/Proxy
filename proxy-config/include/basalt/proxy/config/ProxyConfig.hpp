@@ -52,6 +52,11 @@ struct AdmissionConfig {
     std::uint32_t originExpiryMs = 60000;
 };
 
+struct ForwardingConfig {
+    std::string proxyId = "proxy";
+    std::string keyFile = ".basalt/forwarding.key";
+};
+
 struct BackendConfig {
     bool bungeeMessages = false;
     std::string name;
@@ -72,6 +77,7 @@ struct ProxyConfig {
     NetworkConfig network;
     RuntimeConfig runtime;
     AdmissionConfig admission;
+    ForwardingConfig forwarding;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;

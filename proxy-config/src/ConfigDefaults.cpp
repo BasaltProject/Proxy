@@ -47,6 +47,12 @@ origin-burst = 20
 max-origins = 65536
 origin-expiry-ms = 60000
 
+[forwarding]
+# Identity this proxy signs into basalt-scheme backends, and the private Ed25519 key file.
+# The key is generated on first use and its public half is printed for the backends' trusted-keys.
+proxy-id = "proxy"
+key-file = ".basalt/forwarding.key"
+
 [translation]
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.
@@ -67,7 +73,7 @@ host = "127.0.0.1"
 port = 25566
 # Backend Java protocol; compatibility is checked for the client/backend pair.
 protocol = 777
-# none, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
+# none, basalt, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
 # none is viable for an offline vanilla backend; it does not forward premium UUID/properties.
 # The backend must use a matching scheme. No fallback to weaker identity on security failure.
 forwarding = "none"

@@ -19,7 +19,7 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
         return std::unexpected(BackendLoginError::kMalformed);
     const auto& backend = *backendConfig_;
     const auto& profile = *profile_;
-    if (backend.forwarding == Mode::Velocity && !velocityForwarded_)
+    if ((backend.forwarding == Mode::Velocity || backend.forwarding == Mode::Basalt) && !forwarded_)
         return std::unexpected(BackendLoginError::kMalformed);
     const auto body = packet.readable();
     (void)protocol::readUuid(packet);
