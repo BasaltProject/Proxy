@@ -67,6 +67,11 @@ struct PluginHost::Access {
         return luaL_error(state, "unknown event '%s'", name);
     }
 
+    static int denied(lua_State* state) {
+        return luaL_error(state, "'%s' needs the '%s' capability in plugin.toml%s",
+                          lua_tostring(state, lua_upvalueindex(2)), lua_tostring(state, lua_upvalueindex(3)), "");
+    }
+
     static int command(lua_State* state) {
         Plugin* self = plugin(state);
         std::size_t length = 0;
@@ -286,6 +291,20 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
         report(manifest.main + " is missing or larger than 1 MiB; plugin skipped");
         return;
     }
+    const auto granted = settings_.allow.find(name);
+    std::string missing;
+    for (const wire::plugins::PluginPermission asked : manifest.capabilities.asks()) {
+        const std::string_view label = wire::plugins::permissionName(asked);
+        const bool allowed =
+            granted != settings_.allow.end() && std::ranges::find(granted->second, label) != granted->second.end();
+        if (!allowed)
+            missing += (missing.empty() ? "" : ", ") + std::string{label};
+    }
+    if (!missing.empty()) {
+        report("did not load: it asks for " + missing + " and the operator has not granted it; add " + name +
+               " to [allow] in plugins.toml");
+        return;
+    }
     // A plugin sees its own modules first, then those a dependency that loaded before it chose to export.
     std::vector<std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>> lenders;
     for (const wire::plugins::PluginDependency& dependency : manifest.dependencies)
@@ -315,24 +334,28 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     }
     lua_State* state = plugin->sandbox->state();
     lua_newtable(state);
-    const std::array<std::pair<const char*, lua_CFunction>, 5> functions = {{{"log", &Access::log},
-                                                                             {"on", &Access::on},
-                                                                             {"command", &Access::command},
-                                                                             {"servers", &Access::servers},
-                                                                             {"send", &Access::send}}};
-    for (const auto& [label, function] : functions) {
+    const auto install = [&](const char* label, lua_CFunction function, const char* capability, bool permitted) {
         lua_pushlightuserdata(state, plugin.get());
-        lua_pushcclosure(state, function, 1);
+        if (permitted) {
+            lua_pushcclosure(state, function, 1);
+        } else {
+            lua_pushstring(state, label);
+            lua_pushstring(state, capability);
+            lua_pushcclosure(state, &Access::denied, 3);
+        }
         lua_setfield(state, -2, label);
-    }
+    };
+    const bool commands = manifest.capabilities.commands;
+    install("log", &Access::log, "", true);
+    install("on", &Access::on, "", true);
+    install("servers", &Access::servers, "", true);
+    install("command", &Access::command, "commands", commands);
+    install("send", &Access::send, "commands", commands);
     lua_newtable(state);
-    const std::array<std::pair<const char*, lua_CFunction>, 3> dataFunctions = {
-        {{"get", &Access::dataGet}, {"set", &Access::dataSet}, {"delete", &Access::dataDelete}}};
-    for (const auto& [label, function] : dataFunctions) {
-        lua_pushlightuserdata(state, plugin.get());
-        lua_pushcclosure(state, function, 1);
-        lua_setfield(state, -2, label);
-    }
+    const bool storage = manifest.capabilities.storage;
+    install("get", &Access::dataGet, "storage", storage);
+    install("set", &Access::dataSet, "storage", storage);
+    install("delete", &Access::dataDelete, "storage", storage);
     lua_setfield(state, -2, "data");
     lua_setglobal(state, "proxy");
     auto chunk =

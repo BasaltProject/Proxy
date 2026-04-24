@@ -121,6 +121,7 @@ int run(const cliCommand::Run& command) {
         proxy::plugins::PluginSettings settings;
         settings.directory = configuration->plugins.directory;
         settings.database = configuration->plugins.database;
+        settings.allow = configuration->plugins.allow;
         settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
         settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
         settings.queueSize = configuration->plugins.queueSize;

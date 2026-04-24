@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,6 +84,8 @@ struct PluginsConfig {
     std::int64_t instructionsPerTurn = 250000;
     std::size_t memoryMib = 32;
     std::size_t queueSize = 256;
+    /// Plugin id to the permissions the operator grants it; a manifest asking for more is not loaded.
+    std::map<std::string, std::vector<std::string>> allow;
 
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };

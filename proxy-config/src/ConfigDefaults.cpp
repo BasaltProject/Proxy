@@ -81,6 +81,12 @@ instructions-per-turn = 250000
 memory-mib = 32
 # Events waiting for the plugin thread. A full queue drops the newest event and counts it.
 queue-size = 256
+
+# What each plugin may do beyond logging, listening and reading the server list. A plugin whose plugin.toml asks for more than
+# is granted here does not load. Permissions: commands (register console commands and send players), network, packets.
+# Plugin data needs `storage = true` under [capabilities] in the plugin's own manifest, no grant.
+# [allow]
+# my_plugin = ["commands"]
 )";
 }
 

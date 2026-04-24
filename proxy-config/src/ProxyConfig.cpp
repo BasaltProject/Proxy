@@ -121,7 +121,8 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     if (pluginsTable) {
         detail::Reader plugins{std::string{directory} + "/plugins.toml", {}};
         plugins.keys(pluginsTable,
-                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size"}, "");
+                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size", "allow"},
+                     "");
         plugins.scalar(pluginsTable, "enabled", result.plugins.enabled, "");
         plugins.scalar(pluginsTable, "directory", result.plugins.directory, "");
         plugins.scalar(pluginsTable, "database", result.plugins.database, "");
@@ -129,6 +130,15 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                         "");
         plugins.integer(pluginsTable, "memory-mib", result.plugins.memoryMib, 1, 1024, "");
         plugins.integer(pluginsTable, "queue-size", result.plugins.queueSize, 1, 65536, "");
+        if (const auto* allow = plugins.child(*pluginsTable, "allow")) {
+            for (const auto& id : allow->keys()) {
+                auto names = plugins.strings(allow->find(id), "allow." + id);
+                for (const auto& name : names)
+                    if (name != "commands" && name != "network" && name != "packets")
+                        plugins.fail("allow." + id, "grants unknown permission '" + name + "'");
+                result.plugins.allow.emplace(id, std::move(names));
+            }
+        }
         if (result.plugins.database.empty() || result.plugins.database.size() > 4096)
             plugins.fail("database", "must be a path of 1..4096 bytes");
         if (result.plugins.directory.empty() || result.plugins.directory.size() > 4096)

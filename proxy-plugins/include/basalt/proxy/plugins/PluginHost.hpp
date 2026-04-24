@@ -29,6 +29,8 @@ struct PluginSettings {
     std::string database;
     wire::lua::LuaLimits limits;
     std::size_t queueSize = 256;
+    /// Plugin id to permission names (commands, network, packets) the operator grants.
+    std::map<std::string, std::vector<std::string>> allow;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.

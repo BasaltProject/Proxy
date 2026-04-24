@@ -34,7 +34,21 @@ namespace {
 struct Topology {
     std::vector<config::BackendConfig> backends;
     detail::BackendRoutes routes;
+    std::shared_ptr<const detail::NativeForwarding> forwarding;
 };
+
+std::expected<std::shared_ptr<const detail::NativeForwarding>, std::string>
+loadForwarding(const config::ProxyConfig& config) {
+    if (std::ranges::none_of(config.backends, [](const config::BackendConfig& backend) {
+            return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+        }))
+        return nullptr;
+    auto signing = detail::loadOrCreateForwardingKey(config.forwarding.keyFile);
+    if (!signing)
+        return std::unexpected(signing.error());
+    return std::make_shared<const detail::NativeForwarding>(
+        detail::NativeForwarding{std::move(*signing), config.forwarding.proxyId, config.network.onlineMode});
+}
 } // namespace
 
 namespace {
@@ -120,8 +134,7 @@ struct ProxyRuntime::Impl {
                     return resolve(id, attempt, deadline, snapshot);
                 },
                 snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
-                runtime.config.network.acceptTransfers, runtime.identities,
-                runtime.nativeForwarding ? &*runtime.nativeForwarding : nullptr, snapshot);
+                runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -391,7 +404,6 @@ struct ProxyRuntime::Impl {
     std::vector<std::uint8_t> authenticationFailure;
     RuntimeServices services;
     std::optional<wire::auth::SessionKeyPair> key;
-    std::optional<detail::NativeForwarding> nativeForwarding;
     std::optional<wire::io::WorkerPool> workers;
     detail::IdentityRegistry identities;
     std::vector<std::unique_ptr<Owner>> owners;
@@ -453,21 +465,16 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         auto routes = detail::BackendRoutes::create(impl->config);
         if (!routes)
             return std::unexpected(routes.error());
-        impl->topology.store(std::make_shared<const Topology>(Topology{impl->config.backends, std::move(*routes)}));
+        auto forwarding = loadForwarding(impl->config);
+        if (!forwarding)
+            return std::unexpected(forwarding.error());
+        impl->topology.store(std::make_shared<const Topology>(
+            Topology{impl->config.backends, std::move(*routes), std::move(*forwarding)}));
         impl->services = std::move(services);
         if (impl->config.network.onlineMode) {
             impl->key = wire::auth::SessionKeyPair::generate();
             if (!impl->key)
                 return std::unexpected("could not generate the login key");
-        }
-        if (std::ranges::any_of(impl->config.backends, [](const config::BackendConfig& backend) {
-                return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
-            })) {
-            auto signing = detail::loadOrCreateForwardingKey(impl->config.forwarding.keyFile);
-            if (!signing)
-                return std::unexpected(signing.error());
-            impl->nativeForwarding = detail::NativeForwarding{std::move(*signing), impl->config.forwarding.proxyId,
-                                                              impl->config.network.onlineMode};
         }
         auto workers = wire::io::WorkerPool::create(impl->config.runtime.workers, impl->config.runtime.maxPendingWork);
         if (!workers)
@@ -617,15 +624,15 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
         return std::unexpected("changing " + fixed + " requires a restart");
-    if (!impl_->nativeForwarding && std::ranges::any_of(fresh.backends, [](const config::BackendConfig& backend) {
-            return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
-        }))
-        return std::unexpected("a basalt backend needs a restart so its forwarding key is loaded");
     auto routes = detail::BackendRoutes::create(fresh);
     if (!routes)
         return std::unexpected(routes.error());
+    auto forwarding = loadForwarding(fresh);
+    if (!forwarding)
+        return std::unexpected(forwarding.error());
     const auto count = fresh.backends.size();
-    impl_->topology.store(std::make_shared<const Topology>(Topology{std::move(fresh.backends), std::move(*routes)}));
+    impl_->topology.store(std::make_shared<const Topology>(
+        Topology{std::move(fresh.backends), std::move(*routes), std::move(*forwarding)}));
     return count;
 }
 
