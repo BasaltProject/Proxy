@@ -36,6 +36,11 @@ struct RuntimeServices {
         resolution = {};
     /// Called on session owner threads; must return quickly and never block.
     std::function<void(PlayerEvent)> playerEvents = {};
+    /// Offered every command a player types in play (without the slash). True consumes it: it is not sent to the
+    /// backend. Called on session owner threads; must return quickly and never block.
+    std::function<bool(std::string_view player, std::string_view command)> playerCommand = {};
+    /// The names of those commands, added to every command tree the proxy relays so clients know them.
+    std::function<std::vector<std::string>()> playerCommandNames = {};
 };
 
 class ProxyRuntime {
@@ -57,6 +62,9 @@ public:
     /// Sessions keep the snapshot they started with; fixed settings (network, limits, forwarding) need a restart.
     [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
     [[nodiscard]] std::vector<std::string> backendNames() const;
+    /// Thread-safe. Queues a chat line to a player's client; true when handed to the session owners, not when
+    /// delivered.
+    [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

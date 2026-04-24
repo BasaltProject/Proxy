@@ -70,6 +70,12 @@ enabled = false
 port = 19132
 motd = "Basalt Proxy"
 
+[reload]
+# Reload by itself when a file in the config directory or the plugin directory changes, once it has stopped changing.
+# A file that does not validate is reported and the running configuration stays. Same as the console `reload` command.
+watch-files = false
+interval-ms = 2000
+
 [translation]
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.

@@ -73,6 +73,20 @@ jobs:
       - name: Test
         run: ctest --test-dir build/asan --output-on-failure
 
+  portable-poll:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: lukka/get-cmake@latest
+      - name: Configure with the portable poll readiness backend
+        run: cmake --preset debug -DBASALT_IO_FORCE_POLL=ON -B build/poll
+      - name: Build
+        run: cmake --build build/poll
+      - name: Test
+        run: ctest --test-dir build/poll --output-on-failure
+
   thread-sanitize:
     runs-on: ubuntu-24.04
     steps:
@@ -96,6 +110,6 @@ jobs:
 
       - name: Check formatting
         run: |
-          find proxy-runtime proxy-config wire/wire-* -name '*.hpp' -o -name '*.cpp' \
+          find proxy-runtime proxy-config proxy-plugins wire/wire-* -name '*.hpp' -o -name '*.cpp' \
             | grep -v third_party \
             | xargs clang-format --dry-run --Werror

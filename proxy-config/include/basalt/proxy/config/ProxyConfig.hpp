@@ -98,6 +98,13 @@ struct BedrockConfig {
     friend bool operator==(const BedrockConfig&, const BedrockConfig&) = default;
 };
 
+struct ReloadConfig {
+    bool watchFiles = false;
+    std::uint32_t intervalMs = 2000;
+
+    friend bool operator==(const ReloadConfig&, const ReloadConfig&) = default;
+};
+
 struct BackendConfig {
     bool bungeeMessages = false;
     std::string name;
@@ -122,6 +129,7 @@ struct ProxyConfig {
     LoggingConfig logging;
     PluginsConfig plugins;
     BedrockConfig bedrock;
+    ReloadConfig reload;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;

@@ -101,6 +101,34 @@ struct PluginHost::Access {
         return 0;
     }
 
+    static int playerCommand(lua_State* state) {
+        Plugin* self = plugin(state);
+        std::size_t length = 0;
+        const char* name = luaL_checklstring(state, 1, &length);
+        luaL_checktype(state, 2, LUA_TFUNCTION);
+        const std::string_view label{name, length};
+        if (!self->host->loading_)
+            return luaL_error(state, "commands can only be registered while the plugin loads");
+        const bool valid = !label.empty() && label.size() <= 32 && std::ranges::all_of(label, [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        });
+        if (!valid)
+            return luaL_error(state, "command names are 1..32 characters of a-z, 0-9, '_' and '-'");
+        bool refused = false;
+        {
+            std::unique_lock lock{self->host->commandsMutex_};
+            refused = self->host->playerCommands_.contains(label);
+            if (!refused) {
+                lua_pushvalue(state, 2);
+                self->host->playerCommands_.emplace(
+                    std::string{label}, std::make_unique<Command>(Command{self, wire::lua::LuaRef::take(state)}));
+            }
+        }
+        if (refused)
+            return luaL_error(state, "player command '%s' already exists", name);
+        return 0;
+    }
+
     static int servers(lua_State* state) {
         Plugin* self = plugin(state);
         lua_newtable(state);
@@ -350,6 +378,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     install("on", &Access::on, "", true);
     install("servers", &Access::servers, "", true);
     install("command", &Access::command, "commands", commands);
+    install("player_command", &Access::playerCommand, "commands", commands);
     install("send", &Access::send, "commands", commands);
     lua_newtable(state);
     const bool storage = manifest.capabilities.storage;
@@ -384,6 +413,7 @@ std::size_t PluginHost::reload() {
     {
         std::unique_lock lock{commandsMutex_};
         commands_.clear();
+        playerCommands_.clear();
     }
     plugins_.clear();
     installed_.clear();
@@ -433,6 +463,37 @@ bool PluginHost::command(std::string_view line) {
     return true;
 }
 
+bool PluginHost::playerCommand(std::string_view player, std::string_view line) {
+    std::vector<std::string> words;
+    while (!line.empty() && words.size() <= 32) {
+        const auto begin = line.find_first_not_of(" \t\r\n");
+        if (begin == std::string_view::npos)
+            break;
+        line.remove_prefix(begin);
+        const auto end = line.find_first_of(" \t\r\n");
+        words.emplace_back(line.substr(0, end));
+        if (end == std::string_view::npos)
+            break;
+        line.remove_prefix(end);
+    }
+    {
+        std::shared_lock lock{commandsMutex_};
+        if (words.empty() || !playerCommands_.contains(words.front()))
+            return false;
+    }
+    PlayerCommandCall call{std::string{player}, words.front(), {words.begin() + 1, words.end()}};
+    static_cast<void>(enqueue(std::move(call)));
+    return true;
+}
+
+std::vector<std::string> PluginHost::playerCommandNames() const {
+    std::shared_lock lock{commandsMutex_};
+    std::vector<std::string> names;
+    for (const auto& [name, command] : playerCommands_)
+        names.push_back(name);
+    return names;
+}
+
 void PluginHost::run(std::stop_token stop) {
     while (true) {
         Task task;
@@ -446,8 +507,10 @@ void PluginHost::run(std::stop_token stop) {
         }
         if (const auto* event = std::get_if<runtime::PlayerEvent>(&task))
             deliver(*event);
+        else if (const auto* call = std::get_if<CommandCall>(&task))
+            invoke(*call);
         else
-            invoke(std::get<CommandCall>(task));
+            invoke(std::get<PlayerCommandCall>(task));
         delivered_.fetch_add(1, std::memory_order_relaxed);
     }
 }
@@ -477,6 +540,35 @@ void PluginHost::invoke(const CommandCall& call) {
     std::size_t length = 0;
     if (const char* reply = lua_tolstring(state, -1, &length); reply != nullptr && hooks_.log)
         hooks_.log(plugin.name, std::string_view{reply, std::min<std::size_t>(length, 4096)});
+    lua_pop(state, 1);
+}
+
+void PluginHost::invoke(const PlayerCommandCall& call) {
+    const auto found = playerCommands_.find(call.name);
+    if (found == playerCommands_.end() || found->second->plugin->broken)
+        return;
+    Plugin& plugin = *found->second->plugin;
+    lua_State* state = plugin.sandbox->state();
+    plugin.sandbox->refill();
+    found->second->handler.push();
+    lua_pushlstring(state, call.player.data(), call.player.size());
+    lua_newtable(state);
+    lua_Integer position = 1;
+    for (const std::string& word : call.arguments) {
+        lua_pushlstring(state, word.data(), word.size());
+        lua_rawseti(state, -2, position++);
+    }
+    if (lua_pcall(state, 2, 1, 0) != LUA_OK) {
+        const auto failure = plugin.sandbox->failureFromStack();
+        if (hooks_.log)
+            hooks_.log(plugin.name, "command '" + call.name + "' failed: " + failure.message);
+        if (failure.outOfBudget() || failure.outOfMemory())
+            plugin.broken = true;
+        return;
+    }
+    std::size_t length = 0;
+    if (const char* reply = lua_tolstring(state, -1, &length); reply != nullptr && hooks_.tell)
+        hooks_.tell(call.player, std::string_view{reply, std::min<std::size_t>(length, 1024)});
     lua_pop(state, 1);
 }
 

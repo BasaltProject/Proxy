@@ -38,9 +38,11 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     manifest(root / "syntax", "syntax");
     write(root / "syntax" / "src" / "main.lua", "this is not lua\n");
     manifest(root / "tools", "tools", "[capabilities]\ncommands = true\n");
-    write(root / "tools" / "src" / "main.lua", "proxy.command('hello', function(args) return 'hi ' .. #args end)\n"
-                                               "local ok = pcall(proxy.command, 'stop', function() end)\n"
-                                               "proxy.log('builtin accepted: ' .. tostring(ok))\n");
+    write(root / "tools" / "src" / "main.lua",
+          "proxy.command('hello', function(args) return 'hi ' .. #args end)\n"
+          "proxy.player_command('wave', function(player, args) return 'waved ' .. player .. ' ' .. #args end)\n"
+          "local ok = pcall(proxy.command, 'stop', function() end)\n"
+          "proxy.log('builtin accepted: ' .. tostring(ok))\n");
 
     manifest(root / "lender", "lender", "[exports]\nmodules = [\"shared\"]\n");
     write(root / "lender" / "src" / "shared.lua", "return {value = 7}\n");
@@ -64,6 +66,11 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     std::vector<std::string> lines;
     plugins::PluginHooks hooks;
     hooks.servers = [] { return std::vector<std::string>{"a", "b"}; };
+    hooks.tell = [&](std::string_view player, std::string_view text) {
+        std::lock_guard lock{mutex};
+        lines.push_back("tell " + std::string{player} + ": " + std::string{text});
+        ready.notify_all();
+    };
     hooks.log = [&](std::string_view plugin, std::string_view line) {
         std::lock_guard lock{mutex};
         lines.push_back(std::string{plugin} + ": " + std::string{line});
@@ -96,6 +103,8 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     CHECK((*host)->command("hello a b"));
     CHECK_FALSE((*host)->command("stop"));
     CHECK_FALSE((*host)->command("nosuch"));
+    CHECK((*host)->playerCommand("Steve", "wave a b c"));
+    CHECK_FALSE((*host)->playerCommand("Steve", "hello"));
 
     const auto hellos = [&] { return std::ranges::count(lines, "greeter: hello Steve on a of 2"); };
     for (int round = 1; round <= 2; ++round) {
@@ -104,6 +113,7 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
         REQUIRE(ready.wait_for(lock, 5s, [&] { return hellos() == round; }));
     }
     std::unique_lock lock{mutex};
+    REQUIRE(ready.wait_for(lock, 5s, [&] { return std::ranges::count(lines, "tell Steve: waved Steve 3") == 1; }));
     CHECK(std::ranges::count_if(
               lines, [](const std::string& line) { return line.starts_with("looper: handler failed"); }) == 1);
     lock.unlock();

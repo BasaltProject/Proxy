@@ -16,7 +16,9 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -88,6 +90,14 @@ int run(const cliCommand::Run& command) {
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     RuntimeServices services;
+    services.playerCommandNames = [&pluginHost]() -> std::vector<std::string> {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr ? host->playerCommandNames() : std::vector<std::string>{};
+    };
+    services.playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr && host->playerCommand(player, command);
+    };
     services.playerEvents = [&pluginHost](PlayerEvent event) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post(std::move(event));
@@ -131,6 +141,9 @@ int run(const cliCommand::Run& command) {
         hooks.send = [&runtime](std::string_view player, std::string_view backend) {
             return runtime->sendPlayer(player, backend).has_value();
         };
+        hooks.tell = [&runtime](std::string_view player, std::string_view text) {
+            static_cast<void>(runtime->tellPlayer(player, text));
+        };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
         };
@@ -147,10 +160,52 @@ int run(const cliCommand::Run& command) {
 #if !defined(_WIN32)
     const auto oldReload = std::signal(SIGHUP, reloadSignal);
 #endif
+    const auto fingerprint = [&command, &configuration] {
+        std::map<std::string, std::pair<std::filesystem::file_time_type, std::uintmax_t>> seen;
+        std::error_code error;
+        const auto add = [&seen, &error](const std::filesystem::path& root, bool recursive) {
+            if (!std::filesystem::is_directory(root, error))
+                return;
+            const auto record = [&seen, &error](const std::filesystem::directory_entry& entry) {
+                if (entry.is_regular_file(error))
+                    seen[entry.path().string()] = {entry.last_write_time(error), entry.file_size(error)};
+            };
+            if (recursive)
+                for (const auto& entry : std::filesystem::recursive_directory_iterator{root, error})
+                    record(entry);
+            else
+                for (const auto& entry : std::filesystem::directory_iterator{root, error})
+                    record(entry);
+        };
+        add(command.configDirectory, false);
+        if (configuration->plugins.enabled)
+            add(configuration->plugins.directory, true);
+        return seen;
+    };
     std::jthread signals{[&](std::stop_token stop) {
+        auto watched = fingerprint();
+        auto pending = watched;
+        bool changing = false;
+        auto nextLook = std::chrono::steady_clock::now();
         while (!stop.stop_requested() && !signalStop.load(std::memory_order_relaxed)) {
-            if (signalReload.exchange(false, std::memory_order_relaxed))
+            if (signalReload.exchange(false, std::memory_order_relaxed)) {
                 logger.info([&] { return reloadConfiguration(); });
+                watched = pending = fingerprint();
+                changing = false;
+            }
+            if (configuration->reload.watchFiles && std::chrono::steady_clock::now() >= nextLook) {
+                nextLook =
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds{configuration->reload.intervalMs};
+                auto current = fingerprint();
+                if (changing && current == pending) {
+                    logger.info([&] { return "Files changed. " + reloadConfiguration(); });
+                    watched = pending = current;
+                    changing = false;
+                } else if (current != watched) {
+                    changing = true;
+                    pending = std::move(current);
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds{50});
         }
         if (signalStop.load(std::memory_order_relaxed))

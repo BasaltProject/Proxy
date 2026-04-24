@@ -10,7 +10,8 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                                                  std::string_view directory, const detail::TomlTable* pluginsTable) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
-    reader.keys(&proxy, {"network", "runtime", "admission", "forwarding", "logging", "bedrock", "translation"}, "");
+    reader.keys(&proxy,
+                {"network", "runtime", "admission", "forwarding", "logging", "bedrock", "reload", "translation"}, "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
                 {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
@@ -113,6 +114,11 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     if (result.bedrock.motd.empty() || result.bedrock.motd.size() > 64 ||
         result.bedrock.motd.find(';') != std::string::npos)
         reader.fail("bedrock.motd", "must be 1..64 bytes without ';'");
+
+    const auto* reload = reader.child(proxy, "reload");
+    reader.keys(reload, {"watch-files", "interval-ms"}, "reload.");
+    reader.scalar(reload, "watch-files", result.reload.watchFiles, "reload.");
+    reader.integer(reload, "interval-ms", result.reload.intervalMs, 250, 600000, "reload.");
 
     const auto* translation = reader.child(proxy, "translation");
     reader.keys(translation, {"mode"}, "translation.");

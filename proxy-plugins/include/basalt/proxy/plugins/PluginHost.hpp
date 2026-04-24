@@ -38,6 +38,8 @@ struct PluginHooks {
     std::function<std::vector<std::string>()> servers;
     std::function<bool(std::string_view player, std::string_view backend)> send;
     std::function<void(std::string_view plugin, std::string_view line)> log;
+    /// Sends a chat line to a player's client.
+    std::function<void(std::string_view player, std::string_view text)> tell;
 };
 
 /// One thread runs every plugin's Lua, so a Lua state is never entered twice at once and no I/O owner waits on a
@@ -55,6 +57,11 @@ public:
 
     /// True when the first word names a plugin command, which is then queued for the plugin thread; otherwise false.
     [[nodiscard]] bool command(std::string_view line);
+
+    /// True when the first word names a command a plugin registered for players; the call is queued for the plugin
+    /// thread.
+    [[nodiscard]] bool playerCommand(std::string_view player, std::string_view line);
+    [[nodiscard]] std::vector<std::string> playerCommandNames() const;
 
     /// Stops the plugin thread, drops every plugin and its commands, reads the packages again and resumes.
     /// Events queued meanwhile are kept; per-plugin data stays in the database. Serialised with itself.
@@ -82,11 +89,18 @@ private:
         std::vector<std::string> arguments;
     };
 
-    using Task = std::variant<runtime::PlayerEvent, CommandCall>;
+    struct PlayerCommandCall {
+        std::string player;
+        std::string name;
+        std::vector<std::string> arguments;
+    };
+
+    using Task = std::variant<runtime::PlayerEvent, CommandCall, PlayerCommandCall>;
     struct Command;
 
     void deliver(const runtime::PlayerEvent& event);
     void invoke(const CommandCall& call);
+    void invoke(const PlayerCommandCall& call);
     [[nodiscard]] bool enqueue(Task task);
 
     PluginSettings settings_;
@@ -102,6 +116,7 @@ private:
     mutable std::shared_mutex commandsMutex_;
     std::mutex reloadMutex_;
     std::map<std::string, std::unique_ptr<Command>, std::less<>> commands_;
+    std::map<std::string, std::unique_ptr<Command>, std::less<>> playerCommands_;
     bool loading_ = true;
     std::atomic<std::size_t> dropped_{0};
     std::atomic<std::size_t> delivered_{0};
