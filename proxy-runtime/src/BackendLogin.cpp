@@ -1,6 +1,7 @@
 #include "BackendLogin.hpp"
 
 #include "NativeForwarding.hpp"
+#include "RelayCounters.hpp"
 #include "RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -184,6 +185,7 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
                                 : wire::protocol::packetFraming::writeUncompressed(output_, packet);
     if (!written)
         return std::unexpected(BackendLoginError::kLimit);
+    relayCounters().towardBackends.fetch_add(packet.size(), std::memory_order_relaxed);
     return {};
 }
 

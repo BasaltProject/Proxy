@@ -1,3 +1,4 @@
+#include "BedrockStatus.hpp"
 #include "Console.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -159,6 +160,22 @@ int run(const cliCommand::Run& command) {
     logger.warn([] {
         return std::string{"Proxy is under development; only verified protocol/backend combinations are supported."};
     });
+    std::unique_ptr<detail::BedrockStatus> bedrock;
+    if (configuration->bedrock.enabled) {
+        bedrock = std::make_unique<detail::BedrockStatus>(
+            configuration->bedrock.port, configuration->bedrock.motd, [&runtime] { return runtime->sessionCount(); },
+            configuration->runtime.maxSessions);
+        if (!bedrock->start()) {
+            logger.error([&configuration] {
+                return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
+            });
+            return 1;
+        }
+        logger.info([&bedrock] {
+            return "Bedrock status on UDP port " + std::to_string(bedrock->port()) +
+                   "; Bedrock players are turned away with a message.";
+        });
+    }
     std::jthread console{[&](std::stop_token stop) {
         detail::runConsole(*runtime, configuration->backends, stopping, stop, reloadConfiguration,
                            [&pluginHost](std::string_view line) {
@@ -169,6 +186,7 @@ int run(const cliCommand::Run& command) {
     const auto result = runtime->run(stopping.get_token());
     console.request_stop();
     console.join();
+    bedrock.reset();
     pluginHost.store(nullptr, std::memory_order_release);
     plugins.reset();
     signals.request_stop();

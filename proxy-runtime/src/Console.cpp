@@ -57,7 +57,9 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
             return {"Sessions: " + std::to_string(runtime.sessionCount()) +
                     "; retained buffer bytes: " + std::to_string(runtime.bufferedBytes()) +
                     "; accepted: " + std::to_string(runtime.acceptedConnections()) +
-                    "; rejected: " + std::to_string(runtime.rejectedConnections()) + "."};
+                    "; rejected: " + std::to_string(runtime.rejectedConnections()) +
+                    "; bytes toward clients: " + std::to_string(runtime.bytesTowardClients()) +
+                    "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) + "."};
         if (words[0] == "servers") {
             std::string names = "Backends:";
             for (const auto& name : runtime.backendNames())

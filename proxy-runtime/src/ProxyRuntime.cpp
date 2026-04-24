@@ -3,6 +3,7 @@
 #include "ClientSession.hpp"
 #include "ForwardingKey.hpp"
 #include "NativeForwarding.hpp"
+#include "RelayCounters.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/Admission.hpp>
@@ -620,6 +621,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.admission == fresh.admission, "[admission]");
     compare(current.forwarding == fresh.forwarding, "[forwarding]");
     compare(current.logging == fresh.logging, "[logging]");
+    compare(current.bedrock == fresh.bedrock, "[bedrock]");
     compare(current.plugins == fresh.plugins, "plugins.toml");
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
@@ -647,6 +649,14 @@ std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }
 
 std::uint64_t ProxyRuntime::acceptedConnections() const noexcept {
     return impl_->accepted.load(std::memory_order_relaxed);
+}
+
+std::uint64_t ProxyRuntime::bytesTowardClients() const noexcept {
+    return detail::relayCounters().towardClients.load(std::memory_order_relaxed);
+}
+
+std::uint64_t ProxyRuntime::bytesTowardBackends() const noexcept {
+    return detail::relayCounters().towardBackends.load(std::memory_order_relaxed);
 }
 
 std::uint64_t ProxyRuntime::rejectedConnections() const noexcept {
