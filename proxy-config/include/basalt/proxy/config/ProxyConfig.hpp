@@ -86,6 +86,8 @@ struct PluginsConfig {
     std::size_t queueSize = 256;
     /// Plugin id to the permissions the operator grants it; a manifest asking for more is not loaded.
     std::map<std::string, std::vector<std::string>> allow;
+    /// Players who may run a plugin command that asks for a permission.
+    std::vector<std::string> operators;
 
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };

@@ -166,7 +166,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
             clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5 &&
             id == wire::protocol::configuration::SelectKnownPacksPacket::kClientboundId)
             return answerKnownPacks();
-        if (shaped && state_ == State::kPlay && playerCommandNames_ &&
+        if (shaped && state_ == State::kPlay && playerCommandSpecs_ &&
             id == wire::protocol::play::CommandsPacket::kId) {
             if (!relayCommandTree(bytes))
                 return false;

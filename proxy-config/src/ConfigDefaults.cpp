@@ -84,7 +84,7 @@ mode = "auto"
 }
 
 std::string_view defaultPluginsToml() noexcept {
-    return R"(# Lua plugins, one folder per plugin under directory, each with a main.lua. Off by default.
+    return R"(# Lua plugins, packages (.bppkg) under directory, each with a plugin.toml and a main script. Off by default.
 enabled = false
 directory = "plugins"
 # The proxy's own SQLite file for plugin data. It is state, not configuration, and is never shared with a server.
@@ -95,9 +95,12 @@ memory-mib = 32
 # Events waiting for the plugin thread. A full queue drops the newest event and counts it.
 queue-size = 256
 
-# What each plugin may do beyond logging, listening and reading the server list. A plugin whose plugin.toml asks for more than
-# is granted here does not load. Permissions: commands (register console commands and send players), network, packets.
-# Plugin data needs `storage = true` under [capabilities] in the plugin's own manifest, no grant.
+# Players who may run a plugin command that is declared with a permission, by name.
+# operators = ["Steve"]
+
+# What each plugin may do beyond logging, listening, registering commands and reading the server list. A plugin whose plugin.toml
+# asks for more than is granted here does not load. Permissions: commands (run console commands), network, packets.
+# Plugin data needs `storage = true` or `players_data = true` under [capabilities] in the plugin's own manifest, no grant.
 # [allow]
 # my_plugin = ["commands"]
 )";

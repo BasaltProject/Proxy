@@ -1,11 +1,14 @@
 #pragma once
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/wire/lua/LuaArgs.hpp>
+#include <basalt/wire/lua/LuaRef.hpp>
 #include <basalt/wire/lua/LuaSandbox.hpp>
 #include <basalt/wire/plugins/PluginPackage.hpp>
 #include <basalt/wire/sql/Sqlite.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -15,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
@@ -31,6 +35,8 @@ struct PluginSettings {
     std::size_t queueSize = 256;
     /// Plugin id to permission names (commands, network, packets) the operator grants.
     std::map<std::string, std::vector<std::string>> allow;
+    /// Player names allowed to run a command a plugin guards with a permission.
+    std::vector<std::string> operators;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.
@@ -38,8 +44,12 @@ struct PluginHooks {
     std::function<std::vector<std::string>()> servers;
     std::function<bool(std::string_view player, std::string_view backend)> send;
     std::function<void(std::string_view plugin, std::string_view line)> log;
-    /// Sends a chat line to a player's client.
+    /// Sends a chat line, written in MiniMessage, to a player's client.
     std::function<void(std::string_view player, std::string_view text)> tell;
+    /// Disconnects a player in play; the reason is MiniMessage.
+    std::function<void(std::string_view player, std::string_view reason)> kick;
+    /// Runs a console line as the operator would; true when the line named a command.
+    std::function<bool(std::string_view line)> console;
 };
 
 /// One thread runs every plugin's Lua, so a Lua state is never entered twice at once and no I/O owner waits on a
@@ -55,13 +65,12 @@ public:
     /// Never blocks: a full queue drops the event and counts it.
     void post(runtime::PlayerEvent event);
 
-    /// True when the first word names a plugin command, which is then queued for the plugin thread; otherwise false.
+    /// True when the first word names a command a plugin registered, which is then queued for the plugin thread.
     [[nodiscard]] bool command(std::string_view line);
 
-    /// True when the first word names a command a plugin registered for players; the call is queued for the plugin
-    /// thread.
+    /// The same for a command typed by a player; the call is queued for the plugin thread.
     [[nodiscard]] bool playerCommand(std::string_view player, std::string_view line);
-    [[nodiscard]] std::vector<std::string> playerCommandNames() const;
+    [[nodiscard]] std::vector<runtime::PlayerCommandSpec> playerCommandSpecs() const;
 
     /// Stops the plugin thread, drops every plugin and its commands, reads the packages again and resumes.
     /// Events queued meanwhile are kept; per-plugin data stays in the database. Serialised with itself.
@@ -74,8 +83,10 @@ public:
     [[nodiscard]] std::size_t delivered() const noexcept { return delivered_.load(std::memory_order_relaxed); }
 
 private:
+    friend struct PluginApi;
     struct Plugin;
-    struct Access;
+    struct Entry;
+    struct Timer;
 
     PluginHost(PluginSettings settings, PluginHooks hooks);
 
@@ -83,25 +94,35 @@ private:
     void load(const std::shared_ptr<wire::plugins::PluginPackage>& package,
               const wire::plugins::PluginManifest& manifest);
     void run(std::stop_token stop);
+    void shutdown();
 
-    struct CommandCall {
-        std::string name;
-        std::vector<std::string> arguments;
+    struct ConsoleCall {
+        std::vector<std::string> words;
     };
 
     struct PlayerCommandCall {
         std::string player;
-        std::string name;
-        std::vector<std::string> arguments;
+        std::vector<std::string> words;
     };
 
-    using Task = std::variant<runtime::PlayerEvent, CommandCall, PlayerCommandCall>;
-    struct Command;
+    using Task = std::variant<runtime::PlayerEvent, ConsoleCall, PlayerCommandCall>;
+
+    struct Player {
+        std::string name;
+        std::string uuid;
+        std::string server;
+    };
 
     void deliver(const runtime::PlayerEvent& event);
-    void invoke(const CommandCall& call);
-    void invoke(const PlayerCommandCall& call);
+    void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
+    void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
+    void call(Plugin& plugin, const wire::lua::LuaRef& function,
+              const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why);
+    void report(Plugin& plugin, const wire::lua::LuaFailure& failure, std::string_view why);
+    void runTimers(std::chrono::steady_clock::time_point now);
     [[nodiscard]] bool enqueue(Task task);
+    [[nodiscard]] bool allowed(const Player& player, const std::optional<std::string>& permission) const;
+    [[nodiscard]] const Player* findPlayer(std::string_view name) const;
 
     PluginSettings settings_;
     PluginHooks hooks_;
@@ -115,8 +136,9 @@ private:
     std::deque<Task> queue_;
     mutable std::shared_mutex commandsMutex_;
     std::mutex reloadMutex_;
-    std::map<std::string, std::unique_ptr<Command>, std::less<>> commands_;
-    std::map<std::string, std::unique_ptr<Command>, std::less<>> playerCommands_;
+    std::map<std::string, std::vector<std::unique_ptr<Entry>>, std::less<>> commands_;
+    std::vector<std::unique_ptr<Timer>> timers_;
+    std::map<std::string, Player, std::less<>> roster_;
     bool loading_ = true;
     std::atomic<std::size_t> dropped_{0};
     std::atomic<std::size_t> delivered_{0};
