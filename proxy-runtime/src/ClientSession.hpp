@@ -151,6 +151,7 @@ private:
     [[nodiscard]] PluginMessageResult pluginMessage(bool fromBackend);
     [[nodiscard]] bool decode();
     [[nodiscard]] bool packet();
+    [[nodiscard]] bool preLoginPacket(std::int32_t id);
     enum class CookiePublication { kPublished, kUnavailable, kFatal };
     [[nodiscard]] CookiePublication publishCookieRequest(BackendLogin& source);
     [[nodiscard]] bool cookieResponse();
