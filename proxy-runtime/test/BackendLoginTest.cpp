@@ -2,6 +2,10 @@
 #include "RuntimeFixture.hpp"
 
 #include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
+#include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
+#include <basalt/wire/protocol/PacketFraming.hpp>
+#include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/play/ChatPackets.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -200,6 +204,56 @@ TEST_CASE("native login ACK and configuration finish gate bidirectional relay") 
     keepAliveResponse[1] = 0x1c;
     REQUIRE(client.write(keepAliveResponse));
     CHECK(receive(*backend, 11) == std::vector<std::uint8_t>{10, 0, 0x1c, 0, 0, 0, 0, 0, 0, 0, 99});
+    {
+        namespace play = basalt::wire::protocol::play;
+        namespace framing = basalt::wire::protocol::packetFraming;
+        const auto relayed = [&](std::int32_t id, const auto& packet) {
+            io::ByteBuffer body;
+            basalt::wire::protocol::varInt::write(body, id);
+            packet.write(body);
+            io::ByteBuffer framed;
+            REQUIRE(framing::writeUncompressed(framed, body.readable()));
+            REQUIRE(client.write(framed.readable()));
+            io::ByteBuffer wire;
+            io::ByteBuffer frame;
+            for (int attempts = 0; attempts < 20; ++attempts) {
+                wire.writeBytes(receive(*backend, 1));
+                const auto read = framing::tryReadFrame(wire, true, frame, 256);
+                REQUIRE(read);
+                if (*read)
+                    break;
+            }
+            CHECK(frame.toVector() == body.toVector());
+        };
+        play::MessageSignature signature{};
+        for (std::size_t i = 0; i < signature.size(); ++i)
+            signature[i] = static_cast<std::uint8_t>(i * 7 + 3);
+        play::LastSeenUpdate seen;
+        seen.offset = 3;
+        seen.setAcknowledged(1);
+        seen.setAcknowledged(17);
+        seen.checksum = 42;
+        play::ChatMessagePacket chat;
+        chat.message = "hello there";
+        chat.timestamp = 1700000000123;
+        chat.salt = 0x1122334455667788;
+        chat.signature = signature;
+        chat.lastSeen = seen;
+        relayed(play::ChatMessagePacket::kId, chat);
+        play::ChatSessionUpdatePacket session;
+        session.session.sessionId = basalt::wire::common::Uuid::offlinePlayer("chat-session");
+        session.session.expiresAt = 1800000000000;
+        session.session.publicKey.assign(294, 0x5a);
+        session.session.keySignature.assign(512, 0xa5);
+        relayed(play::ChatSessionUpdatePacket::kId, session);
+        play::SignedChatCommandPacket command;
+        command.command = "msg Steve hi";
+        command.timestamp = 1700000000456;
+        command.salt = 99;
+        command.argumentSignatures.push_back({"message", signature});
+        command.lastSeen = seen;
+        relayed(play::SignedChatCommandPacket::kId, command);
+    }
     if (prematureReconfigurationAck) {
         REQUIRE(client.write(std::array<std::uint8_t, 2>{1, 0x10}));
         CHECK(receive(client, 0, true).empty());
@@ -422,6 +476,7 @@ TEST_CASE("basalt forwarding answers the backend challenge with a verifiable sig
     std::ifstream stored{keyFile};
     std::string text;
     stored >> text;
+    stored.close();
     REQUIRE(text.size() == 64);
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i < seed.size(); ++i)
@@ -437,6 +492,62 @@ TEST_CASE("basalt forwarding answers the backend challenge with a verifiable sig
     CHECK_FALSE(identity.onlineMode);
     proxy.stop();
     std::filesystem::remove(keyFile);
+}
+
+TEST_CASE("online login forwards the Mojang profile and its properties into the signed backend identity") {
+    namespace velocity = basalt::wire::auth::forwarding::velocity;
+    const auto id = basalt::wire::common::Uuid::offlinePlayer("Tester");
+    const std::string json = "{\"id\":\"" + id.toUndashedString() +
+                             "\",\"name\":\"Tester\",\"properties\":[{\"name\":\"textures\",\"value\":"
+                             "\"dGV4dHVyZXM=\",\"signature\":\"c2ln\"}]}";
+    runtime::RuntimeServices services{[&](auto, auto, auto) {
+        return std::expected<basalt::wire::auth::HttpsResponse, basalt::wire::auth::HttpsError>{
+            basalt::wire::auth::HttpsResponse{200, {json.begin(), json.end()}}};
+    }};
+    auto config = settings();
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "modern",
+                        .host = "127.0.0.1",
+                        .port = *port,
+                        .forwarding = basalt::wire::auth::forwarding::ForwardingMode::Velocity,
+                        .secret = "fixture-secret"}};
+    config.defaultRoute = {"modern"};
+    Running proxy{std::move(config), std::move(services)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    static_cast<void>(keyResponse(client));
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(3000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    const std::string channel = "velocity:player_info";
+    std::vector<std::uint8_t> request{24, 4, 42, 20};
+    request.insert(request.end(), channel.begin(), channel.end());
+    request.push_back(4);
+    REQUIRE(backend->write(request));
+
+    const std::vector<basalt::wire::auth::SessionProfileProperty> properties{{"textures", "dGV4dHVyZXM=", "c2ln"}};
+    const auto payload = velocity::sign("fixture-secret", "127.0.0.1", id, "Tester", properties, 4);
+    REQUIRE_FALSE(payload.empty());
+    std::vector<std::uint8_t> expected{
+        static_cast<std::uint8_t>(3 + payload.size() > 127 ? (3 + payload.size()) | 128 : 3 + payload.size())};
+    if (3 + payload.size() > 127)
+        expected.push_back(static_cast<std::uint8_t>((3 + payload.size()) >> 7));
+    expected.insert(expected.end(), {2, 42, 1});
+    expected.insert(expected.end(), payload.begin(), payload.end());
+    CHECK(receive(*backend, expected.size()) == expected);
+    proxy.stop();
 }
 
 TEST_CASE("legacy forwarding handshakes carry the configured identity and token") {
