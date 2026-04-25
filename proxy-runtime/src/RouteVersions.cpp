@@ -21,11 +21,29 @@ bool translatedClientVerified(std::int32_t protocol) noexcept {
     return std::ranges::find(kVerified, protocol) != kVerified.end();
 }
 
+bool backendVerified(std::int32_t protocol) noexcept {
+    constexpr std::array<std::int32_t, 38> kVerified = {47,  110, 210, 316, 340, 393, 401, 404, 480, 490, 498, 573, 575,
+                                                        578, 751, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763,
+                                                        765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776};
+    return std::ranges::find(kVerified, protocol) != kVerified.end();
+}
+
+LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
+    namespace versions = wire::multiversion::protocolVersions;
+    if (protocol >= versions::kV26_2)
+        return LoginFinishedTail::kSessionId;
+    return protocol >= versions::kV1_21_2 || protocol < versions::kV1_20_5 ? LoginFinishedTail::kNone
+                                                                           : LoginFinishedTail::kStrictErrorsFlag;
+}
+
 std::expected<void, RouteRefusal> resolveRoute(std::int32_t clientProtocol, std::int32_t backendProtocol) noexcept {
     constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
-    if (backendProtocol != kNative)
+    if (backendProtocol != kNative) {
+        if (backendProtocol == clientProtocol && backendVerified(backendProtocol))
+            return {};
         return std::unexpected(clientProtocol == kNative ? RouteRefusal::kBackendUnsupported
                                                          : RouteRefusal::kNoTranslation);
+    }
     if (clientProtocol == kNative || translatedClientVerified(clientProtocol))
         return {};
     return std::unexpected(RouteRefusal::kClientUnsupported);

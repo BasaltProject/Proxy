@@ -1,6 +1,8 @@
 #include "BackendDial.hpp"
 #include "BackendLogin.hpp"
 #include "ClientSession.hpp"
+#include "LoginShapes.hpp"
+#include "RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/common/json/Json.hpp>
@@ -30,7 +32,7 @@ bool ClientSession::answerKnownPacks() {
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::configuration::SelectKnownPacksPacket::kServerboundId);
     wire::protocol::configuration::SelectKnownPacksPacket{}.write(frame_);
-    if (!backend()->queue(frame_.readable()))
+    if (!toBackend(*backend(), frame_.readable()))
         return false;
     backpressure();
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
@@ -86,10 +88,21 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
     if (!relay && packet->size() > BackendLogin::kLoginPacketLimit)
         return false;
+    std::span<const std::uint8_t> bytes = *packet;
+    if (relay && numbered(protocolState())) {
+        if (ids_->apply(IdRenumbering::Flow::kBackendToSession, protocolState(), bytes, idIn_) !=
+            IdRenumbering::Outcome::kRenumbered)
+            return false;
+        bytes = idIn_.readable();
+    }
+    return backendFrame(bytes);
+}
+
+bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     frame_.clear();
-    if (!frame_.tryReserve(packet->size()))
+    if (!frame_.tryReserve(bytes.size()))
         return false;
-    frame_.writeBytes(*packet);
+    frame_.writeBytes(bytes);
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
@@ -114,14 +127,19 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         if (id == (state_ == State::kConfiguration ? wire::protocol::configuration::KeepAlivePacket::kId
                                                    : wire::protocol::play::PlayKeepAlivePacket::kClientboundId))
             return backendChallenge();
-        if (id == (state_ == State::kConfiguration ? 0x05 : 0x3d))
+        if (awaitingJoin_ && state_ == State::kPlay) {
+            awaitingJoin_ = false;
+            backpressure();
+        }
+        const bool shaped = !legacyRaw_;
+        if (shaped && id == (state_ == State::kConfiguration ? 0x05 : 0x3d))
             return backendChallenge(true);
         const bool transfer =
-            id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
+            shaped && id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
         const bool terminal = transfer || (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||
                               (state_ == State::kPlay && id == wire::protocol::play::PlayDisconnectPacket::kId);
         if (transfer) {
-            if (packet->size() > 512)
+            if (bytes.size() > 512)
                 return false;
             auto destination = wire::protocol::play::TransferPacket::read(frame_);
             if (!destination || frame_.readableBytes() != 0 || destination->host.empty() ||
@@ -129,9 +147,9 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
                 std::ranges::any_of(destination->host, [](unsigned char c) { return c <= 32 || c == 127; }))
                 return false;
         } else if (terminal) {
-            if (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0)
+            if (shaped && (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0))
                 return false;
-        } else if (state_ == State::kPlay && id == kStartConfigurationId) {
+        } else if (shaped && state_ == State::kPlay && id == kStartConfigurationId) {
             if (startingConfiguration_ || frame_.readableBytes() != 0)
                 return false;
             if (candidateBackend_ || connectionStage_ != ConnectionStage::kIdle)
@@ -148,8 +166,9 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
             clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5 &&
             id == wire::protocol::configuration::SelectKnownPacksPacket::kClientboundId)
             return answerKnownPacks();
-        if (state_ == State::kPlay && playerCommandNames_ && id == wire::protocol::play::CommandsPacket::kId) {
-            if (!relayCommandTree(*packet))
+        if (shaped && state_ == State::kPlay && playerCommandNames_ &&
+            id == wire::protocol::play::CommandsPacket::kId) {
+            if (!relayCommandTree(bytes))
                 return false;
             backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
             return true;
@@ -165,11 +184,12 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         }
         const auto packPushId = state_ == State::kConfiguration ? 0x09 : 0x51;
         const auto packPopId = state_ == State::kConfiguration ? 0x08 : 0x50;
-        if (id == packPushId || id == packPopId)
+        if (shaped && (id == packPushId || id == packPopId))
             return backendResourcePack(id == packPushId);
         const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
         const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
-        if (id == cookieRequestId) {
+        if (!shaped) {
+        } else if (id == cookieRequestId) {
             auto request = wire::protocol::cookie::RequestPacket::read(frame_);
             if (!request || frame_.readableBytes() != 0 ||
                 !pendingCookies_.add(request->key, cookieCache_.lookup(request->key).storeRevision,
@@ -181,7 +201,7 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
                 !cookieCache_.store(store->key, std::span<const std::uint8_t>{store->payload}))
                 return false;
         }
-        if (!queuePacket(*packet))
+        if (!queuePacket(bytes))
             return false;
         backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
         if (legacyClient() && state_ == State::kConfiguration && finishingConfiguration_ &&
@@ -209,8 +229,23 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
             frame_.clear();
         }
         wire::protocol::varInt::write(frame_, wire::protocol::login::LoginFinishedPacket::kId);
+        if (clientProtocol_ != 0 && clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_2) {
+            writeLoginSuccess(frame_, clientProtocol_, *finished);
+            if (!queueNative(frame_.readable()))
+                return false;
+            state_ = State::kLoginAck;
+            return synthesizeClientPacket(wire::protocol::login::kLoginAcknowledgedId);
+        }
         finished->write(frame_);
-        if (!queuePacket(frame_.readable()))
+        auto encoded = frame_.readable();
+        std::vector<std::uint8_t> older;
+        if (ids_ && !translation_ && loginFinishedTail(clientProtocol_) != LoginFinishedTail::kSessionId) {
+            older.assign(encoded.begin(), encoded.end() - 16);
+            if (loginFinishedTail(clientProtocol_) == LoginFinishedTail::kStrictErrorsFlag)
+                older.push_back(1);
+            encoded = older;
+        }
+        if (!queuePacket(encoded))
             return false;
         state_ = State::kLoginAck;
         if (legacyClient())
@@ -234,7 +269,7 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     if (frame_.failed() || frame_.readableBytes() != 0 || !wire::common::parseJson(reason))
         return false;
     frame_.clear();
-    if (!wire::protocol::packetFraming::writeUncompressed(frame_, *packet))
+    if (!wire::protocol::packetFraming::writeUncompressed(frame_, bytes))
         return false;
     closeBackends();
     return queue(frame_.readable());

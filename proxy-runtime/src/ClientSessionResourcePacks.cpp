@@ -65,7 +65,7 @@ bool ClientSession::resourcePackResponse() {
     if (!origin || !backend() || recovering_ || origin->backend != backend()->attempt())
         return true;
     replaceUuid(frame_, offset, origin->id);
-    if (!backend()->queue(frame_.mutableSpan(0)))
+    if (!toBackend(*backend(), frame_.mutableSpan(0)))
         return false;
     if (action != kPackSuccessfullyLoaded && action != kPackAccepted && action != kPackDownloaded)
         (void)resourcePacks_.remove(origin->id, origin->backend);

@@ -1,13 +1,17 @@
 #include "BackendLogin.hpp"
+#include "LoginShapes.hpp"
+#include "RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/SessionProfile.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 namespace basalt::proxy::runtime::detail {
 
@@ -21,7 +25,17 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
     const auto& profile = *profile_;
     if ((backend.forwarding == Mode::Velocity || backend.forwarding == Mode::Basalt) && !forwarded_)
         return std::unexpected(BackendLoginError::kMalformed);
-    const auto body = packet.readable();
+    std::span<const std::uint8_t> body = packet.readable();
+    std::vector<std::uint8_t> converted;
+    if (backend.protocol < wire::multiversion::protocolVersions::kV1_20_2) {
+        auto native = loginFinishedToNative(backend.protocol, body);
+        if (!native)
+            return std::unexpected(BackendLoginError::kMalformed);
+        converted = std::move(*native);
+        packet.skip(packet.readableBytes());
+        packet.writeBytes(converted);
+        body = packet.readable();
+    }
     (void)protocol::readUuid(packet);
     const auto nameBytes = protocol::varInt::read(packet);
     if (packet.failed() || nameBytes < 0 || nameBytes > 16 * 3)
@@ -33,7 +47,14 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
     frame_.clear();
     if (!frame_.tryReserve(body.size()))
         return std::unexpected(BackendLoginError::kLimit);
-    frame_.writeBytes(body);
+    if (!frame_.tryReserve(body.size() + 16))
+        return std::unexpected(BackendLoginError::kLimit);
+    const auto tail = converted.empty() ? loginFinishedTail(backend.protocol) : LoginFinishedTail::kSessionId;
+    frame_.writeBytes(tail == LoginFinishedTail::kStrictErrorsFlag && !body.empty() ? body.first(body.size() - 1)
+                                                                                    : body);
+    if (tail != LoginFinishedTail::kSessionId)
+        for (int i = 0; i < 16; ++i)
+            frame_.writeByte(0);
     packet.skip(packet.readableBytes());
     auto finished = protocol::login::LoginFinishedPacket::read(frame_);
     if (!finished || frame_.readableBytes() != 0 || finished->gameProfile.name != profile.name ||

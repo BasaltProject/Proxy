@@ -21,8 +21,15 @@ std::expected<void, BackendLoginError> BackendLogin::queueCookie(std::string_vie
     if ((phase_ != Phase::kLogin && phase_ != Phase::kConfiguration && phase_ != Phase::kPlay) || key.empty() ||
         key.size() > kCookieKeyLimit || (payload && payload->size() > protocol::cookie::kMaxPayloadBytes))
         return std::unexpected(BackendLoginError::kMalformed);
-    const auto id = phase_ == Phase::kLogin ? protocol::cookie::ResponsePacket::kLoginId
-                                            : (phase_ == Phase::kConfiguration ? 0x01 : 0x15);
+    auto id = phase_ == Phase::kLogin ? protocol::cookie::ResponsePacket::kLoginId
+                                      : (phase_ == Phase::kConfiguration ? 0x01 : 0x15);
+    if (ids_ && phase_ != Phase::kLogin) {
+        id = ids_->toBackendId(phase_ == Phase::kConfiguration ? protocol::ProtocolState::Configuration
+                                                               : protocol::ProtocolState::Play,
+                               id);
+        if (id < 0)
+            return {};
+    }
     frame_.clear();
     if (!frame_.tryReserve(kCookiePacketLimit))
         return std::unexpected(BackendLoginError::kLimit);

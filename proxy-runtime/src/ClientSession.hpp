@@ -2,6 +2,7 @@
 
 #include "BackendAttempts.hpp"
 #include "CookieCache.hpp"
+#include "IdRenumbering.hpp"
 #include "IdentityRegistry.hpp"
 #include "PendingCookies.hpp"
 #include "PendingResponses.hpp"
@@ -82,6 +83,7 @@ public:
     [[nodiscard]] std::string_view playerName() const;
     [[nodiscard]] bool candidatePrepared() const;
     [[nodiscard]] bool beginPreparedChange();
+    [[nodiscard]] bool commitLegacyChange();
     [[nodiscard]] bool backendReady(const wire::io::IoReady& event);
     [[nodiscard]] bool timedOut(Clock::time_point now);
 
@@ -123,6 +125,13 @@ private:
     [[nodiscard]] bool queueNative(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queueTranslated(std::span<const std::uint8_t> packet);
     std::unique_ptr<wire::multiversion::java::JavaChain> translation_;
+    std::unique_ptr<IdRenumbering> ids_;
+    [[nodiscard]] bool toBackend(BackendLogin& target, std::span<const std::uint8_t> frame);
+    [[nodiscard]] bool numbered(wire::protocol::ProtocolState state) const;
+    [[nodiscard]] bool keepAliveVarInt() const;
+    bool legacyRaw_ = false;
+    bool awaitingJoin_ = false;
+    [[nodiscard]] bool acceptsBackend(std::int32_t protocol) const;
     std::int32_t clientProtocol_ = 0;
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;
@@ -150,6 +159,7 @@ private:
     [[nodiscard]] bool routeNext();
     [[nodiscard]] bool candidateReady(const wire::io::IoReady& event);
     [[nodiscard]] bool backendEvent(const wire::io::IoReady& event);
+    [[nodiscard]] bool backendFrame(std::span<const std::uint8_t> bytes);
     [[nodiscard]] bool advancePreparedChange();
     void discardCandidate();
     [[nodiscard]] bool acknowledgePreparedChange();
@@ -221,6 +231,8 @@ private:
     std::optional<wire::auth::Cfb8Cipher> encryptor_;
     std::optional<wire::auth::Cfb8Cipher> decryptor_;
     wire::io::ByteBuffer clientSettings_;
+    wire::io::ByteBuffer idIn_;
+    wire::io::ByteBuffer idOut_;
     wire::io::ByteBuffer input_;
     wire::io::ByteBuffer frame_;
     wire::io::ByteBuffer output_;

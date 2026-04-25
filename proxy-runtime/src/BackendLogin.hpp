@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BackendAttempts.hpp"
+#include "IdRenumbering.hpp"
 
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
@@ -57,6 +58,10 @@ public:
     BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory, BackendAttempt attempt);
 
     [[nodiscard]] BackendAttempt attempt() const { return attempt_; }
+
+    void useIds(const IdRenumbering* ids) { ids_ = ids; }
+
+    [[nodiscard]] std::int32_t protocol() const { return protocol_; }
 
     [[nodiscard]] bool forwarded() const { return forwarded_; }
 
@@ -134,6 +139,8 @@ private:
     wire::io::ByteBuffer frame_;
     bool allocationReady_ = false;
     Phase phase_ = Phase::kUnstarted;
+    const IdRenumbering* ids_ = nullptr;
+    std::int32_t protocol_ = 0;
     bool compressionNegotiated_ = false;
     std::optional<std::int32_t> compression_;
 };

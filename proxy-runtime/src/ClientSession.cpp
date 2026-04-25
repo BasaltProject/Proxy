@@ -3,6 +3,7 @@
 #include "BackendDial.hpp"
 #include "BackendLogin.hpp"
 #include "BackendRoutes.hpp"
+#include "LoginShapes.hpp"
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
 #include "RouteVersions.hpp"
@@ -10,6 +11,7 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -53,8 +55,8 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
       online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
-      clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
-      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
+      clientSettings_(0, memory_), idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_), frame_(0, memory_),
+      output_(0, memory_), readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
     buffers.reset();
     allocationReady_ =
         input_.tryReserve(kBufferCapacity) && frame_.tryReserve(kBufferCapacity) && output_.tryReserve(kBufferCapacity);
@@ -120,8 +122,22 @@ void ClientSession::tell(std::string_view text) {
         return;
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::play::SystemChatPacket::kId);
-    wire::protocol::play::SystemChatPacket{wire::text::Component::text(std::string{text.substr(0, 1024)}), false}.write(
-        frame_);
+    if (legacyRaw_) {
+        if (clientProtocol_ < wire::multiversion::protocolVersions::kV1_19)
+            return;
+        std::string json = R"({"text":")";
+        for (const char c : text.substr(0, 1024))
+            json += c == '"' || c == '\\' ? std::string{'\\', c} : std::string{c};
+        json += R"("})";
+        wire::protocol::writeString(frame_, json);
+        if (clientProtocol_ == wire::multiversion::protocolVersions::kV1_19)
+            wire::protocol::varInt::write(frame_, 1);
+        else
+            wire::protocol::writeBoolean(frame_, false);
+    } else {
+        wire::protocol::play::SystemChatPacket{wire::text::Component::text(std::string{text.substr(0, 1024)}), false}
+            .write(frame_);
+    }
     static_cast<void>(queuePacket(frame_.readable()));
 }
 
@@ -143,8 +159,8 @@ bool ClientSession::accounted() const {
     return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() +
                                        pendingCookies_.allocated() + pendingKeepAlives_.allocated() +
                                        pendingPings_.allocated() + cookieCache_.allocated() +
-                                       resourcePacks_.allocated() + clientSettings_.capacity() +
-                                       (activeBackend_ ? activeBackend_->allocated() : 0) +
+                                       resourcePacks_.allocated() + clientSettings_.capacity() + idIn_.capacity() +
+                                       idOut_.capacity() + (activeBackend_ ? activeBackend_->allocated() : 0) +
                                        (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
                                    localBuffers_.used();
 }
@@ -198,8 +214,52 @@ wire::protocol::ProtocolState ClientSession::protocolState() const {
     }
 }
 
+bool ClientSession::numbered(wire::protocol::ProtocolState state) const {
+    return ids_ && (legacyRaw_ ? state == wire::protocol::ProtocolState::Play : IdRenumbering::applies(state));
+}
+
+bool ClientSession::keepAliveVarInt() const { return legacyRaw_ && keepAliveIsVarInt(clientProtocol_); }
+
 bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
+    if (numbered(protocolState())) {
+        switch (ids_->apply(IdRenumbering::Flow::kSessionToClient, protocolState(), packet, idOut_)) {
+        case IdRenumbering::Outcome::kRenumbered:
+            return queueNative(idOut_.readable());
+        case IdRenumbering::Outcome::kDropped:
+            return true;
+        default:
+            return false;
+        }
+    }
     return translation_ ? queueTranslated(packet) : queueNative(packet);
+}
+
+bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t> frame) {
+    if (ids_) {
+        const auto phase = target.phase();
+        if (legacyRaw_ && (phase == BackendLogin::Phase::kConfiguration ||
+                           (phase == BackendLogin::Phase::kLoginAccepted && !frame.empty() &&
+                            frame[0] == wire::protocol::login::kLoginAcknowledgedId)))
+            return true;
+        const auto state = phase == BackendLogin::Phase::kPlay            ? wire::protocol::ProtocolState::Play
+                           : phase == BackendLogin::Phase::kConfiguration ? wire::protocol::ProtocolState::Configuration
+                                                                          : wire::protocol::ProtocolState::Login;
+        if (numbered(state)) {
+            switch (ids_->apply(IdRenumbering::Flow::kSessionToBackend, state, frame, idOut_)) {
+            case IdRenumbering::Outcome::kRenumbered:
+                return static_cast<bool>(target.queue(idOut_.readable()));
+            case IdRenumbering::Outcome::kDropped:
+                return true;
+            default:
+                return false;
+            }
+        }
+    }
+    return static_cast<bool>(target.queue(frame));
+}
+
+bool ClientSession::acceptsBackend(std::int32_t protocol) const {
+    return ids_ ? protocol == clientProtocol_ : protocol == buildInfo::kProtocolVersion;
 }
 
 bool ClientSession::legacyClient() const {
@@ -298,7 +358,8 @@ bool ClientSession::rememberSettings(std::span<const std::uint8_t> packet) {
     (void)wire::protocol::varInt::read(frame_);
     (void)wire::protocol::readBoolean(frame_);
     (void)wire::protocol::readBoolean(frame_);
-    (void)wire::protocol::varInt::read(frame_);
+    if (!ids_ || clientProtocol_ >= wire::multiversion::protocolVersions::kV1_21_2)
+        (void)wire::protocol::varInt::read(frame_);
     if (frame_.failed() || frame_.readableBytes() != 0 || !clientSettings_.tryReserve(packet.size()))
         return false;
     clientSettings_.clear();
@@ -319,7 +380,7 @@ bool ClientSession::packet() {
         if (id != protocol::login::kLoginAcknowledgedId || frame_.readableBytes() != 0 ||
             (output_.readableBytes() != 0 && !synthesizing_) || !backend())
             return false;
-        if (!backend()->queue(raw))
+        if (!toBackend(*backend(), raw))
             return false;
         backpressure();
         if (!backend()->acknowledgeLogin())
@@ -328,12 +389,18 @@ bool ClientSession::packet() {
         readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         backend()->expectReadUntil(readDeadline_);
         backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        if (legacyRaw_) {
+            constexpr std::array<std::uint8_t, 1> finish{
+                static_cast<std::uint8_t>(wire::protocol::configuration::kFinishConfigurationId)};
+            return backendFrame(finish);
+        }
         return true;
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend() || id < 0 || (state_ == State::kConfiguration && id == kConfigurationAcknowledgedId))
             return false;
-        if (state_ == State::kPlay && playerCommand_ && profile_ &&
+        const bool shaped = !legacyRaw_;
+        if (shaped && state_ == State::kPlay && playerCommand_ && profile_ &&
             (id == protocol::play::ChatCommandPacket::kId || id == protocol::play::SignedChatCommandPacket::kId)) {
             wire::io::ByteBuffer view;
             view.writeBytes(frame_.readable());
@@ -344,7 +411,7 @@ bool ClientSession::packet() {
         if (id == (state_ == State::kConfiguration ? protocol::configuration::KeepAlivePacket::kId
                                                    : protocol::play::PlayKeepAlivePacket::kServerboundId))
             return challengeResponse();
-        if (id == (state_ == State::kConfiguration ? 0x05 : 0x2d))
+        if (shaped && id == (state_ == State::kConfiguration ? 0x05 : 0x2d))
             return challengeResponse(true);
         if (id == (state_ == State::kConfiguration ? 0x02 : 0x16)) {
             const auto result = pluginMessage(false);
@@ -352,12 +419,12 @@ bool ClientSession::packet() {
                 return result == PluginMessageResult::kConsumed;
         }
         const auto settingsId = state_ == State::kConfiguration ? 0x00 : 0x0e;
-        if (id == settingsId && !rememberSettings(raw))
+        if (shaped && id == settingsId && !rememberSettings(raw))
             return false;
         const auto cookieResponseId = state_ == State::kConfiguration ? 0x01 : 0x15;
-        if (id == cookieResponseId)
+        if (shaped && id == cookieResponseId)
             return cookieResponse();
-        if (id == (state_ == State::kConfiguration ? 0x06 : 0x32))
+        if (shaped && id == (state_ == State::kConfiguration ? 0x06 : 0x32))
             return resourcePackResponse();
         bool enterPlay = false;
         bool enterConfiguration = false;
@@ -381,11 +448,12 @@ bool ClientSession::packet() {
         }
         if (recovering_)
             return true;
-        if (!backend()->queue(raw))
+        if (!toBackend(*backend(), raw))
             return false;
         if (enterConfiguration && !backend()->beginConfiguration())
             return false;
-        if (enterConfiguration && clientSettings_.readableBytes() != 0 && !backend()->queue(clientSettings_.readable()))
+        if (enterConfiguration && clientSettings_.readableBytes() != 0 &&
+            !toBackend(*backend(), clientSettings_.readable()))
             return false;
         if (enterPlay) {
             pendingKeepAlives_.clear();
@@ -395,6 +463,7 @@ bool ClientSession::packet() {
             if (!activeBackend_)
                 activeBackend_ = std::move(candidateBackend_);
             state_ = State::kPlay;
+            awaitingJoin_ = legacyRaw_;
         }
         backpressure();
         backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
@@ -413,7 +482,7 @@ bool ClientSession::packet() {
         } else if ((hello->intent == protocol::handshake::ClientIntent::Login ||
                     (acceptTransfers_ && hello->intent == protocol::handshake::ClientIntent::Transfer)) &&
                    (hello->protocolVersion == buildInfo::kProtocolVersion ||
-                    translatedClientVerified(hello->protocolVersion))) {
+                    translatedClientVerified(hello->protocolVersion) || backendVerified(hello->protocolVersion))) {
             const auto candidates = routes_.select(hello->hostName);
             if (!candidates.empty() && std::ranges::none_of(candidates, [&](std::size_t target) {
                     return resolveRoute(hello->protocolVersion, backends_[target].protocol).has_value();
@@ -421,9 +490,22 @@ bool ClientSession::packet() {
                 return false;
             if (hello->protocolVersion != buildInfo::kProtocolVersion) {
                 clientProtocol_ = hello->protocolVersion;
-                translation_ = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
-                if (!translation_)
+                auto chain = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
+                if (!chain)
                     return false;
+                if (backendVerified(hello->protocolVersion) && std::ranges::any_of(candidates, [&](std::size_t target) {
+                        return backends_[target].protocol == hello->protocolVersion;
+                    })) {
+                    ids_ = std::make_unique<IdRenumbering>(std::move(chain));
+                    if (hello->protocolVersion < wire::multiversion::protocolVersions::kV1_20_2) {
+                        translation_ = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
+                        legacyRaw_ = translation_ != nullptr;
+                        if (!legacyRaw_)
+                            return false;
+                    }
+                } else {
+                    translation_ = std::move(chain);
+                }
             }
             state_ = State::LoginStart;
             virtualHost_ = hello->hostName;
@@ -438,10 +520,11 @@ bool ClientSession::packet() {
     } else if (state_ == State::LoginStart) {
         if (id != protocol::login::LoginStartPacket::kId)
             return false;
-        auto start = protocol::login::LoginStartPacket::read(frame_);
-        if (!start || frame_.readableBytes() != 0 || !wire::auth::validLoginName(start->name))
+        auto loginName =
+            readClientLoginName(clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion, frame_);
+        if (!loginName || !wire::auth::validLoginName(*loginName))
             return false;
-        name_ = std::move(start->name);
+        name_ = std::move(*loginName);
         if (!online_) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
             return route();
@@ -455,7 +538,7 @@ bool ClientSession::packet() {
                                            .shouldAuthenticate = true};
         frame_.clear();
         protocol::varInt::write(frame_, protocol::login::HelloPacket::kId);
-        hello.write(frame_);
+        writeEncryptionRequest(frame_, clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion, hello);
         output_.discardReadBytes();
         if (frame_.readableBytes() + 3 > kBufferCapacity - output_.writerIndex())
             return false;
@@ -468,7 +551,7 @@ bool ClientSession::packet() {
     } else if (state_ == State::Key) {
         if (id != protocol::login::KeyPacket::kId)
             return false;
-        auto key = protocol::login::KeyPacket::read(frame_);
+        auto key = readEncryptionResponse(clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion, frame_);
         if (!key || frame_.readableBytes() != 0 || key->encryptedSecret.size() != 128 ||
             key->encryptedChallenge.size() != 128 || output_.readableBytes() != 0)
             return false;
@@ -538,7 +621,17 @@ bool ClientSession::decode() {
             return false;
         if (!*decoded)
             break;
-        if (translation_ ? !translateInbound() : !packet())
+        const bool raw = numbered(protocolState());
+        if (raw) {
+            if (ids_->apply(IdRenumbering::Flow::kClientToSession, protocolState(), frame_.readable(), idIn_) !=
+                IdRenumbering::Outcome::kRenumbered)
+                return false;
+            frame_.clear();
+            if (!frame_.tryReserve(idIn_.readableBytes() + 8))
+                return false;
+            frame_.writeBytes(idIn_.readable());
+        }
+        if (raw || !translation_ ? !packet() : !translateInbound())
             return false;
     }
     input_.discardReadBytes();
@@ -697,7 +790,8 @@ bool ClientSession::routeNext() {
         }
         identityClaimed_ = true;
     }
-    while (recovering_ && nextTarget_ < targets_.size() && recoveryVisited_.test(targets_[nextTarget_]))
+    while (nextTarget_ < targets_.size() && ((recovering_ && recoveryVisited_.test(targets_[nextTarget_])) ||
+                                             !acceptsBackend(backends_[targets_[nextTarget_]].protocol)))
         ++nextTarget_;
     if (nextTarget_ == targets_.size()) {
         if (recovering_)
@@ -772,6 +866,7 @@ bool ClientSession::dial() {
     if (!dialAttempt_ || dialAttempt_->target >= backends_.size())
         return false;
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
+    candidateBackend_->useIds(ids_.get());
     dialAttempt_.reset();
     if (!profile_ ||
         !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_, virtualPort_,
@@ -843,7 +938,7 @@ std::array<ClientSession::BackendWatch, 3> ClientSession::backendWatches() const
 }
 
 void ClientSession::backpressure() {
-    if (backend() && backend()->pendingBytes() >= settings_.highWaterBytes)
+    if (awaitingJoin_ || (backend() && backend()->pendingBytes() >= settings_.highWaterBytes))
         frontendPaused_ = true;
     else if (frontendPaused_ && (!backend() || backend()->pendingBytes() <= settings_.lowWaterBytes)) {
         frontendPaused_ = false;

@@ -106,7 +106,7 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
             first = false;
         }
     }
-    if (!backend()->queue(frame_.readable()))
+    if (!toBackend(*backend(), frame_.readable()))
         return PluginMessageResult::kInvalid;
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
     backpressure();
