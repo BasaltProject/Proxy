@@ -115,6 +115,8 @@ private:
 
     void deliver(const runtime::PlayerEvent& event);
     void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
+    void callLogin(Plugin& plugin, const std::string& player, const std::string& uuid);
+    void callPing(Plugin& plugin, const std::string& host, const std::string& protocol);
     void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
     void call(Plugin& plugin, const wire::lua::LuaRef& function,
               const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why);

@@ -34,15 +34,21 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
           "on('player.join', function(e) log.info('hello ' .. e.player.name .. ' on ' .. e.server .. ' of ' "
           "  .. #servers.list() .. ' online ' .. players.count()) end)\n"
           "on('player.quit', function(e) log.info('bye ' .. e.player_name) end)\n"
-          "on('player.server_change', function(e) log.info('moved ' .. e.from_server .. ' to ' .. e.server) end)\n");
+          "on('player.server_change', function(e) log.info('moved ' .. e.from_server .. ' to ' .. e.server) end)\n"
+          "watch('player.chat', function(e) log.info('said ' .. e.player_name .. ': ' .. e.message) end)\n"
+          "watch('player.kick', function(e) log.info('kicked ' .. e.player_name .. ': ' .. e.reason) end)\n"
+          "watch('server.ping', function(e) log.info('pinged ' .. e.host .. ' ' .. e.protocol) end)\n"
+          "watch('player.login', function(e) log.info('login ' .. e.player_name) end)\n");
     manifest(root / "looper", "looper");
     write(root / "looper" / "src" / "main.lua", "on('player.join', function() while true do end end)\n");
     manifest(root / "syntax", "syntax");
     write(root / "syntax" / "src" / "main.lua", "this is not lua\n");
     manifest(root / "tools", "tools");
+    write(root / "tools" / "lang" / "en_us.toml", "welcome = \"Hello {who}\"\n");
     write(root / "tools" / "src" / "main.lua",
           "cmd('hello [times: int 1..5]', function(src, times) src:send('hi ' .. tostring(times)) end)\n"
           "cmd('hello world', function(src) src:send('hello world') end)\n"
+          "cmd('greet', function(src) src:send('@welcome', {who = 'Ann'}) log.info(t('welcome', {who = 'Bob'})) end)\n"
           "cmd('secret', function(src) src:send('opened') end, {permission = 'tools.secret'})\n"
           "local ok = pcall(cmd, 'stop', function() end)\n"
           "log.info('builtin accepted: ' .. tostring(ok))\n"
@@ -118,6 +124,9 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     CHECK(seen("tools: hi 2"));
     CHECK(seen("tools: hello world"));
     CHECK(seen("tell Steve: hi 3"));
+    CHECK((*host)->playerCommand("Steve", "greet"));
+    CHECK(seen("tell Steve: Hello Ann"));
+    CHECK(seen("tools: Hello Bob"));
     CHECK(seen("tell Steve: <red>Usage: /hello [times: int 1..5]"));
     CHECK(seen("tell Steve: <red>You do not have permission to use this command."));
     CHECK(seen("tell Admin: opened"));
@@ -128,6 +137,14 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     }
     (*host)->post({runtime::PlayerEventKind::kSwitch, "Steve", "b", "uuid-1", "a"});
     CHECK(seen("greeter: moved a to b"));
+    (*host)->post({runtime::PlayerEventKind::kChat, "Steve", {}, {}, "hi all"});
+    CHECK(seen("greeter: said Steve: hi all"));
+    (*host)->post({runtime::PlayerEventKind::kKick, "Steve", {}, {}, "Flying"});
+    CHECK(seen("greeter: kicked Steve: Flying"));
+    (*host)->post({runtime::PlayerEventKind::kPing, {}, "mc.example", {}, "777"});
+    CHECK(seen("greeter: pinged mc.example 777"));
+    (*host)->post({runtime::PlayerEventKind::kLogin, "Steve", {}, "uuid-1", {}});
+    CHECK(seen("greeter: login Steve"));
     (*host)->post({runtime::PlayerEventKind::kLeave, "Steve", "b", "uuid-1", {}});
     CHECK(seen("greeter: bye Steve"));
     {

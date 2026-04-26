@@ -1,5 +1,5 @@
-#include "BedrockStatus.hpp"
 #include "BackendRoutes.hpp"
+#include "BedrockStatus.hpp"
 #include "Console.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -98,6 +98,22 @@ int run(const cliCommand::Run& command) {
     services.playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr && host->playerCommand(player, command);
+    };
+    services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kChat, std::string{player}, {}, {}, std::string{message}});
+    };
+    services.playerKick = [&pluginHost](std::string_view player, std::string_view reason) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kKick, std::string{player}, {}, {}, std::string{reason}});
+    };
+    services.statusPing = [&pluginHost](std::string_view host, std::int32_t protocol) {
+        if (auto* host_ = pluginHost.load(std::memory_order_acquire))
+            host_->post({PlayerEventKind::kPing, {}, std::string{host}, {}, std::to_string(protocol)});
+    };
+    services.playerLogin = [&pluginHost](std::string_view player, std::string_view uuid) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kLogin, std::string{player}, {}, std::string{uuid}, {}});
     };
     services.playerEvents = [&pluginHost](PlayerEvent event) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
