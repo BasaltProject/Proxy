@@ -140,9 +140,6 @@ struct ProxyConfig {
     std::vector<HostRoute> forcedHosts;
 };
 
-[[nodiscard]] std::string_view defaultProxyToml() noexcept;
-[[nodiscard]] std::string_view defaultBackendsToml() noexcept;
-[[nodiscard]] std::string_view defaultPluginsToml() noexcept;
 [[nodiscard]] std::expected<ProxyConfig, std::string> fromToml(const wire::common::toml::TomlTable& proxy,
                                                                const wire::common::toml::TomlTable& backends,
                                                                std::string_view directory,

@@ -1,4 +1,5 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
 
@@ -11,7 +12,7 @@ namespace toml = basalt::wire::common::toml;
 
 namespace {
 std::expected<ProxyConfig, std::string> decode(std::string_view proxy,
-                                               std::string_view backends = defaultBackendsToml()) {
+                                               std::string_view backends = kBackendsDefaultToml) {
     auto p = toml::parse(proxy);
     auto b = toml::parse(backends);
     if (!p || !b)
@@ -22,7 +23,7 @@ std::expected<ProxyConfig, std::string> decode(std::string_view proxy,
 
 TEST_CASE("commented defaults produce online authentication, bounded owners "
           "and explicit backend identity") {
-    const auto defaults = decode(defaultProxyToml());
+    const auto defaults = decode(kProxyDefaultToml);
     REQUIRE(defaults);
     CHECK(defaults->network.onlineMode);
     CHECK_FALSE(defaults->network.acceptTransfers);

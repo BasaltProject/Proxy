@@ -80,8 +80,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
     } else if (state_ == State::LoginStart) {
         if (id != protocol::login::LoginStartPacket::kId)
             return false;
-        auto loginName =
-            readClientLoginName(clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion, frame_);
+        auto loginName = readClientLoginName(
+            translation_ || clientProtocol_ == 0 ? buildInfo::kProtocolVersion : clientProtocol_, frame_);
         if (!loginName || !wire::auth::validLoginName(*loginName))
             return false;
         name_ = std::move(*loginName);
@@ -111,7 +111,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
     } else if (state_ == State::Key) {
         if (id != protocol::login::KeyPacket::kId)
             return false;
-        auto key = readEncryptionResponse(clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion, frame_);
+        auto key = readEncryptionResponse(
+            translation_ || clientProtocol_ == 0 ? buildInfo::kProtocolVersion : clientProtocol_, frame_);
         if (!key || frame_.readableBytes() != 0 || key->encryptedSecret.size() != 128 ||
             key->encryptedChallenge.size() != 128 || output_.readableBytes() != 0)
             return false;

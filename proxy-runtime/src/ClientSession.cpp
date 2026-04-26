@@ -50,8 +50,8 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::function<bool(std::string_view, std::string_view)> playerCommand,
                              std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs,
                              config::TranslationMode translation)
-    : topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
-      playerCommandSpecs_(std::move(playerCommandSpecs)), translationMode_(translation), slot_(std::move(slot)),
+    : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
+      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
