@@ -4,6 +4,8 @@ basalt_module(proxy-runtime-core
         src/Console.cpp
         src/Admission.cpp
         src/BedrockStatus.cpp
+        src/bedrock/JavaLink.cpp
+        src/bedrock/BedrockSession.cpp
         src/BackendChangeRequest.cpp
         src/BackendRoutes.cpp
         src/BackendAttempts.cpp

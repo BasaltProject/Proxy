@@ -9,7 +9,7 @@ namespace basalt::proxy::runtime::detail {
 namespace {
 
 constexpr std::string_view kGameVersion = "1.26.50";
-constexpr int kPollTimeoutMillis = 50;
+constexpr int kPollTimeoutMillis = 5;
 constexpr std::size_t kMaxHandshakes = 64;
 constexpr std::string_view kTurnedAway = "Bedrock players cannot join this network yet.";
 
@@ -21,8 +21,9 @@ std::uint64_t nowMillis() {
 
 } // namespace
 
-BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max)
-    : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max) {}
+BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
+                             Route route)
+    : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -54,26 +55,51 @@ bool BedrockStatus::start() {
     }
     server_->onAdvertise([this] { return advertisement(); });
     server_->onConnect([this](wire::bedrock::RakSession& session) {
-        auto client = std::make_unique<wire::bedrock::BedrockConnection>(session, keys_, std::string{kGameVersion});
-        wire::bedrock::BedrockConnection& connection = *client;
-        connection.onLogin([&connection](const wire::bedrock::LoginRequest& login) {
+        auto connection = std::make_unique<wire::bedrock::BedrockConnection>(session, keys_, std::string{kGameVersion});
+        wire::bedrock::BedrockConnection& raw = *connection;
+        const wire::io::UdpEndpoint peer = session.peer();
+        raw.onLogin([](const wire::bedrock::LoginRequest& login) {
             wire::common::Logger{"Bedrock"}.info([&login] {
-                return login.name + " tried to join from Bedrock" + (login.authenticated ? "" : " (unauthenticated)") +
-                       " and was turned away.";
+                return login.name + " is joining from Bedrock" + (login.authenticated ? "" : " (unauthenticated)") +
+                       ".";
             });
-            connection.disconnect(kTurnedAway);
         });
-        clients_.insert_or_assign(session.peer(), std::move(client));
+        raw.onReady([this, &raw, peer] {
+            const auto found = clients_.find(peer);
+            const auto backend = route_ ? route_() : std::nullopt;
+            if (found == clients_.end() || !backend) {
+                wire::common::Logger{"Bedrock"}.warn(
+                    [] { return std::string{"No backend to send a Bedrock player to."}; });
+                raw.disconnect(kTurnedAway);
+                return;
+            }
+            found->second.session = std::make_unique<BedrockSession>(raw, *backend, peer.toString());
+            if (!found->second.session->begin()) {
+                wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
+                found->second.session.reset();
+                raw.disconnect("The server could not be reached.");
+            }
+        });
+        raw.onPacket([this, peer](wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body) {
+            if (const auto found = clients_.find(peer); found != clients_.end() && found->second.session)
+                found->second.session->fromBedrock(packet, body);
+        });
+        clients_.insert_or_assign(peer, Client{std::move(connection), nullptr});
     });
     server_->onMessage([this](wire::bedrock::RakSession& session, std::span<const std::uint8_t> payload) {
         if (const auto found = clients_.find(session.peer()); found != clients_.end())
-            found->second->receive(payload);
+            found->second.connection->receive(payload);
     });
     server_->onDisconnect([this](wire::bedrock::RakSession& session) { clients_.erase(session.peer()); });
     running_.store(true);
     thread_ = std::jthread{[this] {
-        while (running_.load())
+        while (running_.load()) {
             server_->poll(nowMillis(), kPollTimeoutMillis);
+            for (auto& [peer, client] : clients_) {
+                if (client.session)
+                    client.session->pump();
+            }
+        }
     }};
     return true;
 }

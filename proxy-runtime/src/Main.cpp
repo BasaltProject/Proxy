@@ -1,4 +1,5 @@
 #include "BedrockStatus.hpp"
+#include "BackendRoutes.hpp"
 #include "Console.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -227,17 +228,23 @@ int run(const cliCommand::Run& command) {
     if (configuration->bedrock.enabled) {
         bedrock = std::make_unique<detail::BedrockStatus>(
             configuration->bedrock.port, configuration->bedrock.motd, [&runtime] { return runtime->sessionCount(); },
-            configuration->runtime.maxSessions);
+            configuration->runtime.maxSessions,
+            [&configuration]() -> std::optional<proxy::config::BackendConfig> {
+                const auto routes = detail::BackendRoutes::create(*configuration);
+                if (!routes)
+                    return std::nullopt;
+                const auto defaults = routes->select("bedrock.invalid");
+                if (defaults.empty())
+                    return std::nullopt;
+                return configuration->backends[defaults.front()];
+            });
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
             });
             return 1;
         }
-        logger.info([&bedrock] {
-            return "Bedrock status on UDP port " + std::to_string(bedrock->port()) +
-                   "; Bedrock players are turned away with a message.";
-        });
+        logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
     }
     std::jthread console{[&](std::stop_token stop) {
         detail::runConsole(*runtime, configuration->backends, stopping, stop, reloadConfiguration,
