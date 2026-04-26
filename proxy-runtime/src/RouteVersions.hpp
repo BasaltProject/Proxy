@@ -17,6 +17,9 @@ enum class RouteRefusal { kClientUnsupported, kBackendUnsupported, kNoTranslatio
 enum class LoginFinishedTail { kSessionId, kNone, kStrictErrorsFlag };
 [[nodiscard]] LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept;
 
+/// The protocol a backend is spoken to in: its own, or the player's when it follows the client.
+[[nodiscard]] std::int32_t effectiveProtocol(std::int32_t configured, std::int32_t clientProtocol) noexcept;
+
 /// Every pairing without a verified route is refused before any state is entered.
 [[nodiscard]] std::expected<void, RouteRefusal> resolveRoute(std::int32_t clientProtocol,
                                                              std::int32_t backendProtocol) noexcept;

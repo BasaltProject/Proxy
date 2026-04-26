@@ -36,6 +36,12 @@ LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
                                                                            : LoginFinishedTail::kStrictErrorsFlag;
 }
 
+std::int32_t effectiveProtocol(std::int32_t configured, std::int32_t clientProtocol) noexcept {
+    if (configured != 0)
+        return configured;
+    return clientProtocol != 0 ? clientProtocol : buildInfo::kProtocolVersion;
+}
+
 std::expected<void, RouteRefusal> resolveRoute(std::int32_t clientProtocol, std::int32_t backendProtocol) noexcept {
     constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
     if (backendProtocol != kNative) {

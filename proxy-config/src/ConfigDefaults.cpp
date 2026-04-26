@@ -117,7 +117,8 @@ default = ["lobby"]
 [backends.lobby]
 host = "127.0.0.1"
 port = 25566
-# Backend Java protocol; compatibility is checked for the client/backend pair.
+# Backend Java protocol, or "client" for a backend that speaks whatever version each player connects with, as a Basalt Server does
+# for the older versions it translates itself. Compatibility is checked for the client/backend pair.
 protocol = 777
 # none, basalt, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
 # none is viable for an offline vanilla backend; it does not forward premium UUID/properties.

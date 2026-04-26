@@ -48,9 +48,10 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                              const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
                              std::function<bool(std::string_view, std::string_view)> playerCommand,
-                             std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs)
+                             std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs,
+                             config::TranslationMode translation)
     : topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
-      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
+      playerCommandSpecs_(std::move(playerCommandSpecs)), translationMode_(translation), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
@@ -146,8 +147,18 @@ wire::protocol::ProtocolState ClientSession::protocolState() const {
     }
 }
 
+bool ClientSession::rawProtocol(std::int32_t protocol) const {
+    return ids_ && clientProtocol_ != 0 && protocol == clientProtocol_;
+}
+
+bool ClientSession::rawNow() const { return backend() && rawProtocol(backend()->protocol()); }
+
 bool ClientSession::numbered(wire::protocol::ProtocolState state) const {
-    return ids_ && (legacyRaw_ ? state == wire::protocol::ProtocolState::Play : IdRenumbering::applies(state));
+    return rawNow() && (legacyRaw_ ? state == wire::protocol::ProtocolState::Play : IdRenumbering::applies(state));
+}
+
+bool ClientSession::queueLoginPacket(std::span<const std::uint8_t> packet) {
+    return rawNow() ? queueNative(packet) : queuePacket(packet);
 }
 
 bool ClientSession::keepAliveVarInt() const { return legacyRaw_ && keepAliveIsVarInt(clientProtocol_); }
@@ -167,7 +178,7 @@ bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
 }
 
 bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t> frame) {
-    if (ids_) {
+    if (rawProtocol(target.protocol())) {
         const auto phase = target.phase();
         if (legacyRaw_ && (phase == BackendLogin::Phase::kConfiguration ||
                            (phase == BackendLogin::Phase::kLoginAccepted && !frame.empty() &&
@@ -190,8 +201,30 @@ bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t
     return static_cast<bool>(target.queue(frame));
 }
 
-bool ClientSession::acceptsBackend(std::int32_t protocol) const {
-    return ids_ ? protocol == clientProtocol_ : protocol == buildInfo::kProtocolVersion;
+std::int32_t ClientSession::speaksTo(std::int32_t configured, std::int32_t client) const {
+    if (configured == 0 && translationMode_ == config::TranslationMode::Proxy)
+        return buildInfo::kProtocolVersion;
+    return effectiveProtocol(configured, client);
+}
+
+bool ClientSession::routeAllowed(std::int32_t client, std::int32_t configured) const {
+    const std::int32_t speaks = speaksTo(configured, client);
+    if (translationMode_ == config::TranslationMode::Off && client != buildInfo::kProtocolVersion &&
+        speaks == buildInfo::kProtocolVersion)
+        return false;
+    return resolveRoute(client, speaks).has_value();
+}
+
+bool ClientSession::acceptsBackend(std::int32_t configured) const {
+    constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
+    const std::int32_t protocol = speaksTo(configured, clientProtocol_);
+    if (translationMode_ == config::TranslationMode::Off && clientProtocol_ != 0 && protocol == kNative)
+        return false;
+    if (legacyRaw_ || (ids_ && !translation_))
+        return protocol == clientProtocol_;
+    if (ids_)
+        return protocol == clientProtocol_ || protocol == kNative;
+    return protocol == kNative;
 }
 
 bool ClientSession::legacyClient() const {
@@ -290,7 +323,7 @@ bool ClientSession::rememberSettings(std::span<const std::uint8_t> packet) {
     (void)wire::protocol::varInt::read(frame_);
     (void)wire::protocol::readBoolean(frame_);
     (void)wire::protocol::readBoolean(frame_);
-    if (!ids_ || clientProtocol_ >= wire::multiversion::protocolVersions::kV1_21_2)
+    if (!rawNow() || clientProtocol_ >= wire::multiversion::protocolVersions::kV1_21_2)
         (void)wire::protocol::varInt::read(frame_);
     if (frame_.failed() || frame_.readableBytes() != 0 || !clientSettings_.tryReserve(packet.size()))
         return false;
@@ -443,7 +476,7 @@ bool ClientSession::decode() {
                 return false;
             frame_.writeBytes(idIn_.readable());
         }
-        if (raw || !translation_ ? !packet() : !translateInbound())
+        if (raw || !translation_ || (rawNow() && !legacyRaw_) ? !packet() : !translateInbound())
             return false;
     }
     input_.discardReadBytes();
@@ -678,11 +711,12 @@ bool ClientSession::dial() {
     if (!dialAttempt_ || dialAttempt_->target >= backends_.size())
         return false;
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
-    candidateBackend_->useIds(ids_.get());
+    const std::int32_t speaks = speaksTo(backends_[candidateBackend_->attempt().target].protocol, clientProtocol_);
+    candidateBackend_->useIds(rawProtocol(speaks) ? ids_.get() : nullptr);
     dialAttempt_.reset();
     if (!profile_ ||
         !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_, virtualPort_,
-                                  connection_.remoteAddress(), connection_.remotePort(), nativeForwarding_)) {
+                                  connection_.remoteAddress(), connection_.remotePort(), nativeForwarding_, speaks)) {
         if (recovering_)
             return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {

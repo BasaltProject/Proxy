@@ -30,11 +30,12 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
                                                            const wire::auth::SessionProfile& profile,
                                                            std::string_view virtualHost, std::uint16_t virtualPort,
                                                            std::string_view remoteAddress, std::uint16_t remotePort,
-                                                           const NativeForwarding* native) {
+                                                           const NativeForwarding* native, std::int32_t speaks) {
     namespace protocol = wire::protocol;
+    const std::int32_t version = speaks != 0 ? speaks : backend.protocol;
     if (!allocationReady_)
         return std::unexpected(BackendLoginError::kLimit);
-    if (phase_ != Phase::kUnstarted || !resolveRoute(backend.protocol, backend.protocol) ||
+    if (phase_ != Phase::kUnstarted || !resolveRoute(version, version) ||
         (backend.forwarding != wire::auth::forwarding::ForwardingMode::None &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Velocity &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Basalt &&
@@ -68,19 +69,19 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     if (!frame_.tryReserve(virtualHost.size() + 64) || !output_.tryReserve(virtualHost.size() + 128))
         return std::unexpected(BackendLoginError::kLimit);
     protocol::varInt::write(frame_, protocol::handshake::HandshakePacket::kId);
-    protocol::handshake::HandshakePacket{backend.protocol, std::string{virtualHost}, virtualPort,
+    protocol::handshake::HandshakePacket{version, std::string{virtualHost}, virtualPort,
                                          protocol::handshake::ClientIntent::Login}
         .write(frame_);
     if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()))
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
     protocol::varInt::write(frame_, protocol::login::LoginStartPacket::kId);
-    writeLoginStart(frame_, backend.protocol, profile.name, profile.id);
+    writeLoginStart(frame_, version, profile.name, profile.id);
     if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()))
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
     backendConfig_ = &backend;
-    protocol_ = backend.protocol;
+    protocol_ = version;
     profile_ = &profile;
     remoteAddress_ = remoteAddress;
     remotePort_ = remotePort;

@@ -8,6 +8,7 @@
 #include "PendingResponses.hpp"
 #include "ResourcePacks.hpp"
 
+#include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
@@ -66,7 +67,8 @@ public:
                   std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                   const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
                   std::function<bool(std::string_view, std::string_view)> playerCommand = {},
-                  std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {});
+                  std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {},
+                  config::TranslationMode translation = config::TranslationMode::Auto);
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -136,8 +138,15 @@ private:
     std::unique_ptr<IdRenumbering> ids_;
     [[nodiscard]] bool toBackend(BackendLogin& target, std::span<const std::uint8_t> frame);
     [[nodiscard]] bool numbered(wire::protocol::ProtocolState state) const;
+    /// True when this backend protocol is the client's own, so its packets travel untranslated.
+    [[nodiscard]] bool rawProtocol(std::int32_t protocol) const;
+    [[nodiscard]] bool rawNow() const;
+    [[nodiscard]] bool queueLoginPacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool keepAliveVarInt() const;
     bool legacyRaw_ = false;
+    config::TranslationMode translationMode_;
+    [[nodiscard]] std::int32_t speaksTo(std::int32_t configured, std::int32_t client) const;
+    [[nodiscard]] bool routeAllowed(std::int32_t client, std::int32_t configured) const;
     bool awaitingJoin_ = false;
     [[nodiscard]] bool acceptsBackend(std::int32_t protocol) const;
     std::int32_t clientProtocol_ = 0;

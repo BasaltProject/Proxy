@@ -17,6 +17,9 @@ route for before it enters a state it cannot leave.
 | 26.3 | anything older | refused | no translation upward exists |
 | N | M, N different from M, M not 26.3 | refused | |
 
+A network may mix both kinds of backend for clients from 1.20.2 on: a 26.2 client moves between a Basalt Server 26.3 (translated) and a Paper 26.2
+(same version) without reconnecting, checked over four moves in both directions. Before 1.20.2 a session uses one kind only.
+
 ### Same version, client and backend
 
 Both on the same protocol, no translation. Forwarding checked against Paper in each mode that applies:
