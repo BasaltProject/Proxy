@@ -22,9 +22,9 @@ bool translatedClientVerified(std::int32_t protocol) noexcept {
 }
 
 bool backendVerified(std::int32_t protocol) noexcept {
-    constexpr std::array<std::int32_t, 38> kVerified = {47,  110, 210, 316, 340, 393, 401, 404, 480, 490, 498, 573, 575,
-                                                        578, 751, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763,
-                                                        765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776};
+    constexpr std::array<std::int32_t, 43> kVerified = {
+        47,  110, 210, 316, 335, 338, 340, 393, 401, 404, 480, 485, 490, 498, 573, 575, 578, 736, 764, 751, 753, 754,
+        755, 756, 757, 758, 759, 760, 761, 762, 763, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776};
     return std::ranges::find(kVerified, protocol) != kVerified.end();
 }
 
