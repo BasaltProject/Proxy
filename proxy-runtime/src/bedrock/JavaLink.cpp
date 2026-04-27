@@ -1,5 +1,6 @@
 #include "JavaLink.hpp"
 
+#include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>

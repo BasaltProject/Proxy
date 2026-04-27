@@ -24,9 +24,10 @@ std::uint64_t nowMillis() {
 } // namespace
 
 BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                             Route route, BedrockSession::Events events)
+                             Route route, BedrockSession::Events events,
+                             std::shared_ptr<const wire::text::LangTable> language)
     : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
-      events_(std::move(events)) {}
+      events_(std::move(events)), language_(std::move(language)) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -78,7 +79,8 @@ bool BedrockStatus::start() {
                 raw.disconnect(kTurnedAway);
                 return;
             }
-            found->second.session = std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_);
+            found->second.session =
+                std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_, language_);
             if (!found->second.session->begin()) {
                 wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
                 found->second.session.reset();

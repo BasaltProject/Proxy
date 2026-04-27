@@ -1,6 +1,7 @@
 #include "BackendRoutes.hpp"
 #include "BedrockStatus.hpp"
 #include "Console.hpp"
+#include "bedrock/BedrockLanguage.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
@@ -247,6 +248,11 @@ int run(const cliCommand::Run& command) {
     });
     std::unique_ptr<detail::BedrockStatus> bedrock;
     if (configuration->bedrock.enabled) {
+        auto language = detail::loadBedrockLanguage(configuration->bedrock.language);
+        if (!language) {
+            logger.error([&language] { return language.error(); });
+            return 1;
+        }
         bedrock = std::make_unique<detail::BedrockStatus>(
             configuration->bedrock.port, configuration->bedrock.motd, [&runtime] { return runtime->sessionCount(); },
             configuration->runtime.maxSessions,
@@ -262,7 +268,8 @@ int run(const cliCommand::Run& command) {
             [&pluginHost](PlayerEvent event) {
                 if (auto* host = pluginHost.load(std::memory_order_acquire))
                     host->post(std::move(event));
-            });
+            },
+            *language);
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
