@@ -36,6 +36,7 @@ using bedrock::BedrockPacket;
 constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
+constexpr std::int64_t kTicksPerDay = 24000;
 constexpr float kMobWidth = 0.6F;
 constexpr float kMobHeight = 1.8F;
 constexpr std::size_t kCarriedSlots = 36;
@@ -144,6 +145,10 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         teleportEntity(body);
     else if (id == play::RemoveEntitiesPacket::kId)
         removeEntities(body);
+    else if (id == play::SetTimePacket::kId)
+        timeChanged(body);
+    else if (id == play::GameEventPacket::kId)
+        gameEvent(body);
     else if (id == play::ContainerSetContentPacket::kId)
         inventoryContent(body);
     else if (id == play::ContainerSetSlotPacket::kId)
@@ -379,6 +384,46 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     if (named == nullptr)
         return {};
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+}
+
+void BedrockSession::timeChanged(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetTimePacket::read(in);
+    if (!packet)
+        return;
+    for (const auto& clock : packet->clocks) {
+        if (clock.clockId != play::SetTimePacket::kOverworldClock)
+            continue;
+        wire::io::ByteBuffer out;
+        bedrock::writeSetTime(out, static_cast<std::int32_t>(clock.totalTicks % kTicksPerDay));
+        sendBedrock(BedrockPacket::SetTime, out);
+        return;
+    }
+}
+
+void BedrockSession::gameEvent(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::GameEventPacket::read(in);
+    if (!packet)
+        return;
+    using Level = bedrock::LevelEventType;
+    const auto send = [this](Level type, float strength) {
+        wire::io::ByteBuffer out;
+        bedrock::writeLevelEvent(
+            out, type, 0.0F, 0.0F, 0.0F,
+            static_cast<std::int32_t>(strength * static_cast<float>(bedrock::kWeatherStrengthScale)));
+        sendBedrock(BedrockPacket::LevelEvent, out);
+    };
+    if (packet->event == play::GameEventPacket::kStartRaining)
+        send(Level::StartRaining, 1.0F);
+    else if (packet->event == play::GameEventPacket::kStopRaining)
+        send(Level::StopRaining, 0.0F);
+    else if (packet->event == play::GameEventPacket::kRainLevelChange)
+        send(packet->param > 0.0F ? Level::StartRaining : Level::StopRaining, packet->param);
+    else if (packet->event == play::GameEventPacket::kThunderLevelChange)
+        send(packet->param > 0.0F ? Level::StartThunderstorm : Level::StopThunderstorm, packet->param);
 }
 
 void BedrockSession::sendInventory() {

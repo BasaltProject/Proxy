@@ -56,6 +56,8 @@ private:
     void interact(const wire::bedrock::PlayerAuthInput& input);
     [[nodiscard]] wire::bedrock::BedrockItemStack
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
+    void timeChanged(std::span<const std::uint8_t> body);
+    void gameEvent(std::span<const std::uint8_t> body);
     void sendInventory();
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
