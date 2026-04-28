@@ -3,6 +3,7 @@
 #include "JavaLink.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/text/LangTable.hpp>
@@ -36,6 +37,7 @@ public:
     void tell(std::string_view miniMessage);
     void kick(std::string_view miniMessage);
     [[nodiscard]] bool begin();
+    [[nodiscard]] bool switchTo(config::BackendConfig target);
     void pump();
     void fromBedrock(wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body);
 
@@ -44,6 +46,7 @@ public:
     }
 
 private:
+    [[nodiscard]] bool openLink();
     void fromJava(std::int32_t id, std::span<const std::uint8_t> body);
     void joined(std::span<const std::uint8_t> body);
     void listed(std::span<const std::uint8_t> body);
@@ -79,6 +82,7 @@ private:
     std::string address_;
     Events events_;
     std::shared_ptr<const wire::text::LangTable> language_;
+    wire::auth::SessionProfile profile_;
     std::string javaName_;
     std::string javaUuid_;
     bool announced_ = false;
@@ -96,6 +100,7 @@ private:
 
     std::int32_t sequence_ = 0;
     std::int32_t heldSlot_ = 0;
+    bool switching_ = false;
     bool spawned_ = false;
     bool teleported_ = false;
     std::size_t chunks_ = 0;

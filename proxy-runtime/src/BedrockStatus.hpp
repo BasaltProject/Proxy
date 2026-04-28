@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace basalt::proxy::runtime::detail {
@@ -24,10 +25,11 @@ namespace basalt::proxy::runtime::detail {
 class BedrockStatus {
 public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
+    using Lookup = std::function<std::optional<config::BackendConfig>(std::string_view name)>;
 
     BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
                   Route route = {}, BedrockSession::Events events = {},
-                  std::shared_ptr<const wire::text::LangTable> language = nullptr);
+                  std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {});
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
@@ -35,6 +37,9 @@ public:
     [[nodiscard]] bool start();
     void tell(std::string_view player, std::string_view miniMessage);
     void kick(std::string_view player, std::string_view miniMessage);
+    /// True when a Bedrock player of that name is playing and the backend exists; the move happens on the Bedrock
+    /// thread.
+    [[nodiscard]] bool connect(std::string_view player, std::string_view backend);
     void stop();
 
     [[nodiscard]] std::uint16_t port() const noexcept { return server_ ? server_->port() : port_; }
@@ -60,11 +65,13 @@ private:
     std::unordered_map<wire::io::UdpEndpoint, Client> clients_;
 
     struct Order {
-        bool kick = false;
+        enum class Kind { kTell, kKick, kConnect } kind = Kind::kTell;
         std::string player;
         std::string text;
     };
 
+    Lookup lookup_;
+    std::unordered_set<std::string> playing_;
     std::mutex orders_;
     std::vector<Order> pending_;
     std::atomic<bool> running_{false};
