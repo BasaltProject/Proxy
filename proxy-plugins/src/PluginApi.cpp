@@ -430,7 +430,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                 if (args.isString(-1)) {
                     const std::string written = args.toText(-1);
                     args.pop(1);
-                    const auto spelled = priorityOf(written);
+                    const auto spelled = wire::plugins::priorityOf(written);
                     if (!spelled)
                         return args.fail("'" + written + "' is not a priority");
                     handler.priority = *spelled;

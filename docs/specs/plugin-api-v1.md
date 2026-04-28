@@ -68,7 +68,7 @@ on(event, [options], function(e) ... end)
 watch(event, [options], function(e) ... end)   -- observer: same events, never changes the outcome
 ```
 
-`options` may carry `priority` (`lowest`, `low`, `normal`, `high`, `highest`, `monitor`) and a filter on the event's own
+`options` may carry `priority` (`FIRST`, `EARLY`, `NORMAL`, `LATE`, `LAST`, any case, the same words as in Server) and a filter on the event's own
 fields (`player_name`, `player_uuid`, `server`, `from_server`).
 
 | Event | Fields |

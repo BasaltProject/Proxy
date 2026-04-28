@@ -17,15 +17,6 @@ namespace {
 
 constexpr int kStrikeLimit = 5;
 
-constexpr std::array<std::pair<Priority, std::string_view>, 6> kPriorities = {{
-    {Priority::kLowest, "lowest"},
-    {Priority::kLow, "low"},
-    {Priority::kNormal, "normal"},
-    {Priority::kHigh, "high"},
-    {Priority::kHighest, "highest"},
-    {Priority::kMonitor, "monitor"},
-}};
-
 [[nodiscard]] std::vector<std::string> wordsOf(std::string_view line, std::size_t limit) {
     std::vector<std::string> words;
     while (!line.empty() && words.size() <= limit) {
@@ -49,18 +40,6 @@ constexpr std::array<std::pair<Priority, std::string_view>, 6> kPriorities = {{
 }
 
 } // namespace
-
-std::string_view priorityName(Priority priority) {
-    const auto found = std::ranges::find(kPriorities, priority, &std::pair<Priority, std::string_view>::first);
-    return found == kPriorities.end() ? std::string_view{"normal"} : found->second;
-}
-
-std::optional<Priority> priorityOf(std::string_view name) {
-    const auto found = std::ranges::find(kPriorities, name, &std::pair<Priority, std::string_view>::second);
-    if (found == kPriorities.end())
-        return std::nullopt;
-    return found->first;
-}
 
 PluginHost::PluginHost(PluginSettings settings, PluginHooks hooks)
     : settings_(std::move(settings)), hooks_(std::move(hooks)) {}

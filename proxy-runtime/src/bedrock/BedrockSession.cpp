@@ -4,6 +4,7 @@
 
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockBiomes.hpp>
+#include <basalt/wire/bedrock/BedrockColumn.hpp>
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
@@ -559,44 +560,47 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
         wire::common::Logger{"Bedrock"}.warn([] { return std::string{"A chunk from the backend could not be read."}; });
         return;
     }
-    const int protocol = connection_.protocolVersion();
     wire::io::ByteBuffer data;
     data.writeBytes(packet->chunkData);
-    wire::io::ByteBuffer packed;
-    wire::io::ByteBuffer biomes;
+    std::vector<std::array<std::int32_t, kBlocksPerSection>> blocks;
+    std::vector<bedrock::BiomeQuarts> biomes;
     std::int32_t sent = 0;
-    std::vector<std::array<std::int32_t, kBlocksPerSection>> columns;
     for (std::int32_t section = 0; section < sections_ && data.readableBytes() != 0; ++section) {
         static_cast<void>(data.readShort());
         static_cast<void>(data.readShort());
-        std::vector<std::int32_t> blocks =
+        const std::vector<std::int32_t> states =
             play::palettedContainer::read(data, kBlocksPerSection, play::palettedContainer::kBlockMaxIndirectBits);
         const std::vector<std::int32_t> quarts =
             play::palettedContainer::read(data, kBiomesPerSection, play::palettedContainer::kBiomeMaxIndirectBits);
-        if (data.failed() || blocks.size() != kBlocksPerSection || quarts.size() != kBiomesPerSection)
+        if (data.failed() || states.size() != kBlocksPerSection || quarts.size() != kBiomesPerSection)
             return;
-        bool solid = false;
-        for (const std::int32_t state : blocks)
-            solid = solid || state != 0;
-        if (solid)
+        if (std::ranges::any_of(states, [](std::int32_t state) { return state != 0; }))
             sent = section + 1;
-        std::array<std::int32_t, kBlocksPerSection> ordered{};
-        std::copy(blocks.begin(), blocks.end(), ordered.begin());
-        columns.push_back(ordered);
-        bedrock::BiomeQuarts mapped{};
+        std::copy(states.begin(), states.end(), blocks.emplace_back().begin());
+        bedrock::BiomeQuarts& mapped = biomes.emplace_back();
         for (std::size_t quart = 0; quart < kBiomesPerSection; ++quart) {
             const auto id = static_cast<std::size_t>(quarts[quart]);
             const auto found = id < biomeKeys_.size() ? bedrock::bedrockBiomeId(biomeKeys_[id]) : std::nullopt;
             mapped[quart] = found.value_or(bedrock::kFallbackBedrockBiome);
         }
-        bedrock::writeBiomeSection(biomes, mapped);
     }
-    for (std::int32_t section = 0; section < sent; ++section)
-        bedrock::writeSubChunk(packed, columns[static_cast<std::size_t>(section)],
-                               static_cast<std::int8_t>(minSection_ + section), protocol);
+    bedrock::ColumnShape shape;
+    shape.chunkX = packet->x;
+    shape.chunkZ = packet->z;
+    shape.minSection = minSection_;
+    shape.sections = static_cast<std::int32_t>(blocks.size());
+    shape.sent = sent;
+    shape.protocol = connection_.protocolVersion();
+    const std::vector<std::uint8_t> column = bedrock::encodeColumn(
+        shape,
+        [&blocks](std::int32_t section, std::span<std::int32_t> into) {
+            std::ranges::copy(blocks[static_cast<std::size_t>(section)], into.begin());
+        },
+        [&biomes](std::int32_t section, bedrock::BiomeQuarts& quarts) {
+            quarts = biomes[static_cast<std::size_t>(section)];
+        });
     wire::io::ByteBuffer out;
-    bedrock::writeLevelChunk(out, packet->x, packet->z, static_cast<std::uint32_t>(sent), packed.readable(),
-                             static_cast<std::uint32_t>(columns.size()), 0, protocol, {}, biomes.readable());
+    out.writeBytes(column);
     sendBedrock(BedrockPacket::LevelChunk, out);
     chunks_++;
 }
