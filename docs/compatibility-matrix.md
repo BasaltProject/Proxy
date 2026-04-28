@@ -63,9 +63,27 @@ for their exact shape. Reconfiguration without reconnecting is checked for 1.20.
 | BungeeCord legacy | every version, plus BungeeGuard and a SafeNet-style token on 26.3 |
 | Basalt (Ed25519 challenge) | Basalt Server 26.3 |
 
-## Limits that matter
+## Bedrock to a Basalt Server 26.3
+
+Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world, Velocity forwarding. The bot is not the game client.
+
+| What | Checked |
+|---|---|
+| Login, start game, chunks with biomes, spawn | yes |
+| Position and movement to the backend | yes |
+| Chat and commands to the backend, messages back | yes (the backend answers a late command only once its own tick has room) |
+| Messages translated from a language file (`bedrock.language`) | yes, with the Mojang server jar of the operator |
+| Other players: list, appear, move, leave | yes |
+| Mobs appear with their Bedrock name | yes |
+| Inventory contents, after a `give` | yes |
+| Time of day and rain | yes |
+| Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
+| Block changes, break and place, dropped items | sent, not seen by the bot |
+| Open containers, mob size and metadata, backend switch | not done |
+
+
 
 - A client newer than its backend is not supported.
-- Bedrock clients get a status listing and are turned away after login.
+- Bedrock clients (protocol 2193) join the first backend of the default route as a Java client. See the Bedrock section.
 - The official game client has not been tried against this proxy; every client above is a bot.
 - Windows and macOS builds compile and the Windows one ran under wine; the macOS backend of the event loop ran on FreeBSD.
