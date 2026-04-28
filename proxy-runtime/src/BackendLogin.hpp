@@ -11,6 +11,7 @@
 #include <expected>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace basalt::proxy::config {
@@ -60,6 +61,12 @@ public:
     [[nodiscard]] BackendAttempt attempt() const { return attempt_; }
 
     void useIds(const IdRenumbering* ids) { ids_ = ids; }
+
+    /// What the signed forwarding says the player came in as: 0 Java, 1 Bedrock, 2 other, and their own id there.
+    void useOrigin(std::uint8_t origin, std::string id) {
+        origin_ = origin;
+        originId_ = std::move(id);
+    }
 
     [[nodiscard]] std::int32_t protocol() const { return protocol_; }
 
@@ -128,6 +135,8 @@ private:
     const BackendAttempt attempt_;
     bool forwarded_ = false;
     const NativeForwarding* native_ = nullptr;
+    std::uint8_t origin_ = 0;
+    std::string originId_;
     std::string_view virtualHost_;
     std::uint16_t virtualPort_ = 0;
     std::uint16_t remotePort_ = 0;

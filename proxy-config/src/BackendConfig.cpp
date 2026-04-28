@@ -57,9 +57,11 @@ std::expected<void, std::string> readBackends(ProxyConfig& config, const TomlTab
             reader.scalar(table, "bungee-messages", backend.bungeeMessages, prefix);
             reader.scalar(table, "host", backend.host, prefix);
             reader.integer(table, "port", backend.port, 1, 65535, prefix);
+            bool automatic = false;
             if (const auto* declared = table->find("protocol"); declared && declared->get<std::string>()) {
-                if (*declared->get<std::string>() != "client")
-                    reader.fail(prefix + "protocol", "must be a protocol number or \"client\"");
+                automatic = *declared->get<std::string>() == "auto";
+                if (!automatic && *declared->get<std::string>() != "client")
+                    reader.fail(prefix + "protocol", "must be a protocol number, \"client\" or \"auto\"");
                 backend.protocol = BackendConfig::kClientProtocol;
             } else {
                 reader.integer(table, "protocol", backend.protocol, 1, std::numeric_limits<std::int32_t>::max(),
@@ -76,6 +78,11 @@ std::expected<void, std::string> readBackends(ProxyConfig& config, const TomlTab
                 reader.fail(prefix + "forwarding", "has an unknown scheme");
             else
                 backend.forwarding = *parsed;
+            backend.automatic = automatic;
+            if (automatic)
+                backend.protocol = backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt
+                                       ? BackendConfig::kClientProtocol
+                                       : BackendConfig{}.protocol;
             if (!validHost(backend.host))
                 reader.fail(prefix + "host", "must be a hostname or literal IP address without a port");
             using Mode = wire::auth::forwarding::ForwardingMode;

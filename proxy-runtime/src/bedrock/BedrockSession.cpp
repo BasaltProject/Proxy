@@ -1,5 +1,7 @@
 #include "BedrockSession.hpp"
 
+#include "../NativeForwarding.hpp"
+
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockBiomes.hpp>
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
@@ -66,9 +68,10 @@ constexpr std::int32_t kChatCommandId = play::ChatCommandPacket::kId;
 
 BedrockSession::BedrockSession(bedrock::BedrockConnection& connection, config::BackendConfig backend,
                                std::string address, Events events,
-                               std::shared_ptr<const wire::text::LangTable> language)
+                               std::shared_ptr<const wire::text::LangTable> language,
+                               std::shared_ptr<const NativeForwarding> forwarding)
     : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), events_(std::move(events)),
-      language_(std::move(language)) {}
+      language_(std::move(language)), forwarding_(std::move(forwarding)) {}
 
 BedrockSession::~BedrockSession() {
     if (announced_ && events_)
@@ -94,7 +97,8 @@ bool BedrockSession::openLink() {
             biomeKeys_ = std::move(keys);
     };
     events.closed = [this](const std::string& reason) { leave(reason); };
-    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, std::move(events));
+    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, std::move(events), forwarding_.get(),
+                                       connection_.login().xuid);
     return link_->begin(kConnectBudget);
 }
 

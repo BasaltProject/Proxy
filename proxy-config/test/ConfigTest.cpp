@@ -77,3 +77,22 @@ secret = 'synthetic-secret'
     CHECK(result->forcedHosts.front().host == "play.example.test");
     CHECK(result->forcedHosts.front().backends == std::vector<std::string>{"new", "old"});
 }
+
+TEST_CASE("protocol auto lets a Basalt backend translate and keeps the proxy translating for the others") {
+    const auto result = decode("", R"(
+[routing]
+default = ['basalt', 'other']
+[backends.basalt]
+host = '127.0.0.1'
+protocol = 'auto'
+forwarding = 'basalt'
+[backends.other]
+host = '127.0.0.2'
+protocol = 'auto'
+forwarding = 'velocity'
+secret = 'synthetic-secret'
+)");
+    REQUIRE(result);
+    CHECK(result->backends[0].protocol == BackendConfig::kClientProtocol);
+    CHECK(result->backends[1].protocol == BackendConfig{}.protocol);
+}

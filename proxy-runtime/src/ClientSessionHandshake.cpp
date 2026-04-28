@@ -38,8 +38,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     translatedClientVerified(hello->protocolVersion) || backendVerified(hello->protocolVersion))) {
             const auto candidates = routes_.select(hello->hostName);
             if (!candidates.empty() && std::ranges::none_of(candidates, [&](std::size_t target) {
-                    return resolveRoute(hello->protocolVersion,
-                                        effectiveProtocol(backends_[target].protocol, hello->protocolVersion))
+                    return resolveRoute(hello->protocolVersion, speaksTo(backends_[target], hello->protocolVersion))
                         .has_value();
                 }))
                 return false;
@@ -50,7 +49,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     return false;
                 const auto reaches = [&](std::int32_t protocol) {
                     return std::ranges::any_of(candidates, [&](std::size_t target) {
-                        return speaksTo(backends_[target].protocol, hello->protocolVersion) == protocol;
+                        return speaksTo(backends_[target], hello->protocolVersion) == protocol;
                     });
                 };
                 const bool rawRoute = backendVerified(hello->protocolVersion) && reaches(hello->protocolVersion);

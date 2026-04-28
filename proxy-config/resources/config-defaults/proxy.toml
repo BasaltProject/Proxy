@@ -64,6 +64,7 @@ color = "auto"
 enabled = false
 port = 19132
 motd = "Basalt Proxy"
+# With online-mode on, a Bedrock player must be signed in to Xbox Live; a player without a signed chain is turned away.
 # Path to a Minecraft server jar or to an en_us.json language file, used to put into words the translatable messages a
 # backend sends (join and leave lines, death messages). Empty keeps the raw keys. Nothing is downloaded.
 language = ""

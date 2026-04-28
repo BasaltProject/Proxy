@@ -1,6 +1,8 @@
 #include "BackendRoutes.hpp"
 #include "BedrockStatus.hpp"
 #include "Console.hpp"
+#include "ForwardingKey.hpp"
+#include "NativeForwarding.hpp"
 #include "bedrock/BedrockLanguage.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -14,6 +16,7 @@
 #include <basalt/wire/io/LogFile.hpp>
 #include <basalt/wire/io/Platform.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -251,6 +254,18 @@ int run(const cliCommand::Run& command) {
     });
     std::unique_ptr<detail::BedrockStatus> bedrock;
     if (configuration->bedrock.enabled) {
+        std::shared_ptr<const detail::NativeForwarding> nativeForwarding;
+        if (std::ranges::any_of(configuration->backends, [](const proxy::config::BackendConfig& backend) {
+                return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+            })) {
+            auto signing = detail::loadOrCreateForwardingKey(configuration->forwarding.keyFile);
+            if (!signing) {
+                logger.error([&signing] { return signing.error(); });
+                return 1;
+            }
+            nativeForwarding = std::make_shared<const detail::NativeForwarding>(detail::NativeForwarding{
+                std::move(*signing), configuration->forwarding.proxyId, configuration->network.onlineMode});
+        }
         auto language = detail::loadBedrockLanguage(configuration->bedrock.language);
         if (!language) {
             logger.error([&language] { return language.error(); });
@@ -279,7 +294,8 @@ int run(const cliCommand::Run& command) {
                 if (found == configuration->backends.end())
                     return std::nullopt;
                 return *found;
-            });
+            },
+            nativeForwarding, configuration->network.onlineMode);
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";

@@ -29,7 +29,8 @@ public:
 
     BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
                   Route route = {}, BedrockSession::Events events = {},
-                  std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {});
+                  std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {},
+                  std::shared_ptr<const NativeForwarding> forwarding = nullptr, bool requireAuthenticated = false);
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
@@ -71,6 +72,8 @@ private:
     };
 
     Lookup lookup_;
+    std::shared_ptr<const NativeForwarding> forwarding_;
+    bool requireAuthenticated_ = false;
     std::unordered_set<std::string> playing_;
     std::mutex orders_;
     std::vector<Order> pending_;
