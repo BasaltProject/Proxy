@@ -1,13 +1,13 @@
 #pragma once
 
-#include <basalt/wire/plugins/EventPriority.hpp>
-#include <basalt/wire/plugins/PluginText.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaCall.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
 #include <basalt/wire/plugins/CommandSpec.hpp>
+#include <basalt/wire/plugins/EventPriority.hpp>
+#include <basalt/wire/plugins/PluginText.hpp>
 
 namespace basalt::proxy::plugins {
 
@@ -61,7 +61,6 @@ struct PluginApi {
                         const wire::common::toml::TomlTable& config);
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
-
 
 inline constexpr std::string_view kEnableEvent = "plugin.enable";
 inline constexpr std::string_view kDisableEvent = "plugin.disable";
