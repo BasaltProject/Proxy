@@ -47,6 +47,17 @@ A bot of each of these versions logs in and plays against a Basalt Server 26.3 t
 1.21.11, 26.1, 26.2. Versions that share a protocol (1.16.4 and 1.16.5, 1.20 and 1.20.1, and so on) count as one. The login packets of each version are checked
 for their exact shape. Reconfiguration without reconnecting is checked for 1.20.2 and later.
 
+## Modded backends
+
+| Backend | Result |
+|---|---|
+| Fabric loader 0.20.0 on 1.21.4, no mods, forwarding none | yes, transport gate passes |
+| Fabric loader with Fabric API 0.119.4, forwarding none | yes, transport gate passes (Fabric API holds the join until the client answers a configuration ping) |
+| The same plus FabricProxy-Lite 2.10.1 (Velocity modern forwarding) | login, configuration and the start of play work, FabricProxy-Lite asks for the player info twice and the proxy answers both as Velocity does; the bot receives no chunk in 30 seconds, cause not found, so not verified |
+| Forge, NeoForge, modpacks | not tried |
+
+A relay of the configuration state is not a promise about any particular modpack.
+
 ## Identity
 
 | Mode | State |

@@ -347,7 +347,7 @@ TEST_CASE("Velocity modern forwarding signs verified identity and requires query
     SUBCASE("v1") { requested = 1; }
     SUBCASE("native clients negotiate v1 when v3 signing keys are requested") { requested = 3; }
     SUBCASE("success without required forwarding is rejected") { missing = true; }
-    SUBCASE("duplicate forwarding query is rejected") { duplicate = true; }
+    SUBCASE("a repeated velocity query is answered again, as Velocity does") { duplicate = true; }
     SUBCASE("zero forwarding version is rejected") {
         malformed = true;
         requested = 0;
@@ -386,7 +386,7 @@ TEST_CASE("Velocity modern forwarding signs verified identity and requires query
         CHECK(receive(*backend, expected.size()) == expected);
         if (duplicate) {
             REQUIRE(backend->write(request));
-            CHECK(receive(client, 0, true).empty());
+            CHECK(receive(*backend, expected.size()) == expected);
             proxy.stop();
             CHECK(proxy.runtime.sessionCount() == 0);
             CHECK(proxy.runtime.bufferedBytes() == 0);
