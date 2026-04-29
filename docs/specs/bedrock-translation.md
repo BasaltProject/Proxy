@@ -19,7 +19,10 @@ in `wire-bedrock`.
 | Inventory and windows | `BedrockWindows`, `BedrockStackRequests` | the 36 carried slots, read only | inventory content writer |
 | Crafting recipes, maps, shield, records | `BedrockRecipes`, `BedrockMaps`, `BedrockShield`, `BedrockRecords` | none | recipe and map writers |
 | Health, hunger, experience | `BedrockPlayerConnection` | attribute updates from the Java health and experience packets | attribute writer |
-| Effects, boss bars, scoreboard | `BedrockPlayerConnection` | none | writers exist |
+| Titles and the action bar | `BedrockPlayerConnection` | from the Java title and chat overlay packets | `writeSetTitle` |
+| Boss bars | `BedrockPlayerConnection` | create, remove, progress and name | `writeBossEvent` |
+| The sidebar scoreboard | `BedrockPlayerConnection` | objective, display and score packets, for the sidebar only | scoreboard writers |
+| Effects | `BedrockPlayerConnection` | none | writers exist |
 
 ## What stays in Server
 
@@ -28,6 +31,5 @@ does), recipes, maps, effects and the rest of the player state. Moving them mean
 
 ## What the proxy still lacks
 
-Open containers (a chest, a furnace), item stack requests in either direction, crafting, effects, boss bars, the scoreboard, forms and
-particles. A Bedrock player behind the proxy can walk, see, chat, run commands, build, switch backend and carry items,
+Open containers (a chest, a furnace), item stack requests in either direction, crafting, effects, forms and particles, and the tab list and below-name scoreboards. A Bedrock player behind the proxy can walk, see, chat, run commands, build, switch backend and carry items,
 not play survival through windows.

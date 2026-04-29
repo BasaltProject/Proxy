@@ -14,11 +14,13 @@
 #include <basalt/wire/protocol/play/EntityData.hpp>
 #include <basalt/wire/protocol/play/EntityPackets.hpp>
 #include <basalt/wire/protocol/play/EntityTypeIds.hpp>
+#include <basalt/wire/protocol/play/HudPackets.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/protocol/play/ItemIds.hpp>
 #include <basalt/wire/protocol/play/PalettedContainer.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/PlayerStatePackets.hpp>
+#include <basalt/wire/protocol/play/UiPackets.hpp>
 #include <basalt/wire/protocol/play/WorldPackets.hpp>
 #include <basalt/wire/text/MiniMessage.hpp>
 #include <basalt/wire/text/Serializers.hpp>
@@ -41,6 +43,8 @@ constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
+constexpr std::int32_t kTitleKeep = -1;
+constexpr std::int64_t kBossBase = 0x40000000;
 constexpr float kMaxHealth = 20.0F;
 constexpr float kMaxFood = 20.0F;
 constexpr float kMaxLevel = 24791.0F;
@@ -126,7 +130,21 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     others_.clear();
     mobs_.clear();
     waitingItems_.clear();
+    for (const auto& [key, entity] : bossBars_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeBossEvent(gone, entity, bedrock::BedrockBossAction::Remove, "", 0.0F,
+                                connection_.protocolVersion());
+        sendBedrock(BedrockPacket::BossEvent, gone);
+    }
+    if (!sidebar_.empty()) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeRemoveObjective(gone, sidebar_);
+        sendBedrock(BedrockPacket::RemoveObjective, gone);
+    }
     names_.clear();
+    bossBars_.clear();
+    objectives_.clear();
+    sidebar_.clear();
     biomeKeys_.clear();
     inventory_ = {};
     chunks_ = 0;
@@ -201,6 +219,26 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         teleportEntity(body);
     else if (id == play::RemoveEntitiesPacket::kId)
         removeEntities(body);
+    else if (id == play::kSetTitleTextId)
+        title(bedrock::TitleType::Title, body);
+    else if (id == play::kSetSubtitleTextId)
+        title(bedrock::TitleType::Subtitle, body);
+    else if (id == play::kSetActionBarTextId)
+        title(bedrock::TitleType::ActionBar, body);
+    else if (id == play::SetTitlesAnimationPacket::kId)
+        titleTimes(body);
+    else if (id == play::ClearTitlesPacket::kId)
+        titlesCleared(body);
+    else if (id == play::SetObjectivePacket::kId)
+        objective(body);
+    else if (id == play::SetDisplayObjectivePacket::kId)
+        displayObjective(body);
+    else if (id == play::SetScorePacket::kId)
+        scoreSet(body);
+    else if (id == play::ResetScorePacket::kId)
+        scoreReset(body);
+    else if (id == play::BossEventPacket::kId)
+        bossEvent(body);
     else if (id == play::SetHealthPacket::kId)
         healthChanged(body);
     else if (id == play::SetExperiencePacket::kId)
@@ -452,6 +490,182 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
 }
 
+void BedrockSession::title(bedrock::TitleType type, std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::TitleTextPacket::read(in);
+    if (!packet)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeSetTitle(out, type, wire::text::toLegacyText(resolved(packet->text)), kTitleKeep, kTitleKeep,
+                           kTitleKeep);
+    sendBedrock(BedrockPacket::SetTitle, out);
+}
+
+void BedrockSession::titleTimes(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetTitlesAnimationPacket::read(in);
+    if (!packet)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeSetTitle(out, bedrock::TitleType::Times, "", packet->fadeIn, packet->stay, packet->fadeOut);
+    sendBedrock(BedrockPacket::SetTitle, out);
+}
+
+void BedrockSession::titlesCleared(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::ClearTitlesPacket::read(in);
+    if (!packet)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeSetTitle(out, packet->resetTimes ? bedrock::TitleType::Reset : bedrock::TitleType::Clear, "", 0, 0,
+                           0);
+    sendBedrock(BedrockPacket::SetTitle, out);
+}
+
+wire::text::Component BedrockSession::resolved(const wire::text::Component& component) const {
+    return language_ != nullptr ? wire::text::resolveComponent(component, *language_) : component;
+}
+
+std::string BedrockSession::sidebarTitle() const {
+    const auto found = objectives_.find(sidebar_);
+    return found == objectives_.end() ? sidebar_ : found->second.title;
+}
+
+void BedrockSession::drawSidebar() {
+    if (sidebar_.empty())
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeSetDisplayObjective(out, "sidebar", sidebar_, sidebarTitle());
+    sendBedrock(BedrockPacket::SetDisplayObjective, out);
+    std::vector<bedrock::BedrockScoreLine> lines;
+    for (const auto& [owner, line] : objectives_[sidebar_].lines)
+        lines.push_back({line.id, line.text, line.score});
+    if (lines.empty())
+        return;
+    out.clear();
+    bedrock::writeSetScore(out, sidebar_, lines, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::SetScore, out);
+}
+
+void BedrockSession::objective(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetObjectivePacket::read(in);
+    if (!packet)
+        return;
+    if (packet->method == play::SetObjectivePacket::kMethodRemove) {
+        if (packet->objectiveName == sidebar_) {
+            wire::io::ByteBuffer out;
+            bedrock::writeRemoveObjective(out, sidebar_);
+            sendBedrock(BedrockPacket::RemoveObjective, out);
+            sidebar_.clear();
+        }
+        objectives_.erase(packet->objectiveName);
+        return;
+    }
+    Objective& stored = objectives_[packet->objectiveName];
+    if (packet->displayName)
+        stored.title = wire::text::toLegacyText(resolved(*packet->displayName));
+    if (packet->objectiveName == sidebar_)
+        drawSidebar();
+}
+
+void BedrockSession::displayObjective(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetDisplayObjectivePacket::read(in);
+    if (!packet || packet->slot != play::DisplaySlot::Sidebar)
+        return;
+    if (!sidebar_.empty() && sidebar_ != packet->objectiveName) {
+        wire::io::ByteBuffer out;
+        bedrock::writeRemoveObjective(out, sidebar_);
+        sendBedrock(BedrockPacket::RemoveObjective, out);
+    }
+    sidebar_ = packet->objectiveName;
+    drawSidebar();
+}
+
+void BedrockSession::scoreSet(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetScorePacket::read(in);
+    if (!packet)
+        return;
+    Objective& stored = objectives_[packet->objectiveName];
+    auto [line, added] = stored.lines.try_emplace(packet->owner);
+    if (added)
+        line->second.id = ++nextLine_;
+    line->second.text = packet->display ? wire::text::toLegacyText(resolved(*packet->display)) : packet->owner;
+    line->second.score = packet->score;
+    if (packet->objectiveName != sidebar_)
+        return;
+    const bedrock::BedrockScoreLine drawn{line->second.id, line->second.text, line->second.score};
+    wire::io::ByteBuffer out;
+    bedrock::writeSetScore(out, sidebar_, std::span{&drawn, 1}, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::SetScore, out);
+}
+
+void BedrockSession::scoreReset(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::ResetScorePacket::read(in);
+    if (!packet)
+        return;
+    for (auto& [name, stored] : objectives_) {
+        if (packet->objectiveName && *packet->objectiveName != name)
+            continue;
+        const auto line = stored.lines.find(packet->owner);
+        if (line == stored.lines.end())
+            continue;
+        if (name == sidebar_) {
+            const std::int64_t id = line->second.id;
+            wire::io::ByteBuffer out;
+            bedrock::writeRemoveScores(out, name, std::span{&id, 1}, connection_.protocolVersion());
+            sendBedrock(BedrockPacket::SetScore, out);
+        }
+        stored.lines.erase(line);
+    }
+}
+
+void BedrockSession::bossEvent(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::BossEventPacket::read(in);
+    if (!packet)
+        return;
+    const std::string key = packet->id.toString();
+    wire::io::ByteBuffer out;
+    if (const auto* add = std::get_if<play::BossEventPacket::Add>(&packet->operation)) {
+        const std::int64_t entity = kBossBase + static_cast<std::int64_t>(bossBars_.size()) + 1;
+        bossBars_[key] = entity;
+        bedrock::writeBossEvent(out, entity, bedrock::BedrockBossAction::Create,
+                                wire::text::toLegacyText(resolved(add->name)), add->progress,
+                                connection_.protocolVersion());
+        sendBedrock(BedrockPacket::BossEvent, out);
+        return;
+    }
+    const auto known = bossBars_.find(key);
+    if (known == bossBars_.end())
+        return;
+    if (std::holds_alternative<play::BossEventPacket::Remove>(packet->operation)) {
+        bedrock::writeBossEvent(out, known->second, bedrock::BedrockBossAction::Remove, "", 0.0F,
+                                connection_.protocolVersion());
+        bossBars_.erase(known);
+    } else if (const auto* progress = std::get_if<play::BossEventPacket::UpdateProgress>(&packet->operation)) {
+        bedrock::writeBossEvent(out, known->second, bedrock::BedrockBossAction::UpdatePercentage, "",
+                                progress->progress, connection_.protocolVersion());
+    } else if (const auto* name = std::get_if<play::BossEventPacket::UpdateName>(&packet->operation)) {
+        bedrock::writeBossEvent(out, known->second, bedrock::BedrockBossAction::UpdateName,
+                                wire::text::toLegacyText(resolved(name->name)), 0.0F, connection_.protocolVersion());
+    } else {
+        return;
+    }
+    sendBedrock(BedrockPacket::BossEvent, out);
+}
+
 void BedrockSession::healthChanged(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
@@ -700,9 +914,13 @@ void BedrockSession::chat(std::span<const std::uint8_t> body) {
     if (!packet)
         return;
     wire::io::ByteBuffer out;
-    const wire::text::Component shown =
-        language_ != nullptr ? wire::text::resolveComponent(packet->content, *language_) : packet->content;
-    bedrock::writeText(out, bedrock::TextType::Raw, "", wire::text::toLegacyText(shown), "");
+    const std::string shown = wire::text::toLegacyText(resolved(packet->content));
+    if (packet->isActionBar) {
+        bedrock::writeSetTitle(out, bedrock::TitleType::ActionBar, shown, kTitleKeep, kTitleKeep, kTitleKeep);
+        sendBedrock(BedrockPacket::SetTitle, out);
+        return;
+    }
+    bedrock::writeText(out, bedrock::TextType::Raw, "", shown, "");
     sendBedrock(BedrockPacket::Text, out);
 }
 
