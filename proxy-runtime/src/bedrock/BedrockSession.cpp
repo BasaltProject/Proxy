@@ -41,6 +41,10 @@ constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
+constexpr float kMaxHealth = 20.0F;
+constexpr float kMaxFood = 20.0F;
+constexpr float kMaxLevel = 24791.0F;
+constexpr float kWalkSpeed = 0.1F;
 constexpr float kMobWidth = 0.6F;
 constexpr float kMobHeight = 1.8F;
 constexpr std::size_t kCarriedSlots = 36;
@@ -197,6 +201,10 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         teleportEntity(body);
     else if (id == play::RemoveEntitiesPacket::kId)
         removeEntities(body);
+    else if (id == play::SetHealthPacket::kId)
+        healthChanged(body);
+    else if (id == play::SetExperiencePacket::kId)
+        experienceChanged(body);
     else if (id == play::SetTimePacket::kId)
         timeChanged(body);
     else if (id == play::GameEventPacket::kId)
@@ -442,6 +450,39 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     if (named == nullptr)
         return {};
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+}
+
+void BedrockSession::healthChanged(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetHealthPacket::read(in);
+    if (!packet)
+        return;
+    const std::array<bedrock::AttributeValue, 4> values{{
+        {"minecraft:health", 0.0F, kMaxHealth, packet->health, kMaxHealth},
+        {"minecraft:player.hunger", 0.0F, kMaxFood, static_cast<float>(packet->food), kMaxFood},
+        {"minecraft:player.saturation", 0.0F, kMaxFood, packet->saturation, kMaxFood},
+        // The client never told how fast it walks does it at no pace.
+        {"minecraft:movement", 0.0F, 1024.0F, kWalkSpeed, kWalkSpeed},
+    }};
+    wire::io::ByteBuffer out;
+    bedrock::writeUpdateAttributes(out, 1, values, 0);
+    sendBedrock(BedrockPacket::UpdateAttributes, out);
+}
+
+void BedrockSession::experienceChanged(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SetExperiencePacket::read(in);
+    if (!packet)
+        return;
+    const std::array<bedrock::AttributeValue, 2> values{{
+        {"minecraft:player.experience", 0.0F, 1.0F, packet->progress, 0.0F},
+        {"minecraft:player.level", 0.0F, kMaxLevel, static_cast<float>(packet->level), 0.0F},
+    }};
+    wire::io::ByteBuffer out;
+    bedrock::writeUpdateAttributes(out, 1, values, 0);
+    sendBedrock(BedrockPacket::UpdateAttributes, out);
 }
 
 void BedrockSession::timeChanged(std::span<const std::uint8_t> body) {
