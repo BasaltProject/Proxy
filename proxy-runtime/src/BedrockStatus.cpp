@@ -26,10 +26,11 @@ std::uint64_t nowMillis() {
 BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
                              Route route, BedrockSession::Events events,
                              std::shared_ptr<const wire::text::LangTable> language, Lookup lookup,
-                             std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated)
+                             std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated,
+                             const config::AdmissionConfig& admission)
     : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
       events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
-      forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated) {}
+      forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated), admission_(admission) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -63,6 +64,13 @@ bool BedrockStatus::start() {
     }
     server_->onAdvertise([this] { return advertisement(); });
     server_->onConnect([this](wire::bedrock::RakSession& session) {
+        const std::uint32_t address = session.peer().address;
+        const std::string origin = std::to_string(address & 0xff) + "." + std::to_string((address >> 8) & 0xff) + "." +
+                                   std::to_string((address >> 16) & 0xff) + "." + std::to_string(address >> 24);
+        if (admission_.attempt(origin) != AdmissionResult::Accepted) {
+            session.close();
+            return;
+        }
         auto connection = std::make_unique<wire::bedrock::BedrockConnection>(session, keys_, std::string{kGameVersion});
         wire::bedrock::BedrockConnection& raw = *connection;
         const wire::io::UdpEndpoint peer = session.peer();

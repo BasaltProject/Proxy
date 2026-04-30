@@ -94,18 +94,19 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Chat and commands to the backend, messages back | yes (the backend answers a late command only once its own tick has room) |
 | Messages translated from a language file (`bedrock.language`) | yes, with the Mojang server jar of the operator |
 | Other players: list, appear, move, leave | yes |
-| Mobs appear with their Bedrock name | yes |
+| Mobs appear with their Bedrock name and their hit box | yes (the bot does not report the box) |
 | Inventory contents, after a `give` | yes |
 | Time of day and rain | yes |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
 | Block changes, break and place, dropped items | sent, not seen by the bot |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
+| Bedrock connections go through the same admission gate as Java ones (global and per-origin token buckets) | yes: 32 of 40 bots arriving at once from one address enter with the defaults |
 | A RakNet peer that leaves splits open, holds ordered frames back or never acknowledges is cut off | yes (16 splits, 4 MiB of parts, 256 held frames, 8192 unacknowledged datagrams) |
 | Titles, subtitles, the action bar | yes |
 | Boss bars (create, rename, progress) | yes |
 | The sidebar scoreboard (objective, title, lines) | yes |
-| Open containers, mob size and metadata | not done |
+| Open containers, mob names and variants | not done |
 
 
 
