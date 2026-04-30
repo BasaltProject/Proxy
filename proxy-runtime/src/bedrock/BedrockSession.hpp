@@ -66,6 +66,8 @@ private:
     void interact(const wire::bedrock::PlayerAuthInput& input);
     [[nodiscard]] wire::bedrock::BedrockItemStack
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
+    void died(std::span<const std::uint8_t> body);
+    void playerChat(std::span<const std::uint8_t> body);
     void title(wire::bedrock::TitleType type, std::span<const std::uint8_t> body);
     void titleTimes(std::span<const std::uint8_t> body);
     void titlesCleared(std::span<const std::uint8_t> body);
@@ -80,6 +82,7 @@ private:
     void healthChanged(std::span<const std::uint8_t> body);
     void experienceChanged(std::span<const std::uint8_t> body);
     void timeChanged(std::span<const std::uint8_t> body);
+    void applyGamemode(std::int32_t mode);
     void gameEvent(std::span<const std::uint8_t> body);
     void sendInventory();
     void inventoryContent(std::span<const std::uint8_t> body);
@@ -138,6 +141,8 @@ private:
     std::int32_t sequence_ = 0;
     std::int32_t heldSlot_ = 0;
     bool switching_ = false;
+    bool respawning_ = false;
+    std::int32_t gamemode_ = 0;
     bool spawned_ = false;
     bool teleported_ = false;
     std::size_t chunks_ = 0;

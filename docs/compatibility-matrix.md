@@ -93,10 +93,12 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Position and movement to the backend | yes |
 | Chat and commands to the backend, messages back | yes (the backend answers a late command only once its own tick has room) |
 | Messages translated from a language file (`bedrock.language`) | yes, with the Mojang server jar of the operator |
-| Other players: list, appear, move, leave | yes |
+| Other players: list, appear, move, leave, and what they say in chat | yes |
 | Mobs appear with their Bedrock name and their hit box | yes (the bot does not report the box) |
 | Inventory contents, after a `give` | yes |
 | Time of day and rain | yes |
+| Death, the death message and respawn | yes |
+| Game mode and the abilities that go with it (flight in creative) | game mode seen, abilities sent but not decoded by the bot |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
 | Block changes, break and place | sent, not seen by the bot |
 | Dropped items | yes (counts and item ids seen) |
