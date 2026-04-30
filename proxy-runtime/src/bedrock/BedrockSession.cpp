@@ -58,6 +58,8 @@ std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + be
 constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::chrono::milliseconds kConnectBudget{5000};
+constexpr std::chrono::seconds kJoinBudget{60};
+constexpr std::chrono::seconds kSilenceBudget{45};
 constexpr std::int32_t kChatMessageId = play::ChatMessagePacket::kId;
 constexpr std::int32_t kChatCommandId = play::ChatCommandPacket::kId;
 
@@ -97,6 +99,8 @@ bool BedrockSession::begin() {
 }
 
 bool BedrockSession::openLink() {
+    joinStarted_ = std::chrono::steady_clock::now();
+    lastFromJava_ = joinStarted_;
     JavaLink::Events events;
     events.play = [this](std::int32_t id, std::span<const std::uint8_t> body) { fromJava(id, body); };
     events.registry = [this](const std::string& registry, std::vector<std::string> keys) {
@@ -175,8 +179,14 @@ void BedrockSession::kick(std::string_view miniMessage) {
 }
 
 void BedrockSession::pump() {
-    if (link_ != nullptr)
-        link_->pump();
+    if (link_ == nullptr)
+        return;
+    link_->pump();
+    const auto now = std::chrono::steady_clock::now();
+    if (!spawned_ && now - joinStarted_ > kJoinBudget)
+        leave("The server took too long to let you in.");
+    else if (now - lastFromJava_ > kSilenceBudget)
+        leave("The server stopped answering.");
 }
 
 void BedrockSession::leave(const std::string& reason) {
@@ -195,6 +205,7 @@ void BedrockSession::sendJava(std::int32_t id, const wire::io::ByteBuffer& body)
 }
 
 void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> body) {
+    lastFromJava_ = std::chrono::steady_clock::now();
     if (id == play::LoginPlayPacket::kId)
         joined(body);
     else if (id == play::MapChunkPacket::kId)

@@ -98,7 +98,8 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Inventory contents, after a `give` | yes |
 | Time of day and rain | yes |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
-| Block changes, break and place, dropped items | sent, not seen by the bot |
+| Block changes, break and place | sent, not seen by the bot |
+| Dropped items | yes (counts and item ids seen) |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
 | Bedrock connections go through the same admission gate as Java ones (global and per-origin token buckets) | yes: 32 of 40 bots arriving at once from one address enter with the defaults |
@@ -108,7 +109,13 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | The sidebar scoreboard (objective, title, lines) | yes |
 | Open containers, mob names and variants | not done |
 
+## Under stress
 
+Under the ASan proxy with 100 Java bots (1.21.4, translated) on a Basalt Server, killing the backend halfway left the proxy serving, and a
+termination signal ended it cleanly with no sanitizer report. Fuzzing of RakNet sessions, the envelope and the Bedrock packet readers (about
+60,000 sessions and 200,000 inputs per seed) found nothing under ASan and UBSan.
+
+## Limits that matter
 
 - A client newer than its backend is not supported.
 - Bedrock clients (protocol 2193) join the first backend of the default route as a Java client. See the Bedrock section.
