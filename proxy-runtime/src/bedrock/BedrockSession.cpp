@@ -44,6 +44,9 @@ constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
+constexpr std::int32_t kOverworldMinSection = -4;
+constexpr std::int32_t kSwingAction = 1;
+constexpr std::int32_t kAttackAction = 1;
 constexpr std::int32_t kTitleKeep = -1;
 constexpr std::int64_t kBossBase = 0x40000000;
 constexpr float kMaxHealth = 20.0F;
@@ -163,6 +166,7 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     bedrock::writeChangeDimension(out, bedrock::BedrockDimension::Overworld, x_, eye, z_, false);
     sendBedrock(BedrockPacket::ChangeDimension, out);
     connection_.flush();
+    clientDimension_ = 0;
     backend_ = std::move(target);
     return openLink();
 }
@@ -234,7 +238,7 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
     else if (id == play::PlayerCombatKillPacket::kId)
         died(body);
     else if (id == play::RespawnPacket::kId)
-        respawning_ = true;
+        respawned(body);
     else if (id == play::kSetTitleTextId)
         title(bedrock::TitleType::Title, body);
     else if (id == play::kSetSubtitleTextId)
@@ -284,20 +288,25 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     const auto login = play::LoginPlayPacket::read(in);
     if (!login || (started_ && !switching_))
         return;
+    useDimension(dimensionOf(login->spawnInfo.dimensionName));
     if (switching_) {
         switching_ = false;
         gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
+        if (dimension_ != clientDimension_)
+            changeDimension();
         return;
     }
     started_ = true;
+    clientDimension_ = dimension_;
     const int protocol = connection_.protocolVersion();
     sections_ = 24;
-    minSection_ = -4;
 
     bedrock::StartGameInfo info;
+    info.dimension = dimension_;
     info.x = x_;
     info.y = y_ + bedrock::kPlayerEyeHeight;
     info.z = z_;
+    selfEntity_ = login->entityId;
     gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
     info.playerGameType = gamemode_;
     info.vanillaVersion = "1.26.50";
@@ -507,6 +516,56 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     if (named == nullptr)
         return {};
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+}
+
+std::int32_t BedrockSession::dimensionOf(std::string_view worldKey) {
+    if (worldKey.find("nether") != std::string_view::npos)
+        return 1;
+    if (worldKey.find("the_end") != std::string_view::npos)
+        return 2;
+    return 0;
+}
+
+void BedrockSession::useDimension(std::int32_t dimension) {
+    dimension_ = dimension;
+    // The overworld starts four sections below zero; the other two start at the bottom.
+    minSection_ = dimension == 0 ? kOverworldMinSection : 0;
+}
+
+void BedrockSession::changeDimension() {
+    wire::io::ByteBuffer out;
+    const float eye = y_ + bedrock::kPlayerEyeHeight;
+    bedrock::writeChangeDimension(out, static_cast<bedrock::BedrockDimension>(dimension_), x_, eye, z_, false);
+    sendBedrock(BedrockPacket::ChangeDimension, out);
+    clientDimension_ = dimension_;
+}
+
+void BedrockSession::respawned(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::RespawnPacket::read(in);
+    respawning_ = true;
+    if (!packet || dimensionOf(packet->spawnInfo.dimensionName) == dimension_)
+        return;
+    for (const auto& [id, uuid] : others_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
+        sendBedrock(BedrockPacket::RemoveEntity, gone);
+        gone.clear();
+        bedrock::writePlayerListRemove(gone, std::span{&uuid, 1}, connection_.protocolVersion());
+        sendBedrock(BedrockPacket::PlayerList, gone);
+    }
+    for (const std::int32_t id : mobs_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
+        sendBedrock(BedrockPacket::RemoveEntity, gone);
+    }
+    others_.clear();
+    mobs_.clear();
+    waitingItems_.clear();
+    chunks_ = 0;
+    useDimension(dimensionOf(packet->spawnInfo.dimensionName));
+    changeDimension();
 }
 
 void BedrockSession::died(std::span<const std::uint8_t> body) {
@@ -908,6 +967,7 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
     shape.chunkX = packet->x;
     shape.chunkZ = packet->z;
     shape.minSection = minSection_;
+    shape.dimension = dimension_;
     shape.sections = static_cast<std::int32_t>(blocks.size());
     shape.sent = sent;
     shape.protocol = connection_.protocolVersion();
@@ -996,6 +1056,36 @@ void BedrockSession::chat(std::span<const std::uint8_t> body) {
     sendBedrock(BedrockPacket::Text, out);
 }
 
+void BedrockSession::sprinting(bool now) {
+    if (now == sprinting_)
+        return;
+    sprinting_ = now;
+    play::PlayerCommandPacket command;
+    command.entityId = selfEntity_;
+    command.action =
+        now ? play::PlayerCommandPacket::Action::StartSprinting : play::PlayerCommandPacket::Action::StopSprinting;
+    wire::io::ByteBuffer out;
+    command.write(out);
+    sendJava(play::PlayerCommandPacket::kId, out);
+}
+
+void BedrockSession::entityTransaction(wire::io::ByteBuffer& body) {
+    const bedrock::BedrockTransaction transaction = bedrock::readTransaction(body, connection_.protocolVersion());
+    if (!transaction.entityUse || transaction.entityUse->runtimeEntityId < kOthersBase)
+        return;
+    const auto target = static_cast<std::int32_t>(transaction.entityUse->runtimeEntityId - kOthersBase);
+    wire::io::ByteBuffer out;
+    if (transaction.entityUse->action == kAttackAction) {
+        play::AttackPacket{target}.write(out);
+        sendJava(play::AttackPacket::kId, out);
+        return;
+    }
+    play::InteractPacket interact;
+    interact.entityId = target;
+    interact.write(out);
+    sendJava(play::InteractPacket::kId, out);
+}
+
 void BedrockSession::interact(const bedrock::PlayerAuthInput& input) {
     const auto direction = [](std::int32_t face) { return static_cast<play::Direction>(std::clamp(face, 0, 5)); };
     for (const bedrock::BedrockBlockAction& action : input.blockActions) {
@@ -1060,7 +1150,17 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         move.onGround = input->onGround;
         move.write(out);
         sendJava(play::ServerboundPositionLookPacket::kId, out);
+        sprinting(input->sprinting);
         interact(*input);
+    } else if (packet == BedrockPacket::InventoryTransaction) {
+        entityTransaction(body);
+    } else if (packet == BedrockPacket::Animate) {
+        const auto animate = bedrock::readAnimate(body);
+        if (animate && animate->action == kSwingAction) {
+            wire::io::ByteBuffer out;
+            wire::protocol::varInt::write(out, play::InteractPacket::kMainHand);
+            sendJava(play::kPunchId, out);
+        }
     } else if (packet == BedrockPacket::Respawn) {
         if (bedrock::readRespawn(body) == bedrock::RespawnState::ClientReady) {
             wire::io::ByteBuffer out;

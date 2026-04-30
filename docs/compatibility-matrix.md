@@ -98,9 +98,11 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Inventory contents, after a `give` | yes |
 | Time of day and rain | yes |
 | Death, the death message and respawn | yes |
+| Crossing to the Nether or the End (dimension change, heights) | dimension change seen by the bot; the Nether and End start at the bottom of the world |
 | Game mode and the abilities that go with it (flight in creative) | game mode seen, abilities sent but not decoded by the bot |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
 | Block changes, break and place | sent, not seen by the bot |
+| Attacking or using an entity, swinging the arm, sprinting | sent, the bot cannot do them |
 | Dropped items | yes (counts and item ids seen) |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |

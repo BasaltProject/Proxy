@@ -63,9 +63,15 @@ private:
     void removeEntities(std::span<const std::uint8_t> body);
     void moveEntity(std::int32_t id, double x, double y, double z, float yaw, float pitch, bool onGround);
     [[nodiscard]] static std::uint64_t runtimeId(std::int32_t javaId);
+    void sprinting(bool now);
+    void entityTransaction(wire::io::ByteBuffer& body);
     void interact(const wire::bedrock::PlayerAuthInput& input);
     [[nodiscard]] wire::bedrock::BedrockItemStack
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
+    [[nodiscard]] static std::int32_t dimensionOf(std::string_view worldKey);
+    void useDimension(std::int32_t dimension);
+    void changeDimension();
+    void respawned(std::span<const std::uint8_t> body);
     void died(std::span<const std::uint8_t> body);
     void playerChat(std::span<const std::uint8_t> body);
     void title(wire::bedrock::TitleType type, std::span<const std::uint8_t> body);
@@ -142,6 +148,10 @@ private:
     std::int32_t heldSlot_ = 0;
     bool switching_ = false;
     bool respawning_ = false;
+    bool sprinting_ = false;
+    std::int32_t selfEntity_ = 0;
+    std::int32_t dimension_ = 0;
+    std::int32_t clientDimension_ = 0;
     std::int32_t gamemode_ = 0;
     bool spawned_ = false;
     bool teleported_ = false;
