@@ -115,6 +115,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Mob custom names | sent, the bot does not read them |
 | Baby mobs, burning, sneaking, invisible, gliding flags of mobs | sent, the bot does not read them |
 | Open a chest, dispenser or hopper: the window opens at the clicked block, shows its slots and closes | yes |
+| Move stacks between a window and the inventory, or inside the inventory (take, place, swap) | yes, checked with the bot in both directions; split stacks and drops are refused |
 | Moving items inside an open window or the inventory | refused (the client reverts); the backend never sees it |
 | Other windows (furnace, crafting, anvil...) are closed at once; mob colour and type variants | not done |
 
