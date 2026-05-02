@@ -4,6 +4,7 @@
 #include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
 #include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
+#include <basalt/wire/protocol/SessionEnvelope.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 
@@ -490,6 +491,108 @@ TEST_CASE("basalt forwarding answers the backend challenge with a verifiable sig
     CHECK(identity.proxyId == "proxy");
     CHECK(identity.port != 0);
     CHECK_FALSE(identity.onlineMode);
+    proxy.stop();
+    std::filesystem::remove(keyFile);
+}
+
+TEST_CASE("a basalt backend that offers the session envelope gets Open, data frames and a close on a malformed frame") {
+    namespace native = basalt::wire::auth::forwarding::native;
+    namespace envelope = basalt::wire::protocol::sessionEnvelope;
+    const std::string keyFile = "basalt-envelope-login-test.key";
+    std::filesystem::remove(keyFile);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.forwarding.keyFile = keyFile;
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "native",
+                        .host = "127.0.0.1",
+                        .port = *port,
+                        .protocol = basalt::proxy::config::BackendConfig::kClientProtocol,
+                        .forwarding = basalt::wire::auth::forwarding::ForwardingMode::Basalt}};
+    config.defaultRoute = {"native"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    REQUIRE(loop.wait(2000));
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+
+    native::Request issued = *native::newRequest("lobby");
+    issued.capabilities = native::kCapabilitySessionEnvelope;
+    const auto payload = native::encodeRequest(issued);
+    const std::string channel{native::kChannel};
+    std::vector<std::uint8_t> body{4, 42, static_cast<std::uint8_t>(channel.size())};
+    body.insert(body.end(), channel.begin(), channel.end());
+    body.insert(body.end(), payload.begin(), payload.end());
+    std::vector<std::uint8_t> request{static_cast<std::uint8_t>(body.size())};
+    request.insert(request.end(), body.begin(), body.end());
+    REQUIRE(backend->write(request));
+    native::Identity probe;
+    probe.name = "Tester";
+    probe.address = "127.0.0.1";
+    probe.proxyId = "proxy";
+    probe.virtualHost = "localhost";
+    probe.capabilities = native::kCapabilitySessionEnvelope;
+    const std::size_t packetBytes =
+        3 + native::sign(native::SigningKey::fromSeed(std::array<std::uint8_t, 32>{}), issued, native::kVersion1, probe)
+                .size();
+    const std::size_t prefixBytes = packetBytes > 127 ? 2 : 1;
+    const auto answered = receive(*backend, prefixBytes + packetBytes);
+    REQUIRE(answered.size() == prefixBytes + packetBytes);
+
+    std::ifstream stored{keyFile};
+    std::string text;
+    stored >> text;
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(std::stoi(text.substr(2 * i, 2), nullptr, 16));
+    const std::array<native::PublicKey, 1> trusted = {native::SigningKey::fromSeed(seed).publicKey()};
+    const auto verified = native::verify(std::span{answered}.subspan(prefixBytes + 3), issued, trusted);
+    REQUIRE(std::holds_alternative<native::Verified>(verified));
+    CHECK(std::get<native::Verified>(verified).identity.capabilities == native::kCapabilitySessionEnvelope);
+
+    std::vector<std::uint8_t> finished{41,   2,    0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d,
+                                       0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
+    finished.insert(finished.end(), 15, 0);
+    finished.push_back(1);
+    REQUIRE(backend->write(finished));
+    const auto expectedOpen =
+        envelope::encodeControl(envelope::Open{envelope::kVersion1, envelope::Edition::Java, 777});
+    const auto opened = receive(*backend, 1 + expectedOpen.size());
+    REQUIRE(opened.size() == 1 + expectedOpen.size());
+    const auto decoded = envelope::decode(std::span{opened}.subspan(1));
+    REQUIRE(decoded);
+    REQUIRE(std::holds_alternative<envelope::Control>(*decoded));
+    CHECK(std::holds_alternative<envelope::Open>(std::get<envelope::Control>(*decoded)));
+
+    SUBCASE("a frame that is neither Opened nor Close ends the login") {
+        CHECK(receive(client, finished.size()) == finished);
+        const std::array<std::uint8_t, 2> ack{1, 3};
+        REQUIRE(client.write(ack));
+        CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 3});
+        const std::vector<std::uint8_t> malformed{2, 9, 0};
+        REQUIRE(backend->write(malformed));
+        CHECK(receive(client, 0, true).empty());
+    }
+    SUBCASE("after Opened the packets of the client travel as data frames") {
+        const auto answer = envelope::encodeControl(envelope::Opened{});
+        std::vector<std::uint8_t> frame{static_cast<std::uint8_t>(answer.size())};
+        frame.insert(frame.end(), answer.begin(), answer.end());
+        REQUIRE(backend->write(frame));
+        const std::array<std::uint8_t, 2> ack{1, 3};
+        REQUIRE(client.write(ack));
+        CHECK(receive(*backend, 3) == std::vector<std::uint8_t>{2, 0, 3});
+    }
     proxy.stop();
     std::filesystem::remove(keyFile);
 }

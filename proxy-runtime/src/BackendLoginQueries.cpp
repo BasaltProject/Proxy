@@ -57,6 +57,10 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
                                                profile.properties, requested >= 4 ? 4 : 1))
         return std::unexpected(BackendLoginError::kMalformed);
     if (nativeChannel) {
+        const bool envelope = native_->delegate && origin_ == 0 &&
+                              backend.protocol == config::BackendConfig::kClientProtocol &&
+                              (nativeRequest->capabilities & basalt::kCapabilitySessionEnvelope) != 0;
+        envelopeSelected_ = envelope;
         basalt::Identity identity{.profileId = profile.id,
                                   .name = profile.name,
                                   .properties = profile.properties,
@@ -67,7 +71,8 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
                                   .onlineMode = native_->onlineMode,
                                   .proxyId = native_->proxyId,
                                   .origin = static_cast<basalt::Origin>(origin_),
-                                  .originId = originId_};
+                                  .originId = originId_,
+                                  .capabilities = envelope ? basalt::kCapabilitySessionEnvelope : 0U};
         const auto response = basalt::sign(native_->key, *nativeRequest, basalt::kVersion1, identity);
         if (response.empty())
             return std::unexpected(BackendLoginError::kMalformed);

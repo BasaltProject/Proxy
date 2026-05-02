@@ -9,6 +9,7 @@
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/auth/forwarding/LegacyForwarding.hpp>
+#include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
@@ -175,6 +176,11 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
                                                            std::size_t loginLimit) {
     if (phase_ == Phase::kUnstarted || phase_ == Phase::kRetired || packet.empty())
         return std::unexpected(BackendLoginError::kMalformed);
+    std::vector<std::uint8_t> wrapped;
+    if (envelopeActive_) {
+        wrapped = wire::protocol::sessionEnvelope::encodeData(packet);
+        packet = wrapped;
+    }
     output_.discardReadBytes();
     const auto maximum = compression_ ? wire::protocol::packetFraming::kMaxUncompressedSize
                                       : wire::protocol::packetFraming::kMaxFrameSize;
@@ -252,6 +258,19 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
         input_.discardReadBytes();
         if (!*packet)
             return std::span<const std::uint8_t>{};
+        if (envelope_) {
+            const auto outcome = envelope_->receive(frame_.readable());
+            if (outcome.closed)
+                return std::unexpected(BackendLoginError::kMalformed);
+            const std::vector<std::uint8_t> inner{outcome.packet.begin(), outcome.packet.end()};
+            frame_.clear();
+            if (inner.empty()) {
+                wire::common::Logger{"Proxy"}.debug(
+                    [] { return std::string{"The backend accepted the session envelope."}; });
+                continue;
+            }
+            frame_.writeBytes(inner);
+        }
         const auto body = frame_.readable();
         const auto id = wire::protocol::varInt::read(frame_);
         if (frame_.failed())
