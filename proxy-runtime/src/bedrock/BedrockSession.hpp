@@ -5,6 +5,7 @@
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
+#include <basalt/wire/protocol/play/EntityData.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
 #include <basalt/wire/text/LangTable.hpp>
@@ -58,6 +59,8 @@ private:
     void unlisted(std::span<const std::uint8_t> body);
     void spawnEntity(std::span<const std::uint8_t> body);
     void entityData(std::span<const std::uint8_t> body);
+    [[nodiscard]] static std::uint64_t sharedFlags(std::uint8_t java);
+    void nameTagged(const wire::protocol::play::SetEntityDataPacket& packet);
     void syncEntity(std::span<const std::uint8_t> body);
     void teleportEntity(std::span<const std::uint8_t> body);
     void removeEntities(std::span<const std::uint8_t> body);
@@ -118,6 +121,17 @@ private:
     std::vector<std::string> biomeKeys_;
     std::unordered_map<std::string, std::string> names_;
     std::unordered_set<std::int32_t> mobs_;
+
+    struct NameTag {
+        std::string text;
+        bool always = false;
+        std::uint64_t flags = wire::bedrock::flagBit(wire::bedrock::EntityFlag::HasCollision) |
+                              wire::bedrock::flagBit(wire::bedrock::EntityFlag::HasGravity) |
+                              wire::bedrock::flagBit(wire::bedrock::EntityFlag::Breathing) |
+                              wire::bedrock::flagBit(wire::bedrock::EntityFlag::CanShowName);
+    };
+
+    std::unordered_map<std::int32_t, NameTag> nameTags_;
     std::unordered_map<std::string, std::int64_t> bossBars_;
 
     struct ScoreLine {
