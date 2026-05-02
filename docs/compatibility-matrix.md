@@ -101,7 +101,8 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Crossing to the Nether or the End (dimension change, heights) | dimension change seen by the bot; the Nether and End start at the bottom of the world |
 | Game mode and the abilities that go with it (flight in creative) | game mode seen, abilities sent but not decoded by the bot |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
-| Block changes, break and place | sent, not seen by the bot |
+| Breaking a block, and the block change that comes back | yes |
+| Using an item on a block | yes, a block change comes back (which block it placed is not checked) |
 | Attacking or using an entity, swinging the arm, sprinting | sent, the bot cannot do them |
 | Dropped items | yes (counts and item ids seen) |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
@@ -113,7 +114,9 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | The sidebar scoreboard (objective, title, lines) | yes |
 | Mob custom names | sent, the bot does not read them |
 | Baby mobs, burning, sneaking, invisible, gliding flags of mobs | sent, the bot does not read them |
-| Open containers, mob colour and type variants | not done |
+| Open a chest, dispenser or hopper: the window opens at the clicked block, shows its slots and closes | yes |
+| Moving items inside an open window or the inventory | refused (the client reverts); the backend never sees it |
+| Other windows (furnace, crafting, anvil...) are closed at once; mob colour and type variants | not done |
 
 ## Under stress
 

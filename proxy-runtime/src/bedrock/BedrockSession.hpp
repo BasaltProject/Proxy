@@ -94,6 +94,15 @@ private:
     void applyGamemode(std::int32_t mode);
     void gameEvent(std::span<const std::uint8_t> body);
     void sendInventory();
+    [[nodiscard]] static std::optional<wire::bedrock::BedrockContainerType> windowType(std::int32_t menu,
+                                                                                       std::size_t& slots);
+    void screenOpened(std::span<const std::uint8_t> body);
+    void screenClosed(std::span<const std::uint8_t> body);
+    void windowContent(const wire::protocol::play::ContainerSetContentPacket& packet);
+    void drawWindow();
+    void closeWindow(bool tellBackend);
+    void rejectStackRequest(wire::io::ByteBuffer& body);
+    void rejectStackRequest(std::int32_t requestId);
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
     void blockChanged(std::span<const std::uint8_t> body);
@@ -155,6 +164,17 @@ private:
     std::int32_t pendingTeleport_ = -1;
     bool started_ = false;
     std::array<std::optional<wire::protocol::play::WireItemStack>, 46> inventory_{};
+
+    struct Window {
+        std::int32_t id = 0;
+        wire::bedrock::BedrockContainerType type = wire::bedrock::BedrockContainerType::Container;
+        std::size_t slots = 0;
+        std::vector<std::optional<wire::protocol::play::WireItemStack>> items;
+        bool shown = false;
+    };
+
+    std::optional<Window> window_;
+    std::array<std::int32_t, 3> lastUse_{};
 
     std::chrono::steady_clock::time_point joinStarted_{};
     std::chrono::steady_clock::time_point lastFromJava_{};
