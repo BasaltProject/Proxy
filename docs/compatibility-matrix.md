@@ -53,8 +53,10 @@ for their exact shape. Reconfiguration without reconnecting is checked for 1.20.
 |---|---|
 | Fabric loader 0.20.0 on 1.21.4, no mods, forwarding none | yes, transport gate passes |
 | Fabric loader with Fabric API 0.119.4, forwarding none | yes, transport gate passes (Fabric API holds the join until the client answers a configuration ping) |
-| The same plus FabricProxy-Lite 2.10.1 (Velocity modern forwarding) | login, configuration and the start of play work, FabricProxy-Lite asks for the player info twice and the proxy answers both as Velocity does; the bot receives no chunk in 30 seconds, cause not found, so not verified |
-| Forge, NeoForge, modpacks | not tried |
+| The same plus FabricProxy-Lite 2.10.1 (Velocity modern forwarding) | yes, transport gate passes with a fresh player record; FabricProxy-Lite asks for the player info twice and the proxy answers both as Velocity does. A second join of the same bot into a world that saved its player data received no chunk from the Fabric server even without the proxy (checked with a loopback tee), so repeat runs need the saved player data removed |
+| NeoForge 21.4.161 on 1.21.4, no mods, forwarding none | yes, transport gate passes |
+| Forge 54.1.22 on 1.21.4, no mods, forwarding none | yes, transport gate passes (once the server finished starting; a client that connects earlier is turned away by Forge itself) |
+| Forge or NeoForge with modern forwarding, and any modpack | not tried; forwarding for them needs a forwarding mod and modpack compatibility is not claimed |
 
 A relay of the configuration state is not a promise about any particular modpack.
 
