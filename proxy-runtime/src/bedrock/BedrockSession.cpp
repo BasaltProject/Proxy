@@ -67,8 +67,7 @@ std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + be
 
 constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
-// Inputs sent before the client has moved to a teleport target are stale and would be read as a huge step.
-// One position per server tick: vanilla disconnects a client that sends two in the same tick.
+// Inputs sent before the client reaches a teleport target are stale; vanilla kicks two positions in one tick.
 constexpr std::chrono::milliseconds kPositionInterval{50};
 constexpr float kArrivalRadius = 2.0F;
 constexpr std::int32_t kArrivalInputs = 100;

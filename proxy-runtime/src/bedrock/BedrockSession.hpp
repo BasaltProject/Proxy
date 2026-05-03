@@ -26,8 +26,7 @@ namespace basalt::proxy::runtime::detail {
 
 struct NativeForwarding;
 
-/// One Bedrock player standing in for a Java client: what the backend says is told to the player in Bedrock's terms and
-/// what the player does is told to the backend in Java's.
+/// One Bedrock player standing in for a Java client: the backend is told in Java's terms, the player in Bedrock's.
 class BedrockSession {
 public:
     using Events = std::function<void(runtime::PlayerEvent)>;

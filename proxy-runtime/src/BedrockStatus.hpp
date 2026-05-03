@@ -21,8 +21,7 @@
 
 namespace basalt::proxy::runtime::detail {
 
-/// Answers Bedrock server-list pings and takes a Bedrock client through login so it can be told, by name, why it is
-/// turned away: nothing translates Bedrock play yet.
+/// Answers Bedrock server-list pings and runs each Bedrock client through login and play on its own thread.
 class BedrockStatus {
 public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
@@ -41,8 +40,7 @@ public:
     [[nodiscard]] std::size_t playingCount();
     void tell(std::string_view player, std::string_view miniMessage);
     void kick(std::string_view player, std::string_view miniMessage);
-    /// True when a Bedrock player of that name is playing and the backend exists; the move happens on the Bedrock
-    /// thread.
+    /// True when a Bedrock player of that name is playing and the backend exists; the move runs on the Bedrock thread.
     [[nodiscard]] bool connect(std::string_view player, std::string_view backend);
     void stop();
 

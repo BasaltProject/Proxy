@@ -39,8 +39,7 @@ struct Topology {
     std::shared_ptr<const detail::NativeForwarding> forwarding;
 };
 
-/// libc++ has no std::atomic<std::shared_ptr>, so a mutex guards the pointer swap; readers copy it and release the
-/// lock.
+/// libc++ has no std::atomic<std::shared_ptr>, so a mutex guards the swap and readers copy the pointer.
 class SnapshotCell {
 public:
     [[nodiscard]] std::shared_ptr<const Topology> load() const {

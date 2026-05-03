@@ -1,7 +1,7 @@
 # Basalt native forwarding, version 1
 
-Wire format implemented in `wire/wire-auth` (`forwarding/BasaltForwarding.hpp`). Direction approved in
-ADR-P003; rationale and threat comparison are in `Server/docs/forwarding-basalt.md`.
+Wire format implemented in `wire/wire-auth` (`forwarding/BasaltForwarding.hpp`). Rationale and threat comparison are in
+`Server/docs/forwarding-basalt.md`.
 
 ## Exchange
 
@@ -64,4 +64,4 @@ described as doing so. It carries no permissions, chat key, locale or brand.
 ## Status
 
 Codec and tests are in Wire, the backend endpoint in Server and the per-backend mode with key file in Proxy.
-A capability is negotiated here but only activated by a later, separate step (P7).
+A capability is negotiated here and activated by the session envelope exchange (`session-envelope-v1.md`).
