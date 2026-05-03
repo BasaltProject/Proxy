@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 
@@ -9,6 +10,10 @@ namespace basalt::proxy::runtime::detail {
 struct RelayCounters {
     std::atomic<std::uint64_t> towardClients{0};
     std::atomic<std::uint64_t> towardBackends{0};
+    std::atomic<std::uint64_t> logins{0};
+    std::atomic<std::uint64_t> backendChanges{0};
+    /// Sessions that ended while in the handshake or status, login, configuration or play.
+    std::array<std::atomic<std::uint64_t>, 4> endedIn{};
 };
 
 [[nodiscard]] inline RelayCounters& relayCounters() noexcept {

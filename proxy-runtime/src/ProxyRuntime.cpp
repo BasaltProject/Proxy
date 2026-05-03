@@ -131,6 +131,7 @@ struct ProxyRuntime::Impl {
                                                found->second->announcedBackend,
                                                found->second->playerUuid(),
                                                {}});
+            detail::relayCounters().endedIn[found->second->phase()].fetch_add(1, std::memory_order_relaxed);
             loop.unwatch(found->second->handle());
             unwatchBackends(*found->second);
             (void)timers.cancel(found->second->timer);

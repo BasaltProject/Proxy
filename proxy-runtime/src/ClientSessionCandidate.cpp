@@ -1,6 +1,7 @@
 #include "BackendLogin.hpp"
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
+#include "RelayCounters.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -73,6 +74,7 @@ bool ClientSession::commitLegacyChange() {
     pendingPings_.clear();
     activeBackend_.reset();
     activeBackend_ = std::move(candidateBackend_);
+    relayCounters().backendChanges.fetch_add(1, std::memory_order_relaxed);
     cancelConnectionAttempt();
     targets_ = {};
     nextTarget_ = 0;
@@ -124,6 +126,7 @@ bool ClientSession::acknowledgePreparedChange() {
     pendingPings_.clear();
     activeBackend_.reset();
     activeBackend_ = std::move(candidateBackend_);
+    relayCounters().backendChanges.fetch_add(1, std::memory_order_relaxed);
     cancelConnectionAttempt();
     targets_ = {};
     nextTarget_ = 0;

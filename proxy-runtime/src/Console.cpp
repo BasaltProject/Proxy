@@ -1,5 +1,7 @@
 #include "Console.hpp"
 
+#include "RelayCounters.hpp"
+
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
@@ -7,12 +9,41 @@
 
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <thread>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 namespace basalt::proxy::runtime::detail {
 namespace {
 constexpr std::string_view kHelp = "Commands: help, servers, status, reload, send <player> <backend>, stop.";
+
+std::string endedIn(std::size_t phase) {
+    return std::to_string(relayCounters().endedIn[phase].load(std::memory_order_relaxed));
 }
+
+std::string processUsage() {
+#if defined(__unix__) || defined(__APPLE__)
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0)
+        return {};
+#if defined(__APPLE__)
+    const long peakKib = usage.ru_maxrss / 1024;
+#else
+    const long peakKib = usage.ru_maxrss;
+#endif
+    const double cpu = static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
+                       static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+    char text[96];
+    std::snprintf(text, sizeof text, "; cpu seconds: %.1f; peak memory MiB: %ld", cpu, peakKib / 1024);
+    return text;
+#else
+    return {};
+#endif
+}
+} // namespace
 
 ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
                             const std::vector<config::BackendConfig>& backends, std::stop_token stop,
@@ -54,14 +85,18 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
         if (words[0] == "stop")
             return {"Stopping proxy.", true};
         if (words[0] == "status")
-            return {"Sessions: " + std::to_string(runtime.sessionCount()) +
-                    "; retained buffer bytes: " + std::to_string(runtime.bufferedBytes()) +
-                    "; accepted: " + std::to_string(runtime.acceptedConnections()) +
-                    "; rejected: " + std::to_string(runtime.rejectedConnections()) +
-                    "; bytes toward clients: " + std::to_string(runtime.bytesTowardClients()) +
-                    "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) +
-                    (bedrock.playing ? "; Bedrock players: " + std::to_string(bedrock.playing()) : std::string{}) +
-                    "."};
+            return {
+                "Sessions: " + std::to_string(runtime.sessionCount()) +
+                "; retained buffer bytes: " + std::to_string(runtime.bufferedBytes()) +
+                "; accepted: " + std::to_string(runtime.acceptedConnections()) +
+                "; rejected: " + std::to_string(runtime.rejectedConnections()) +
+                "; bytes toward clients: " + std::to_string(runtime.bytesTowardClients()) +
+                "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) +
+                "; logins: " + std::to_string(relayCounters().logins.load(std::memory_order_relaxed)) +
+                "; backend changes: " + std::to_string(relayCounters().backendChanges.load(std::memory_order_relaxed)) +
+                "; ended in handshake or status: " + endedIn(0) + ", login: " + endedIn(1) +
+                ", configuration: " + endedIn(2) + ", play: " + endedIn(3) + processUsage() +
+                (bedrock.playing ? "; Bedrock players: " + std::to_string(bedrock.playing()) : std::string{}) + "."};
         if (words[0] == "servers") {
             std::string names = "Backends:";
             for (const auto& name : runtime.backendNames())
