@@ -21,6 +21,12 @@ std::uint64_t nowMillis() {
             .count());
 }
 
+std::string originOf(const wire::io::UdpEndpoint& peer) {
+    const std::uint32_t address = peer.address;
+    return std::to_string(address & 0xff) + "." + std::to_string((address >> 8) & 0xff) + "." +
+           std::to_string((address >> 16) & 0xff) + "." + std::to_string(address >> 24);
+}
+
 } // namespace
 
 BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
@@ -64,9 +70,7 @@ bool BedrockStatus::start() {
     }
     server_->onAdvertise([this] { return advertisement(); });
     server_->onConnect([this](wire::bedrock::RakSession& session) {
-        const std::uint32_t address = session.peer().address;
-        const std::string origin = std::to_string(address & 0xff) + "." + std::to_string((address >> 8) & 0xff) + "." +
-                                   std::to_string((address >> 16) & 0xff) + "." + std::to_string(address >> 24);
+        const std::string origin = originOf(session.peer());
         if (admission_.attempt(origin) != AdmissionResult::Accepted) {
             session.close();
             return;
@@ -97,8 +101,8 @@ bool BedrockStatus::start() {
                 raw.disconnect(kTurnedAway);
                 return;
             }
-            found->second.session =
-                std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_, language_, forwarding_);
+            found->second.session = std::make_unique<BedrockSession>(raw, *backend, originOf(peer), peer.port, events_,
+                                                                     language_, forwarding_);
             if (found->second.session->begin()) {
                 const std::lock_guard lock{orders_};
                 playing_.insert(found->second.session->name());

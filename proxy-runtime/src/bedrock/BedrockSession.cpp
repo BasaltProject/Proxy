@@ -67,6 +67,11 @@ std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + be
 
 constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
+// Inputs sent before the client has moved to a teleport target are stale and would be read as a huge step.
+// One position per server tick: vanilla disconnects a client that sends two in the same tick.
+constexpr std::chrono::milliseconds kPositionInterval{50};
+constexpr float kArrivalRadius = 2.0F;
+constexpr std::int32_t kArrivalInputs = 100;
 constexpr std::chrono::milliseconds kConnectBudget{5000};
 constexpr std::chrono::seconds kJoinBudget{60};
 constexpr std::chrono::seconds kSilenceBudget{45};
@@ -86,11 +91,11 @@ constexpr std::int32_t kChatCommandId = play::ChatCommandPacket::kId;
 } // namespace
 
 BedrockSession::BedrockSession(bedrock::BedrockConnection& connection, config::BackendConfig backend,
-                               std::string address, Events events,
+                               std::string address, std::uint16_t port, Events events,
                                std::shared_ptr<const wire::text::LangTable> language,
                                std::shared_ptr<const NativeForwarding> forwarding)
-    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), events_(std::move(events)),
-      language_(std::move(language)), forwarding_(std::move(forwarding)) {}
+    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), port_(port),
+      events_(std::move(events)), language_(std::move(language)), forwarding_(std::move(forwarding)) {}
 
 BedrockSession::~BedrockSession() {
     if (announced_ && events_)
@@ -118,7 +123,7 @@ bool BedrockSession::openLink() {
             biomeKeys_ = std::move(keys);
     };
     events.closed = [this](const std::string& reason) { leave(reason); };
-    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, std::move(events), forwarding_.get(),
+    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, port_, std::move(events), forwarding_.get(),
                                        connection_.login().xuid);
     return link_->begin(kConnectBudget);
 }
@@ -163,6 +168,8 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     chunks_ = 0;
     spawned_ = false;
     teleported_ = false;
+    acceptedTeleport_ = -1;
+    pendingMove_.reset();
     switching_ = true;
     // The client keeps a world for as long as it stays in a dimension, so it is sent to another and brought back.
     wire::io::ByteBuffer out;
@@ -195,6 +202,13 @@ void BedrockSession::pump() {
         return;
     link_->pump();
     const auto now = std::chrono::steady_clock::now();
+    if (pendingMove_ && now - lastPosition_ >= kPositionInterval) {
+        wire::io::ByteBuffer out;
+        pendingMove_->write(out);
+        pendingMove_.reset();
+        lastPosition_ = now;
+        sendJava(play::ServerboundPositionLookPacket::kId, out);
+    }
     if (!spawned_ && now - joinStarted_ > kJoinBudget)
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
@@ -1286,17 +1300,22 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
                            connection_.protocolVersion());
     sendBedrock(BedrockPacket::MovePlayer, out);
     out.clear();
-    play::AcceptTeleportationPacket{.teleportId = position->teleportId,
-                                    .x = position->x,
-                                    .y = position->y,
-                                    .z = position->z,
-                                    .yaw = yaw_,
-                                    .pitch = pitch_}
-        .write(out);
-    sendJava(play::AcceptTeleportationPacket::kId, out);
+    if (position->teleportId != acceptedTeleport_) {
+        acceptedTeleport_ = position->teleportId;
+        play::AcceptTeleportationPacket{.teleportId = position->teleportId,
+                                        .x = position->x,
+                                        .y = position->y,
+                                        .z = position->z,
+                                        .yaw = yaw_,
+                                        .pitch = pitch_}
+            .write(out);
+        sendJava(play::AcceptTeleportationPacket::kId, out);
+        out.clear();
+        sendJava(play::kPlayerLoadedId, out);
+    }
     teleported_ = true;
-    out.clear();
-    sendJava(play::kPlayerLoadedId, out);
+    arriving_ = true;
+    arrivalInputs_ = 0;
     spawn();
 }
 
@@ -1418,6 +1437,14 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
             stackRequest(*input->stackRequest);
         if (!input || !teleported_)
             return;
+        if (arriving_) {
+            const float dx = input->x - x_;
+            const float dy = input->y - bedrock::kPlayerEyeHeight - y_;
+            const float dz = input->z - z_;
+            if (dx * dx + dy * dy + dz * dz > kArrivalRadius * kArrivalRadius && ++arrivalInputs_ < kArrivalInputs)
+                return;
+            arriving_ = false;
+        }
         wire::io::ByteBuffer out;
         play::ServerboundPositionLookPacket move;
         move.x = static_cast<double>(input->x);
@@ -1426,8 +1453,15 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         move.yaw = input->yaw;
         move.pitch = input->pitch;
         move.onGround = input->onGround;
-        move.write(out);
-        sendJava(play::ServerboundPositionLookPacket::kId, out);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastPosition_ < kPositionInterval) {
+            pendingMove_ = move;
+        } else {
+            lastPosition_ = now;
+            pendingMove_.reset();
+            move.write(out);
+            sendJava(play::ServerboundPositionLookPacket::kId, out);
+        }
         sprinting(input->sprinting);
         interact(*input);
     } else if (packet == BedrockPacket::ContainerClose) {

@@ -32,7 +32,8 @@ public:
     };
 
     JavaLink(config::BackendConfig backend, wire::auth::SessionProfile profile, std::string clientAddress,
-             Events events, const NativeForwarding* native = nullptr, std::string originId = {});
+             std::uint16_t clientPort, Events events, const NativeForwarding* native = nullptr,
+             std::string originId = {});
 
     /// Resolves the backend and starts connecting; false when it cannot be reached at all.
     [[nodiscard]] bool begin(std::chrono::milliseconds budget);
@@ -57,6 +58,7 @@ private:
     config::BackendConfig backend_;
     wire::auth::SessionProfile profile_;
     std::string clientAddress_;
+    std::uint16_t clientPort_ = 0;
     Events events_;
     const NativeForwarding* native_ = nullptr;
     std::string originId_;

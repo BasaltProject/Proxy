@@ -33,9 +33,9 @@ constexpr std::int32_t kPlayPong = 0x2d;
 } // namespace
 
 JavaLink::JavaLink(config::BackendConfig backend, wire::auth::SessionProfile profile, std::string clientAddress,
-                   Events events, const NativeForwarding* native, std::string originId)
+                   std::uint16_t clientPort, Events events, const NativeForwarding* native, std::string originId)
     : backend_(std::move(backend)), profile_(std::move(profile)), clientAddress_(std::move(clientAddress)),
-      events_(std::move(events)), native_(native), originId_(std::move(originId)) {}
+      clientPort_(clientPort), events_(std::move(events)), native_(native), originId_(std::move(originId)) {}
 
 bool JavaLink::begin(std::chrono::milliseconds budget) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
@@ -76,7 +76,7 @@ void JavaLink::pump() {
         login_ = std::make_unique<BackendLogin>(std::move(*connected), *std::pmr::new_delete_resource(),
                                                 BackendAttempt{1, 0});
         login_->useOrigin(1, originId_);
-        if (!login_->start(backend_, profile_, backend_.host, backend_.port, clientAddress_, 0, native_)) {
+        if (!login_->start(backend_, profile_, backend_.host, backend_.port, clientAddress_, clientPort_, native_)) {
             close("the backend login could not start");
             return;
         }

@@ -7,6 +7,7 @@
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
 #include <basalt/wire/protocol/play/EntityData.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
 #include <basalt/wire/text/LangTable.hpp>
 
@@ -32,7 +33,8 @@ public:
     using Events = std::function<void(runtime::PlayerEvent)>;
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
-                   Events events = {}, std::shared_ptr<const wire::text::LangTable> language = nullptr,
+                   std::uint16_t port, Events events = {},
+                   std::shared_ptr<const wire::text::LangTable> language = nullptr,
                    std::shared_ptr<const NativeForwarding> forwarding = nullptr);
     ~BedrockSession();
     BedrockSession(const BedrockSession&) = delete;
@@ -125,6 +127,7 @@ private:
     wire::bedrock::BedrockConnection& connection_;
     config::BackendConfig backend_;
     std::string address_;
+    std::uint16_t port_ = 0;
     Events events_;
     std::shared_ptr<const wire::text::LangTable> language_;
     std::shared_ptr<const NativeForwarding> forwarding_;
@@ -196,6 +199,12 @@ private:
     std::int32_t gamemode_ = 0;
     bool spawned_ = false;
     bool teleported_ = false;
+    bool arriving_ = false;
+    std::int32_t acceptedTeleport_ = -1;
+    std::chrono::steady_clock::time_point lastPosition_{};
+    std::optional<wire::protocol::play::ServerboundPositionLookPacket> pendingMove_;
+    int traced_ = 0;
+    std::int32_t arrivalInputs_ = 0;
     std::size_t chunks_ = 0;
     float x_ = 0.0F;
     float y_ = 64.0F;
