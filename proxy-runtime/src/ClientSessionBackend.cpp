@@ -28,6 +28,8 @@ namespace basalt::proxy::runtime::detail {
 namespace {
 constexpr std::int32_t kConfigurationDisconnectId = 2;
 constexpr std::size_t kMaxBossBars = 256;
+constexpr std::size_t kMaxListedPlayers = 4096;
+constexpr std::size_t kListRemoveBatch = 256;
 constexpr std::int32_t kStartConfigurationId = 0x78;
 } // namespace
 
@@ -117,6 +119,43 @@ void ClientSession::trackBossBar(std::span<const std::uint8_t> body) {
         bossBars_.erase(found);
 }
 
+void ClientSession::trackPlayerList(std::int32_t id, std::span<const std::uint8_t> body) {
+    namespace play = wire::protocol::play;
+    if (id != play::PlayerInfoUpdatePacket::kId && id != play::PlayerInfoRemovePacket::kId)
+        return;
+    wire::io::ByteBuffer view;
+    view.writeBytes(body);
+    if (id == play::PlayerInfoUpdatePacket::kId) {
+        const auto update = play::PlayerInfoUpdatePacket::read(view);
+        if (!update || (update->actions & play::PlayerInfoUpdatePacket::kAddPlayer) == 0)
+            return;
+        for (const auto& entry : update->entries)
+            if (listedPlayers_.size() < kMaxListedPlayers &&
+                std::ranges::find(listedPlayers_, entry.uuid) == listedPlayers_.end())
+                listedPlayers_.push_back(entry.uuid);
+    } else if (const auto removed = play::PlayerInfoRemovePacket::read(view)) {
+        for (const auto& uuid : removed->players)
+            std::erase(listedPlayers_, uuid);
+    }
+}
+
+bool ClientSession::clearClientState() {
+    namespace play = wire::protocol::play;
+    for (std::size_t from = 0; from < listedPlayers_.size(); from += kListRemoveBatch) {
+        play::PlayerInfoRemovePacket packet;
+        const auto to = std::min(listedPlayers_.size(), from + kListRemoveBatch);
+        packet.players.assign(listedPlayers_.begin() + static_cast<std::ptrdiff_t>(from),
+                              listedPlayers_.begin() + static_cast<std::ptrdiff_t>(to));
+        wire::io::ByteBuffer out;
+        wire::protocol::varInt::write(out, play::PlayerInfoRemovePacket::kId);
+        packet.write(out);
+        if (!queuePacket(out.readable()))
+            return false;
+    }
+    listedPlayers_.clear();
+    return clearBossBars();
+}
+
 bool ClientSession::clearBossBars() {
     for (const auto& key : bossBars_) {
         wire::io::ByteBuffer out;
@@ -138,8 +177,12 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
-    if (legacyRaw_ && state_ == State::kPlay && id == wire::protocol::play::BossEventPacket::kId)
-        trackBossBar(frame_.readable());
+    if (legacyRaw_ && state_ == State::kPlay) {
+        if (id == wire::protocol::play::BossEventPacket::kId)
+            trackBossBar(frame_.readable());
+        else
+            trackPlayerList(id, frame_.readable());
+    }
     if (state_ == State::kLoginAck ||
         (state_ == State::kCookieResponse && id != wire::protocol::login::LoginDisconnectPacket::kId))
         return false;

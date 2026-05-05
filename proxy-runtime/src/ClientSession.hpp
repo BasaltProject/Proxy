@@ -166,6 +166,8 @@ private:
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;
     void trackBossBar(std::span<const std::uint8_t> body);
+    void trackPlayerList(std::int32_t id, std::span<const std::uint8_t> body);
+    [[nodiscard]] bool clearClientState();
     [[nodiscard]] bool clearBossBars();
     [[nodiscard]] bool synthesizeClientPacket(std::int32_t id);
     bool synthesizing_ = false;
@@ -217,6 +219,7 @@ private:
     PendingCookies pendingCookies_;
     PendingResponses pendingKeepAlives_;
     std::vector<std::array<std::uint8_t, 16>> bossBars_;
+    std::vector<wire::common::Uuid> listedPlayers_;
     PendingResponses pendingPings_;
     CookieCache cookieCache_;
     ResourcePacks resourcePacks_;
