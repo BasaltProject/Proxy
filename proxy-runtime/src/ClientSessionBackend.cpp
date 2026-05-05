@@ -17,6 +17,7 @@
 #include <basalt/wire/protocol/play/BorderPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
+#include <basalt/wire/protocol/play/UiPackets.hpp>
 #include <basalt/wire/text/Serializers.hpp>
 
 #include <algorithm>
@@ -26,6 +27,7 @@
 namespace basalt::proxy::runtime::detail {
 namespace {
 constexpr std::int32_t kConfigurationDisconnectId = 2;
+constexpr std::size_t kMaxBossBars = 256;
 constexpr std::int32_t kStartConfigurationId = 0x78;
 } // namespace
 
@@ -99,6 +101,35 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     return backendFrame(bytes);
 }
 
+void ClientSession::trackBossBar(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer view;
+    view.writeBytes(body);
+    const auto uuid = view.readSpan(16);
+    const auto action = wire::protocol::varInt::read(view);
+    if (view.failed())
+        return;
+    std::array<std::uint8_t, 16> key{};
+    std::ranges::copy(uuid, key.begin());
+    const auto found = std::ranges::find(bossBars_, key);
+    if (action == 0 && found == bossBars_.end() && bossBars_.size() < kMaxBossBars)
+        bossBars_.push_back(key);
+    else if (action == 1 && found != bossBars_.end())
+        bossBars_.erase(found);
+}
+
+bool ClientSession::clearBossBars() {
+    for (const auto& key : bossBars_) {
+        wire::io::ByteBuffer out;
+        wire::protocol::varInt::write(out, wire::protocol::play::BossEventPacket::kId);
+        out.writeBytes(key);
+        wire::protocol::varInt::write(out, 1);
+        if (!queuePacket(out.readable()))
+            return false;
+    }
+    bossBars_.clear();
+    return true;
+}
+
 bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     frame_.clear();
     if (!frame_.tryReserve(bytes.size()))
@@ -107,6 +138,8 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    if (legacyRaw_ && state_ == State::kPlay && id == wire::protocol::play::BossEventPacket::kId)
+        trackBossBar(frame_.readable());
     if (state_ == State::kLoginAck ||
         (state_ == State::kCookieResponse && id != wire::protocol::login::LoginDisconnectPacket::kId))
         return false;

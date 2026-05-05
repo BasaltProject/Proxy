@@ -67,7 +67,7 @@ bool ClientSession::beginPreparedChange() {
 }
 
 bool ClientSession::commitLegacyChange() {
-    if (!candidateBackend_->acknowledgeLogin() || !candidateBackend_->finishConfiguration())
+    if (!candidateBackend_->acknowledgeLogin() || !candidateBackend_->finishConfiguration() || !clearBossBars())
         return false;
     resourcePacks_.clear();
     pendingKeepAlives_.clear();
