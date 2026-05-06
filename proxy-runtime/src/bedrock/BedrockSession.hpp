@@ -122,6 +122,7 @@ private:
     void sendBedrock(wire::bedrock::BedrockPacket packet, const wire::io::ByteBuffer& body);
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
     void tickEnded();
+    void kicked(std::span<const std::uint8_t> body);
     void leave(const std::string& reason);
 
     wire::bedrock::BedrockConnection& connection_;
