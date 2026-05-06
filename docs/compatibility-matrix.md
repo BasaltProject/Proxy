@@ -109,6 +109,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Dropped items | yes (counts and item ids seen) |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
 | Moving a Bedrock player to a Paper 26.3 with Velocity forwarding and staying there | yes, with the Swarm bot; needs the proxy to end each position with the client tick packet and to send the address without the port |
+| A backend that requires a Java resource pack: the proxy accepts it for the Bedrock player (an optional pack is declined); the pack is not shown | yes, with Paper 26.3 and `require-resource-pack=true`; without it the join never finishes |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
 | Bedrock connections go through the same admission gate as Java ones (global and per-origin token buckets) | yes: 32 of 40 bots arriving at once from one address enter with the defaults |
 | A RakNet peer that leaves splits open, holds ordered frames back or never acknowledges is cut off | yes (16 splits, 4 MiB of parts, 256 held frames, 8192 unacknowledged datagrams) |
