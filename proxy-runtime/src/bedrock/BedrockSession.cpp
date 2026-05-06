@@ -67,6 +67,7 @@ std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + be
 
 constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
+constexpr std::size_t kMaxCommands = 2000;
 constexpr std::chrono::milliseconds kPositionInterval{50};
 // A client ends each of its ticks with this packet; vanilla refuses a second position before one arrives.
 constexpr std::int32_t kClientTickEndId = 0x0d;
@@ -219,6 +220,25 @@ void BedrockSession::pump() {
         leave("The server stopped answering.");
 }
 
+void BedrockSession::commandList(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto tree = play::CommandsPacket::read(in);
+    if (!tree || tree->rootIndex < 0 || static_cast<std::size_t>(tree->rootIndex) >= tree->nodes.size())
+        return;
+    std::vector<bedrock::CommandInfo> commands;
+    for (const std::int32_t child : tree->nodes[static_cast<std::size_t>(tree->rootIndex)].children) {
+        if (child < 0 || static_cast<std::size_t>(child) >= tree->nodes.size() || commands.size() >= kMaxCommands)
+            continue;
+        const auto& node = tree->nodes[static_cast<std::size_t>(child)];
+        if (node.kind == play::CommandNodeData::Kind::Literal && node.name && !node.name->empty())
+            commands.push_back({*node.name, {}});
+    }
+    wire::io::ByteBuffer out;
+    bedrock::writeAvailableCommands(out, commands);
+    sendBedrock(BedrockPacket::AvailableCommands, out);
+}
+
 void BedrockSession::kicked(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
@@ -319,6 +339,8 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         sectionChanged(body);
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
+    else if (id == play::CommandsPacket::kId)
+        commandList(body);
     else if (id == play::PlayDisconnectPacket::kId)
         kicked(body);
     connection_.flush();
