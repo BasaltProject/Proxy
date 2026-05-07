@@ -5,6 +5,7 @@
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockBiomes.hpp>
 #include <basalt/wire/bedrock/BedrockColumn.hpp>
+#include <basalt/wire/bedrock/BedrockEffects.hpp>
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
@@ -73,6 +74,7 @@ std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + be
 constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::size_t kMaxCommands = 2000;
+constexpr std::uint64_t kSelfRuntimeId = 1;
 constexpr std::chrono::milliseconds kPositionInterval{50};
 // A client ends each of its ticks with this packet; vanilla refuses a second position before one arrives.
 constexpr std::int32_t kClientTickEndId = 0x0d;
@@ -154,6 +156,12 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
         bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
         sendBedrock(BedrockPacket::RemoveEntity, gone);
     }
+    for (const std::int32_t effect : effects_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeMobEffect(gone, kSelfRuntimeId, bedrock::BedrockEffectEvent::Remove, effect, 0, false, 0, false);
+        sendBedrock(BedrockPacket::MobEffect, gone);
+    }
+    effects_.clear();
     others_.clear();
     mobs_.clear();
     nameTags_.clear();
@@ -224,6 +232,37 @@ void BedrockSession::pump() {
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
         leave("The server stopped answering.");
+}
+
+void BedrockSession::effectGiven(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::UpdateMobEffectPacket::read(in);
+    if (!packet || packet->entityId != selfEntity_)
+        return;
+    const std::int32_t effect = bedrock::bedrockEffectId(packet->effect);
+    if (effect == 0)
+        return;
+    const auto event =
+        effects_.insert(effect).second ? bedrock::BedrockEffectEvent::Add : bedrock::BedrockEffectEvent::Modify;
+    wire::io::ByteBuffer out;
+    bedrock::writeMobEffect(out, kSelfRuntimeId, event, effect, packet->amplifier, packet->visible,
+                            packet->durationTicks, packet->ambient);
+    sendBedrock(BedrockPacket::MobEffect, out);
+}
+
+void BedrockSession::effectRemoved(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::RemoveMobEffectPacket::read(in);
+    if (!packet || packet->entityId != selfEntity_)
+        return;
+    const std::int32_t effect = bedrock::bedrockEffectId(packet->effect);
+    if (effect == 0 || effects_.erase(effect) == 0)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeMobEffect(out, kSelfRuntimeId, bedrock::BedrockEffectEvent::Remove, effect, 0, false, 0, false);
+    sendBedrock(BedrockPacket::MobEffect, out);
 }
 
 void BedrockSession::commandList(std::span<const std::uint8_t> body) {
@@ -354,6 +393,10 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         sectionChanged(body);
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
+    else if (id == play::UpdateMobEffectPacket::kId)
+        effectGiven(body);
+    else if (id == play::RemoveMobEffectPacket::kId)
+        effectRemoved(body);
     else if (id == play::CommandsPacket::kId)
         commandList(body);
     else if (id == play::PlayDisconnectPacket::kId)
