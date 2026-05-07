@@ -31,7 +31,7 @@ public:
                   Route route = {}, BedrockSession::Events events = {},
                   std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {},
                   std::shared_ptr<const NativeForwarding> forwarding = nullptr, bool requireAuthenticated = false,
-                  const config::AdmissionConfig& admission = {});
+                  const config::AdmissionConfig& admission = {}, BedrockSession::Commands commands = {});
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
@@ -76,6 +76,7 @@ private:
     std::shared_ptr<const NativeForwarding> forwarding_;
     bool requireAuthenticated_ = false;
     Admission admission_;
+    BedrockSession::Commands commands_;
     std::unordered_set<std::string> playing_;
     std::mutex orders_;
     std::vector<Order> pending_;

@@ -33,10 +33,11 @@ BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function
                              Route route, BedrockSession::Events events,
                              std::shared_ptr<const wire::text::LangTable> language, Lookup lookup,
                              std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated,
-                             const config::AdmissionConfig& admission)
+                             const config::AdmissionConfig& admission, BedrockSession::Commands commands)
     : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
       events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
-      forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated), admission_(admission) {}
+      forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated), admission_(admission),
+      commands_(std::move(commands)) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -102,7 +103,7 @@ bool BedrockStatus::start() {
                 return;
             }
             found->second.session = std::make_unique<BedrockSession>(raw, *backend, originOf(peer), peer.port, events_,
-                                                                     language_, forwarding_);
+                                                                     language_, forwarding_, commands_);
             if (found->second.session->begin()) {
                 const std::lock_guard lock{orders_};
                 playing_.insert(found->second.session->name());

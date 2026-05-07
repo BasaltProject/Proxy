@@ -31,10 +31,15 @@ class BedrockSession {
 public:
     using Events = std::function<void(runtime::PlayerEvent)>;
 
+    struct Commands {
+        std::function<bool(std::string_view player, std::string_view command)> run;
+        std::function<std::vector<runtime::PlayerCommandSpec>()> specs;
+    };
+
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
                    std::uint16_t port, Events events = {},
                    std::shared_ptr<const wire::text::LangTable> language = nullptr,
-                   std::shared_ptr<const NativeForwarding> forwarding = nullptr);
+                   std::shared_ptr<const NativeForwarding> forwarding = nullptr, Commands commands = {});
     ~BedrockSession();
     BedrockSession(const BedrockSession&) = delete;
     BedrockSession& operator=(const BedrockSession&) = delete;
@@ -129,6 +134,7 @@ private:
     wire::bedrock::BedrockConnection& connection_;
     config::BackendConfig backend_;
     std::string address_;
+    Commands commands_;
     std::uint16_t port_ = 0;
     Events events_;
     std::shared_ptr<const wire::text::LangTable> language_;
