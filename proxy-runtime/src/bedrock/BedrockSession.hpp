@@ -72,6 +72,7 @@ private:
     void removeEntities(std::span<const std::uint8_t> body);
     void moveEntity(std::int32_t id, double x, double y, double z, float yaw, float pitch, bool onGround);
     [[nodiscard]] static std::uint64_t runtimeId(std::int32_t javaId);
+    void sneaking(bool now);
     void sprinting(bool now);
     void entityTransaction(wire::io::ByteBuffer& body);
     void interact(const wire::bedrock::PlayerAuthInput& input);
@@ -204,6 +205,7 @@ private:
     bool switching_ = false;
     bool respawning_ = false;
     bool sprinting_ = false;
+    bool sneaking_ = false;
     std::int32_t selfEntity_ = 0;
     std::int32_t dimension_ = 0;
     std::int32_t clientDimension_ = 0;
