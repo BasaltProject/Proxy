@@ -61,6 +61,11 @@ constexpr float kMaxLevel = 24791.0F;
 constexpr float kWalkSpeed = 0.1F;
 constexpr std::size_t kCarriedSlots = 36;
 constexpr std::size_t kJavaPlayerSlots = 46;
+constexpr std::size_t kArmourSlots = 4;
+constexpr std::size_t kJavaArmourStart = 5;
+constexpr std::size_t kJavaOffhandSlot = 45;
+constexpr std::uint32_t kOffhandWindow = 119;
+constexpr std::uint32_t kArmourWindow = 120;
 
 // Bedrock numbers the hotbar first; Java puts it last, after the 27 of the main inventory.
 std::size_t javaSlot(std::size_t bedrockSlot) { return bedrockSlot < 9 ? 36 + bedrockSlot : bedrockSlot; }
@@ -1008,6 +1013,20 @@ void BedrockSession::sendInventory() {
         carried[slot] = stackOf(inventory_[javaSlot(slot)]);
     wire::io::ByteBuffer out;
     bedrock::writeInventoryContent(out, 0, carried, bedrock::BedrockContainerSlot::HotbarAndInventory,
+                                   connection_.protocolVersion());
+    sendBedrock(BedrockPacket::InventoryContent, out);
+
+    std::array<bedrock::BedrockItemStack, kArmourSlots> worn{};
+    for (std::size_t slot = 0; slot < kArmourSlots; ++slot)
+        worn[slot] = stackOf(inventory_[kJavaArmourStart + slot]);
+    out.clear();
+    bedrock::writeInventoryContent(out, kArmourWindow, worn, bedrock::BedrockContainerSlot::Armour,
+                                   connection_.protocolVersion());
+    sendBedrock(BedrockPacket::InventoryContent, out);
+
+    const std::array<bedrock::BedrockItemStack, 1> held{stackOf(inventory_[kJavaOffhandSlot])};
+    out.clear();
+    bedrock::writeInventoryContent(out, kOffhandWindow, held, bedrock::BedrockContainerSlot::Offhand,
                                    connection_.protocolVersion());
     sendBedrock(BedrockPacket::InventoryContent, out);
 }
