@@ -260,11 +260,32 @@ void BedrockSession::pluginMessage(std::span<const std::uint8_t> body) {
         const auto bytes = data.readSpan(length);
         return data.failed() ? std::string{} : std::string{bytes.begin(), bytes.end()};
     };
-    if (text() == "Connect") {
+    const std::string subchannel = text();
+    if (subchannel == "Connect") {
         const std::string target = text();
         if (!target.empty() && target.size() <= kMaxBackendName)
             static_cast<void>(commands_.connect(javaName_, target));
+    } else if (subchannel == "GetServer") {
+        bungeeAnswer(message->channel, subchannel, backend_.name);
+    } else if (subchannel == "UUID") {
+        std::string plain = javaUuid_;
+        std::erase(plain, '-');
+        bungeeAnswer(message->channel, subchannel, plain);
     }
+}
+
+void BedrockSession::bungeeAnswer(const std::string& channel, std::string_view subchannel, std::string_view value) {
+    wire::io::ByteBuffer data;
+    for (const std::string_view part : {subchannel, value}) {
+        data.writeShort(static_cast<std::int16_t>(part.size()));
+        data.writeBytes(std::span{reinterpret_cast<const std::uint8_t*>(part.data()), part.size()});
+    }
+    play::CustomPayloadPacket reply;
+    reply.channel = channel;
+    reply.data.assign(data.readable().begin(), data.readable().end());
+    wire::io::ByteBuffer out;
+    reply.write(out);
+    sendJava(play::CustomPayloadPacket::kServerboundId, out);
 }
 
 void BedrockSession::hurt(std::span<const std::uint8_t> body) {

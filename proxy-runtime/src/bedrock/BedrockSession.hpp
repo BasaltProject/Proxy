@@ -130,6 +130,7 @@ private:
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
     void tickEnded();
     void pluginMessage(std::span<const std::uint8_t> body);
+    void bungeeAnswer(const std::string& channel, std::string_view subchannel, std::string_view value);
     void hurt(std::span<const std::uint8_t> body);
     void entityEvent(std::span<const std::uint8_t> body);
     void effectGiven(std::span<const std::uint8_t> body);
