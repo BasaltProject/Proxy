@@ -299,7 +299,12 @@ int run(const cliCommand::Run& command) {
                 return *found;
             },
             nativeForwarding, configuration->network.onlineMode, configuration->admission,
-            detail::BedrockSession::Commands{playerCommand, playerCommandSpecs});
+            detail::BedrockSession::Commands{playerCommand, playerCommandSpecs, {}, [&configuration] {
+                                                 std::vector<std::string> names;
+                                                 for (const auto& backend : configuration->backends)
+                                                     names.push_back(backend.name);
+                                                 return names;
+                                             }});
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
