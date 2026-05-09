@@ -23,6 +23,7 @@
 #include <basalt/wire/protocol/play/PalettedContainer.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/PlayerStatePackets.hpp>
+#include <basalt/wire/protocol/play/SimplePackets.hpp>
 #include <basalt/wire/protocol/play/UiPackets.hpp>
 #include <basalt/wire/protocol/play/WorldPackets.hpp>
 #include <basalt/wire/text/MiniMessage.hpp>
@@ -75,6 +76,10 @@ constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::size_t kMaxCommands = 2000;
 constexpr std::uint64_t kSelfRuntimeId = 1;
+constexpr std::string_view kBungeeChannel = "bungeecord:main";
+constexpr std::string_view kBungeeLegacyChannel = "BungeeCord";
+constexpr std::size_t kMaxBungeePayload = 32768;
+constexpr std::size_t kMaxBackendName = 64;
 // parity: EntityEvent.HURT.
 constexpr std::int8_t kJavaHurtEvent = 2;
 constexpr std::int32_t kPlayerInputId = 0x2b;
@@ -238,6 +243,28 @@ void BedrockSession::pump() {
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
         leave("The server stopped answering.");
+}
+
+void BedrockSession::pluginMessage(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto message = play::CustomPayloadPacket::read(in);
+    if (!message || !backend_.bungeeMessages || !commands_.connect ||
+        (message->channel != kBungeeChannel && message->channel != kBungeeLegacyChannel) ||
+        message->data.size() > kMaxBungeePayload)
+        return;
+    wire::io::ByteBuffer data;
+    data.writeBytes(message->data);
+    const auto text = [&data]() -> std::string {
+        const auto length = static_cast<std::uint16_t>(data.readShort());
+        const auto bytes = data.readSpan(length);
+        return data.failed() ? std::string{} : std::string{bytes.begin(), bytes.end()};
+    };
+    if (text() == "Connect") {
+        const std::string target = text();
+        if (!target.empty() && target.size() <= kMaxBackendName)
+            static_cast<void>(commands_.connect(javaName_, target));
+    }
 }
 
 void BedrockSession::hurt(std::span<const std::uint8_t> body) {
@@ -431,6 +458,8 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         sectionChanged(body);
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
+    else if (id == play::CustomPayloadPacket::kClientboundId)
+        pluginMessage(body);
     else if (id == play::HurtAnimationPacket::kId)
         hurt(body);
     else if (id == play::EntityEventPacket::kId)
