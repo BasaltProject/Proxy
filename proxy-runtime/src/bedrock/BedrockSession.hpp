@@ -128,6 +128,8 @@ private:
     void sendBedrock(wire::bedrock::BedrockPacket packet, const wire::io::ByteBuffer& body);
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
     void tickEnded();
+    void hurt(std::span<const std::uint8_t> body);
+    void entityEvent(std::span<const std::uint8_t> body);
     void effectGiven(std::span<const std::uint8_t> body);
     void effectRemoved(std::span<const std::uint8_t> body);
     void commandList(std::span<const std::uint8_t> body);
