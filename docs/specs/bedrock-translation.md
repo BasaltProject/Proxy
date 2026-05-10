@@ -36,6 +36,6 @@ does), recipes, maps, effects and the rest of the player state. Moving them mean
 
 ## What the proxy still lacks
 
-Crafting tables and the other windows, stack splits and drops, crafting, forms, particles and sounds, the equipment and skins of other
+Crafting tables and the other windows, stack splits, crafting, forms, particles and sounds, the equipment and skins of other
 players, the effects of other entities, mob variants, below-name scoreboards, and the packs of the backend as Bedrock packs. A Bedrock player behind the
 proxy can walk, see, chat, run commands, build, move chests' contents, switch backend and be moved by plugins, but not yet play survival through every window.
