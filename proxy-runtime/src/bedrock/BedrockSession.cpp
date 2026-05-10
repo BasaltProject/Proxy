@@ -62,6 +62,7 @@ constexpr float kMaxFood = 20.0F;
 constexpr float kMaxLevel = 24791.0F;
 constexpr float kWalkSpeed = 0.1F;
 constexpr std::size_t kCarriedSlots = 36;
+constexpr std::size_t kCookerSlotCount = 3;
 constexpr std::size_t kJavaPlayerSlots = 46;
 constexpr std::size_t kArmourSlots = 4;
 constexpr std::size_t kJavaArmourStart = 5;
@@ -1179,8 +1180,21 @@ std::optional<bedrock::BedrockContainerType> BedrockSession::windowType(std::int
     constexpr std::int32_t kGeneric9x1 = 0;
     constexpr std::int32_t kGeneric9x6 = 5;
     constexpr std::int32_t kGeneric3x3 = 6;
+    constexpr std::int32_t kBlastFurnace = 10;
+    constexpr std::int32_t kFurnace = 14;
     constexpr std::int32_t kHopper = 16;
+    constexpr std::int32_t kShulkerBox = 20;
+    constexpr std::int32_t kSmoker = 22;
     constexpr std::size_t kRow = 9;
+    constexpr std::size_t kCookerSlots = 3;
+    if (menu == kShulkerBox) {
+        slots = kRow * 3;
+        return Type::Container;
+    }
+    if (menu == kFurnace || menu == kBlastFurnace || menu == kSmoker) {
+        slots = kCookerSlots;
+        return menu == kFurnace ? Type::Furnace : menu == kBlastFurnace ? Type::BlastFurnace : Type::Smoker;
+    }
     if (menu >= kGeneric9x1 && menu <= kGeneric9x6) {
         slots = kRow * static_cast<std::size_t>(menu + 1);
         return Type::Container;
@@ -1270,6 +1284,14 @@ std::optional<std::int32_t> BedrockSession::clickSlot(const bedrock::BedrockStac
     const std::int32_t slots = window_ ? static_cast<std::int32_t>(window_->slots) : 0;
     if (container == Place::LevelEntity)
         return window_ && slot.slot >= 0 && slot.slot < slots ? std::optional{slot.slot} : std::nullopt;
+    if (window_ && window_->slots == kCookerSlotCount) {
+        if (container == Place::FurnaceIngredient)
+            return 0;
+        if (container == Place::FurnaceFuel)
+            return 1;
+        if (container == Place::FurnaceResult)
+            return 2;
+    }
     const bool carried =
         container == Place::HotbarAndInventory || container == Place::Hotbar || container == Place::Inventory;
     if (!carried || slot.slot < 0 || slot.slot >= static_cast<std::int32_t>(kCarriedSlots))
