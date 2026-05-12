@@ -47,6 +47,13 @@ A bot of each of these versions logs in and plays against a Basalt Server 26.3 t
 1.21.11, 26.1, 26.2. Versions that share a protocol (1.16.4 and 1.16.5, 1.20 and 1.20.1, and so on) count as one. The login packets of each version are checked
 for their exact shape. Reconfiguration without reconnecting is checked for 1.20.2 and later.
 
+## Registries and content a version cannot show
+
+The proxy never substitutes content. A client gets the registries of the backend it is on, sent again at every backend change (from 1.20.2 the
+client reconfigures; before that a translated client gets the new backend's join packet and the lists described in the plan are cleared). A
+client and backend pair that has no verified route is refused with a message before any state is created: at the handshake for the first
+backend, and as a refused `player:connect` for a change. Nothing is rewritten between registries of different versions.
+
 ## Modded backends
 
 | Backend | Result |

@@ -165,6 +165,7 @@ private:
     std::int32_t clientProtocol_ = 0;
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;
+    [[nodiscard]] bool refuse(std::string_view text);
     void trackBossBar(std::span<const std::uint8_t> body);
     void trackPlayerList(std::int32_t id, std::span<const std::uint8_t> body);
     [[nodiscard]] bool clearClientState();
