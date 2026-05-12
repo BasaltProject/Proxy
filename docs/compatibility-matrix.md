@@ -33,8 +33,8 @@ Both on the same protocol, no translation. Forwarding checked against Paper in e
 | 1.20.3 and 1.20.4 (765) to 26.2 (776) | yes | 1.21.4 | 26.2 and 1.21.4 |
 
 Moving a player between two backends of the same version without reconnecting: 1.8.8, 1.9.4, 1.12.2, 1.13.2, 1.14.4, 1.16.5, 1.18.2,
-1.19.4, 1.20.1, and every version from 1.20.3 to 26.2. Before 1.20.2 the client receives the new backend's join packet; its tab list and
-boss bars from the previous backend are not cleared.
+1.19.4, 1.20.1, and every version from 1.20.3 to 26.2. Before 1.20.2 the client receives the new backend's join packet; the proxy first removes the tab list entries and boss
+bars it saw from the previous backend (the tab list removal was seen with a 1.16.5 client; boss bars were not observed with a real bar).
 
 Versions Paper never published or no longer downloads (1.9, 1.9.1, 1.9.2, 1.11, 1.14, 1.16 and the Paperclip fetch of 1.12 and 1.12.1) were checked
 against the Mojang server jar of that version, offline, forwarding none. A negative control (backend demanding forwarding, proxy sending none) fails as it should for BungeeCord and Velocity.
