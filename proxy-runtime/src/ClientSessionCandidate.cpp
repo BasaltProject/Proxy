@@ -57,6 +57,8 @@ bool ClientSession::beginPreparedChange() {
         return false;
     if (legacyRaw_)
         return commitLegacyChange();
+    if (legacyClient() && !clearClientState())
+        return false;
     constexpr std::array<std::uint8_t, 1> start{0x78};
     if (!queuePacket(start))
         return false;

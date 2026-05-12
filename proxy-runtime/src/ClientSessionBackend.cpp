@@ -177,7 +177,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
-    if (legacyRaw_ && state_ == State::kPlay) {
+    if (legacyClient() && state_ == State::kPlay) {
         if (id == wire::protocol::play::BossEventPacket::kId)
             trackBossBar(frame_.readable());
         else
