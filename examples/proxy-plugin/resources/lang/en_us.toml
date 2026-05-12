@@ -1,0 +1,3 @@
+welcome = "Welcome back, {name}. Visit number {visits}."
+where = "You are on {server}."
+no_lobby = "There is no backend called {lobby}."
