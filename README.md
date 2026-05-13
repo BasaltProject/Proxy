@@ -54,7 +54,7 @@ Two goals drive every decision:
 | Target version | Minecraft 26.3 (protocol 777) |
 | Distribution | Native binaries per platform |
 | Backends | Any Minecraft server; 26.3 natively, and older ones from 1.21.5 to 26.2 for 26.3 clients |
-| Plugin API | Lua, `.bppkg` packages (working; see `examples/proxy-plugin`) |
+| Plugin API | Lua, `.bppkg` packages (working) |
 | Configuration | A `proxy.toml` and a `backends.toml`, generated with comments |
 | License | GPL-3.0 |
 
