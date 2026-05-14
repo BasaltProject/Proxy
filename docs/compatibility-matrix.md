@@ -72,7 +72,7 @@ A relay of the configuration state is not a promise about any particular modpack
 | Case | Result |
 |---|---|
 | Listener on `::` with `dual-stack = true`: a server list ping | answered over `::1` and over `127.0.0.1` |
-| A backend reached over IPv6 | not tried; the configuration accepts an IPv6 literal and the resolver returns both families |
+| A backend reached over IPv6 (`host = "::1"`) | a bot joined and played through a local forwarder that listened on `::1` and relayed to a Basalt Server |
 
 ## Identity
 
