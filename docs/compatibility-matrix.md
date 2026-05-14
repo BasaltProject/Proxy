@@ -144,7 +144,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Sounds the backend names (a Basalt Server, `playsound`) are played under their Bedrock name | yes, the bot heard `random.orb` for the orb pickup; vanilla and Paper send most sounds as registry numbers, which are not translated |
 | Move stacks between a window and the inventory, or inside the inventory (take, place, swap) | yes, checked with the bot in both directions; split stacks and drops are refused |
 | Moving items inside an open window or the inventory | refused (the client reverts); the backend never sees it |
-| Other windows (furnace, crafting, anvil...) are closed at once; mob colour and type variants | not done |
+| Other windows (crafting, anvil...) are closed at once; mob colour and type variants | not done |
 
 ## Under stress
 
@@ -157,6 +157,6 @@ termination signal ended it cleanly with no sanitizer report. Fuzzing of RakNet 
 - A client newer than its backend is not supported.
 - Bedrock clients (protocol 2193) join the first backend of the default route as a Java client. See the Bedrock section.
 - The official game client has not been tried against this proxy; every client above is a bot.
-- Windows and macOS builds compile and the Windows one ran under wine; the macOS backend of the event loop ran on FreeBSD.
+- Windows and macOS builds compile and the Windows one ran under wine; the macOS backend of the event loop ran on FreeBSD. On 2026-10-17 the whole tree still compiled for x86_64-windows-gnu, and for aarch64-macos except c-ares, which needs Apple frameworks; wine was not available that day, so nothing ran.
 
 | Session envelope: Java clients delegated to a Basalt Server over data frames (`session-envelope = true` on the Server) | yes, 26.3, 1.21.4, 1.20.1, 1.16.5, plus Basalt to Paper and back |
