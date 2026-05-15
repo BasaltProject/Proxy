@@ -55,18 +55,25 @@ The envelope endpoint, the frame decoder and the forwarding request were fuzzed 
 
 Not done: Bedrock (the Server answers `Close(Unsupported)`, and the Proxy never selects it for Bedrock players).
 
-## Bedrock (proposed contract, not implemented)
+## Bedrock (contract agreed with the Server, codec in Wire, nothing activates it yet)
 
-The same two frames carry a Bedrock player; what changes is what a Data frame holds and who does what.
+The same frames carry a Bedrock player; what changes is what a Data frame holds, what comes before it and who does what.
 
-- The Proxy keeps the transport and the identity: it terminates RakNet, the encryption and the Bedrock login chain, and tells the backend who the player is through
-  the signed forwarding exchange with `origin = Bedrock` and the Xbox id, as it does today for a Bedrock player it translates itself.
-- After the backend's login, the Proxy sends `Open` with edition Bedrock and the client's Bedrock protocol, and the backend answers `Opened`.
-- A Data frame holds one Bedrock game packet as the client's protocol frames it (packet id and body), after the Proxy has decrypted and unbatched it, and before it
-  would batch and encrypt a packet going the other way. RakNet frames, datagrams and the batch header never cross.
-- The backend runs what it already runs for a Bedrock player it serves directly, over frames instead of a RakNet session: its translation, its chunks and its windows.
-  The Proxy only relays, so it needs no Java translation for that session.
-- Limits and failures are the Java ones: 2 MiB per data frame, a frame that is neither `Opened` nor `Close` before `Opened` ends the login, and `Close` ends the session.
+- The Proxy keeps the transport and the identity. It runs the whole Bedrock handshake itself: RakNet, network settings, the login chain, encryption and the
+  resource pack exchange up to the client's final "completed" response. Only then does it open the envelope, so the first Data frame the backend sees is the
+  client's first packet after that and the backend begins with StartGame.
+- Opening: `Open` with edition Bedrock and the client's Bedrock protocol, then one `BedrockIdentity` control frame (type 3), then the backend answers `Opened`.
+  The identity holds the gamertag, the xuid, whether the login chain was authenticated, the client's address, the skin id, the skin's resource patch (geometry
+  JSON), its width and height and its raw RGBA pixels (width times height times four bytes, each side at most 1024). It is the only control frame that may
+  exceed 512 bytes, up to the 2 MiB of a Data frame. An `Opened` before the identity ends the exchange.
+- A Data frame holds one Bedrock game packet as the client's protocol frames it (packet id and body), after the Proxy has decrypted and unbatched it. Going the
+  other way the backend sends one frame per packet, in order, and the Proxy batches, compresses and encrypts; there is no flush marker. RakNet frames, datagrams and
+  the batch header never cross.
+- The backend runs what it already runs for a Bedrock player it serves directly, over frames instead of a RakNet session: its translation, its chunks and its
+  windows. The Proxy only relays, so it needs no Java translation for that session.
+- A backend that ends a session sends `Disconnect` (control type 4) with a message of at most 400 bytes; the Proxy turns it into a Bedrock Disconnect packet.
+  `Close` keeps its four reasons for protocol failures.
+- Limits and failures are the Java ones: 2 MiB per data frame, a frame that is neither `Opened`, `Disconnect` nor `Close` where it does not belong ends the login,
+  and `Close` ends the session.
 - Compatibility: a backend that does not offer the capability, or answers `Close(Unsupported)`, keeps today's behaviour, in which the Proxy translates the Bedrock
   player to a Java backend itself.
-
