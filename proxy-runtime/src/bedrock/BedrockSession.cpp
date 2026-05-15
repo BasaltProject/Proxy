@@ -1758,8 +1758,10 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
             const float dx = input->x - x_;
             const float dy = input->y - bedrock::kPlayerEyeHeight - y_;
             const float dz = input->z - z_;
-            if (dx * dx + dy * dy + dz * dz > kArrivalRadius * kArrivalRadius && ++arrivalInputs_ < kArrivalInputs)
+            if (dx * dx + dy * dy + dz * dz > kArrivalRadius * kArrivalRadius && ++arrivalInputs_ < kArrivalInputs) {
+                tickEnded();
                 return;
+            }
             arriving_ = false;
         }
         wire::io::ByteBuffer out;
@@ -1780,11 +1782,11 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
             pendingMove_.reset();
             move.write(out);
             sendJava(play::ServerboundPositionLookPacket::kId, out);
-            tickEnded();
         }
         sprinting(input->sprinting);
         sneaking(input->sneaking);
         interact(*input);
+        tickEnded();
     } else if (packet == BedrockPacket::ContainerClose) {
         if (const auto closed = bedrock::readContainerClose(body);
             closed && window_ && closed->containerId == window_->id)
