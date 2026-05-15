@@ -137,6 +137,8 @@ private:
     void entityEvent(std::span<const std::uint8_t> body);
     void effectGiven(std::span<const std::uint8_t> body);
     void effectRemoved(std::span<const std::uint8_t> body);
+    void relayToBackend(wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body);
+    void relayFromBackend(std::span<const std::uint8_t> packet);
     void commandList(std::span<const std::uint8_t> body);
     void kicked(std::span<const std::uint8_t> body);
     void leave(const std::string& reason);
@@ -191,6 +193,7 @@ private:
     std::int32_t minSection_ = -4;
     std::int32_t pendingTeleport_ = -1;
     bool started_ = false;
+    bool delegated_ = false;
     std::array<std::optional<wire::protocol::play::WireItemStack>, 46> inventory_{};
 
     struct Window {

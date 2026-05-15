@@ -12,6 +12,7 @@ struct NativeForwarding {
     std::string proxyId;
     bool onlineMode = false;
     bool delegate = true;
+    bool delegateBedrock = false;
 };
 
 } // namespace basalt::proxy::runtime::detail

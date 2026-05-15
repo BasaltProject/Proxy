@@ -56,8 +56,10 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
                                                profile.properties, requested >= 4 ? 4 : 1))
         return std::unexpected(BackendLoginError::kMalformed);
     if (nativeChannel) {
-        const bool envelope = native_->delegate && origin_ == 0 &&
-                              backend.protocol == config::BackendConfig::kClientProtocol &&
+        const bool javaEnvelope =
+            native_->delegate && origin_ == 0 && backend.protocol == config::BackendConfig::kClientProtocol;
+        const bool bedrockEnvelope = native_->delegateBedrock && origin_ == 1 && bedrockIdentity_.has_value();
+        const bool envelope = (javaEnvelope || bedrockEnvelope) &&
                               (nativeRequest->capabilities & basalt::kCapabilitySessionEnvelope) != 0;
         envelopeSelected_ = envelope;
         basalt::Identity identity{.profileId = profile.id,

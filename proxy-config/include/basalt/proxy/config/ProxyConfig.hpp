@@ -97,6 +97,7 @@ struct BedrockConfig {
     std::uint16_t port = 19132;
     std::string motd = "Basalt Proxy";
     std::string language;
+    bool delegate = false;
 
     friend bool operator==(const BedrockConfig&, const BedrockConfig&) = default;
 };

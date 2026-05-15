@@ -57,6 +57,7 @@ public:
     static constexpr std::size_t kBytes = 3 * kCapacity;
     static constexpr std::size_t kLoginPacketLimit = 64 * 1024;
     static constexpr std::size_t kForwardingPacketLimit = 128 * 1024;
+    static constexpr std::size_t kMaxIdentityFrame = 3 * 1024 * 1024;
     BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory, BackendAttempt attempt);
 
     [[nodiscard]] BackendAttempt attempt() const { return attempt_; }
@@ -68,6 +69,17 @@ public:
         origin_ = origin;
         originId_ = std::move(id);
     }
+
+    /// A Bedrock player the backend is asked to serve itself, with the Bedrock protocol of the client; the envelope
+    /// opens after login.
+    void delegateBedrock(wire::protocol::sessionEnvelope::BedrockIdentity identity, std::int32_t protocol) {
+        bedrockIdentity_ = std::move(identity);
+        bedrockProtocol_ = protocol;
+    }
+
+    [[nodiscard]] bool delegated() const { return envelopeActive_; }
+
+    [[nodiscard]] const std::string& disconnectMessage() const { return disconnectMessage_; }
 
     [[nodiscard]] std::int32_t protocol() const { return protocol_; }
 
@@ -138,6 +150,9 @@ private:
     const NativeForwarding* native_ = nullptr;
     bool envelopeSelected_ = false;
     bool envelopeActive_ = false;
+    std::optional<wire::protocol::sessionEnvelope::BedrockIdentity> bedrockIdentity_;
+    std::int32_t bedrockProtocol_ = 0;
+    std::string disconnectMessage_;
     std::optional<wire::protocol::sessionEnvelope::EnvelopeEndpoint> envelope_;
     std::uint8_t origin_ = 0;
     std::string originId_;

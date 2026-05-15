@@ -267,7 +267,7 @@ int run(const cliCommand::Run& command) {
             }
             nativeForwarding = std::make_shared<const detail::NativeForwarding>(detail::NativeForwarding{
                 std::move(*signing), configuration->forwarding.proxyId, configuration->network.onlineMode,
-                configuration->translation == proxy::config::TranslationMode::Auto});
+                configuration->translation == proxy::config::TranslationMode::Auto, configuration->bedrock.delegate});
         }
         auto language = detail::loadBedrockLanguage(configuration->bedrock.language);
         if (!language) {

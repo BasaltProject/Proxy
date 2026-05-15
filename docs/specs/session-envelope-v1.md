@@ -53,9 +53,10 @@ Checked with the Swarm Java bot through the Proxy against a Server built from it
 
 The envelope endpoint, the frame decoder and the forwarding request were fuzzed with libFuzzer under ASan and UBSan (2.8 million runs, no finding).
 
-Not done: Bedrock (the Server answers `Close(Unsupported)`, and the Proxy never selects it for Bedrock players).
+Not done: Bedrock end to end. The Proxy half exists (it selects the capability for a Bedrock player only when `[bedrock] delegate = true` and the backend uses
+`forwarding = "basalt"`, opens the envelope with the identity and relays packets); the Server answers `Close(Unsupported)` until its half exists.
 
-## Bedrock (contract agreed with the Server, codec in Wire, nothing activates it yet)
+## Bedrock (contract agreed with the Server; the Proxy half is in behind `[bedrock] delegate = true`)
 
 The same frames carry a Bedrock player; what changes is what a Data frame holds, what comes before it and who does what.
 
