@@ -27,8 +27,8 @@ public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
     using Lookup = std::function<std::optional<config::BackendConfig>(std::string_view name)>;
 
-    BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                  Route route = {}, BedrockSession::Events events = {},
+    BedrockStatus(std::uint16_t port, std::function<std::string()> motd, std::function<std::size_t()> online,
+                  std::size_t max, Route route = {}, BedrockSession::Events events = {},
                   std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {},
                   std::shared_ptr<const NativeForwarding> forwarding = nullptr, bool requireAuthenticated = false,
                   const config::AdmissionConfig& admission = {}, BedrockSession::Commands commands = {});
@@ -50,7 +50,7 @@ private:
     [[nodiscard]] std::string advertisement() const;
 
     std::uint16_t port_;
-    std::string motd_;
+    std::function<std::string()> motd_;
     std::function<std::size_t()> online_;
     std::size_t max_;
     Route route_;

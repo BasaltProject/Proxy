@@ -2,7 +2,6 @@
 
 #include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
-#include <basalt/wire/io/ConfigFiles.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 
 namespace basalt::proxy::config {
@@ -109,15 +108,11 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("logging.color", "must be auto, always or never");
 
     const auto* bedrock = reader.child(proxy, "bedrock");
-    reader.keys(bedrock, {"enabled", "port", "motd", "language", "delegate"}, "bedrock.");
+    reader.keys(bedrock, {"enabled", "port", "language", "delegate"}, "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrock.enabled, "bedrock.");
     reader.integer(bedrock, "port", result.bedrock.port, 1, 65535, "bedrock.");
-    reader.scalar(bedrock, "motd", result.bedrock.motd, "bedrock.");
     reader.scalar(bedrock, "language", result.bedrock.language, "bedrock.");
     reader.scalar(bedrock, "delegate", result.bedrock.delegate, "bedrock.");
-    if (result.bedrock.motd.empty() || result.bedrock.motd.size() > 64 ||
-        result.bedrock.motd.find(';') != std::string::npos)
-        reader.fail("bedrock.motd", "must be 1..64 bytes without ';'");
 
     const auto* reload = reader.child(proxy, "reload");
     reader.keys(reload, {"watch-files", "interval-ms"}, "reload.");
@@ -177,16 +172,17 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
 }
 
 std::expected<ProxyConfig, std::string> load(std::string_view directory) {
-    auto proxy = wire::io::configFiles::loadToml(directory, "proxy.toml", kProxyDefaultToml);
+    const auto files = configDirectory(directory);
+    auto proxy = files.load("proxy.toml", kProxyDefaultToml);
     if (!proxy)
         return std::unexpected(proxy.error());
-    auto backends = wire::io::configFiles::loadToml(directory, "backends.toml", kBackendsDefaultToml);
+    auto backends = files.load("backends.toml", kBackendsDefaultToml);
     if (!backends)
         return std::unexpected(backends.error());
-    auto plugins = wire::io::configFiles::loadToml(directory, "plugins.toml", kPluginsDefaultToml);
+    auto plugins = files.load("plugins.toml", kPluginsDefaultToml);
     if (!plugins)
         return std::unexpected(plugins.error());
-    return fromToml(proxy->values, backends->values, directory, &plugins->values);
+    return fromToml(*proxy, *backends, directory, &*plugins);
 }
 
 } // namespace basalt::proxy::config

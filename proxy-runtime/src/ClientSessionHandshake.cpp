@@ -98,7 +98,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         if (!online_) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
             if (playerLogin_)
-                playerLogin_(profile_->name, profile_->id.toString());
+                playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress());
             return route();
         }
         if (settings_.sessionBufferBytes < kBufferBytes + kAuthenticationBytes || publicKey_.empty() ||
@@ -143,7 +143,10 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         state_ = State::Authenticating;
         return true;
     } else if (state_ == State::StatusRequest) {
-        if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !queue(status_))
+        if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !status_)
+            return false;
+        const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress());
+        if (answer.empty() || !queue(answer))
             return false;
         if (statusPing_)
             statusPing_(virtualHost_, statusProtocol_);

@@ -9,8 +9,8 @@ basalt_embed_text(proxy-config-defaults
 )
 
 basalt_module(proxy-config
-    SOURCES src/ProxyConfig.cpp src/BackendConfig.cpp
-    DEPENDS basalt::wire-common basalt::wire-io basalt::wire-auth basalt::proxy-config-defaults
+    SOURCES src/ProxyConfig.cpp src/BackendConfig.cpp src/ConfigFiles.cpp
+    DEPENDS basalt::wire-common basalt::wire-config basalt::wire-io basalt::wire-auth basalt::proxy-config-defaults
 )
 
 basalt_test(proxy-config-test

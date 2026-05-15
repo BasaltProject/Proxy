@@ -1,0 +1,116 @@
+# How the proxy looks in the multiplayer list.
+#
+# All of this is decided before anyone logs in, so the only things known about
+# whoever is looking are the three the ping carries: the protocol version of
+# their client, the address they typed to reach you, and where they connected
+# from. Every condition below is one of those three.
+#
+# A profile is one complete look. The one that wins is the highest priority
+# among the profiles that either are switched on with `active` or have a [when]
+# that matches. If none does, the one marked `default` is used. Anything a
+# profile leaves out it takes from the default profile, so a profile that only
+# changes the text is three lines long.
+#
+# Text is MiniMessage. Writing the MOTD as a list gives you the two lines the
+# client shows; a single string with \n does the same thing.
+#
+# Anything %like_this% is a placeholder, filled in before the text is parsed and
+# usable in every file that takes text. A placeholder this proxy cannot fill in
+# is left visible and explained once in the log, so a wrong name shows up rather
+# than silently emptying the line. The four that matter here:
+#   %basalt_server_online%       players connected right now
+#   %basalt_server_max_players%  the slot count shown in the list
+#   %basalt_server_version%      the Minecraft version this proxy implements
+#   %basalt_player_name%         who is pinging, if this proxy knows them; see
+#                                [greeting] at the bottom, off by default. It is
+#                                empty for anyone who has never connected, so a
+#                                greeting by name belongs in its own profile:
+#                                  when = ["%basalt_player_known%"]
+#
+# `when` is a list of conditions over those same placeholders, all of which have
+# to hold. Operators: = != < <= > >= matches contains, and a condition on its own
+# is true when it reads `true`. A condition this situation cannot answer, such as
+# a player's coordinates before anyone has logged in, is reported once in the log
+# and the profile is skipped: it never counts as a silent no.
+
+[profiles.default]
+default = true
+motd = [
+    "              <bold><gradient:gray:white>BASALT PROXY</gradient></bold> <gray>[1.8-26.3]</gray>",
+    "              <white>Welcome to your new proxy</white>",
+]
+# Keep the count but leave the names out of the hover list, as vanilla's hide-online-players does. Lines
+# written in `hover` are still shown, since they are yours and not a player's.
+hide-online-players = false
+
+# How many player names the hover list shows at most, as vanilla's twelve (Spigot's sample-count). 0 shows none.
+sample-size = 12
+
+[profiles.legacy]
+# Gradients are RGB text, and RGB text arrived in 1.16: an older client renders
+# the profile above as flat white and loses the effect entirely. Same layout,
+# built out of the sixteen colours those clients do have.
+motd = [
+    "              <bold><gray>BASALT PROXY</gray></bold> <dark_gray>[1.8-26.3]</dark_gray>",
+    "              <white>Welcome to your new proxy</white>",
+]
+
+# 735 is 1.16, the first version with RGB text.
+when = ["%basalt_player_protocol% < 735"]
+
+[profiles.maintenance]
+# Not conditional: switch it on, and it is what everyone sees until you switch
+# it off. That is what `active` is for, as opposed to [when].
+active = false
+priority = 100
+motd = [
+    "              <bold><gray>BASALT PROXY</gray></bold> <dark_gray>[1.8-26.3]</dark_gray>",
+    "           <red>The proxy is under maintenance</red>",
+]
+# Replaces the player count with ??? rather than showing 0 of 80.
+hide-player-count = true
+# Purely how the list draws it: the client shows a version it does not recognise
+# in red, and this stops nobody from joining. Rejecting people is a job for the
+# whitelist, not for the server list.
+version-name = "Maintenance"
+version-protocol = -1
+
+[profiles.loading]
+# Shown while the proxy is still starting, before it can take players. Never chosen by `active` or [when]: it is
+# used on its own for as long as the start lasts, and a login in that time is turned away with the message
+# `proxy-loading` in messages.toml.
+motd = [
+    "              <bold><gray>BASALT PROXY</gray></bold> <dark_gray>[1.8-26.3]</dark_gray>",
+    "         <red>The proxy is loading, please wait</red>",
+]
+hide-player-count = true
+version-name = "Loading"
+version-protocol = -1
+
+# Other keys a profile takes:
+#   priority = 0              higher wins between profiles that both apply
+#   max-players = 80          what the list shows, not how many can actually join
+#   online-players = 0        likewise, for the left-hand number
+#   hover = ["a", "b"]        the lines shown when hovering the player count
+#   icon = "server-icon.png"  64x64 PNG in config/, replacing the built-in one
+#
+# And what a `when` tends to look like:
+#   when = ["%basalt_player_host% matches beta.*"]      per domain
+#   when = ["%basalt_player_ip% matches 192.168.*"]     per network
+#   when = ["%basalt_player_protocol% = 776"]           one exact version
+#   when = ["%basalt_player_known%"]                    somebody seen before
+#   when = ["%basalt_server_online% >= 20", "%basalt_player_protocol% >= 735"]
+
+[greeting]
+# Remembering the address a player last connected from is what lets <player> and
+# `known-player` work: the ping happens before login, so the address is the only
+# thing there is to recognise someone by.
+#
+# It is off by default because it is personal data that vanilla never stores, and
+# because it is a poor identifier anyway: everyone behind one router shares an
+# address, and dynamic addresses change hands. Fine for saying hello, never for
+# deciding what someone may do, which is why permissions cannot be driven by it.
+#
+# The address is one column in players.db, overwritten on each login, and turning
+# this off stops it being written but does not erase what is already there.
+remember-ip = false

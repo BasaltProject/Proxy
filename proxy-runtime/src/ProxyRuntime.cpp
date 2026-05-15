@@ -149,7 +149,7 @@ struct ProxyRuntime::Impl {
             const auto snapshot = runtime.topology.load();
             auto session = std::make_unique<Session>(
                 std::move(incoming->connection), std::move(incoming->slot), std::move(incoming->buffers),
-                runtime.config.runtime, runtime.status, runtime.unavailable, incoming->acceptedAt,
+                runtime.config.runtime, runtime.statusSource, runtime.unavailable, incoming->acceptedAt,
                 runtime.config.network.onlineMode, runtime.config.network.preventClientProxyConnections,
                 runtime.key ? runtime.key->publicKeyDer() : std::span<const std::uint8_t>{},
                 runtime.authenticationFailure,
@@ -431,7 +431,7 @@ struct ProxyRuntime::Impl {
     std::optional<ResourceBudget::Reservation> bootstrapBuffers;
     wire::io::TcpListener listener;
     std::uint16_t port = 0;
-    std::vector<std::uint8_t> status;
+    detail::ClientSession::StatusSource statusSource;
     std::vector<std::uint8_t> unavailable;
     std::vector<std::uint8_t> authenticationFailure;
     RuntimeServices services;
@@ -514,19 +514,28 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         impl->workers = std::move(*workers);
         namespace protocol = wire::protocol;
         wire::io::ByteBuffer packet{1024}, frame{1024};
-        protocol::status::ServerStatusPayload status{
-            .description = wire::text::Component::text("Basalt Proxy"),
-            .players =
-                protocol::status::ServerStatusPayload::Players{
-                    .max = static_cast<std::int32_t>(impl->config.runtime.maxSessions), .online = 0, .sample = {}},
-            .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
-                                                                      buildInfo::kProtocolVersion},
-            .favicon = std::nullopt};
-        protocol::varInt::write(packet, protocol::status::StatusResponsePacket::kId);
-        protocol::status::StatusResponsePacket{std::move(status)}.write(packet);
-        if (!protocol::packetFraming::writeUncompressed(frame, packet.readable()))
-            return std::unexpected("status encoding failed");
-        impl->status = frame.toVector();
+        impl->statusSource = [state = impl.get()](std::int32_t clientProtocol, std::string_view host,
+                                                  std::string_view address) -> std::vector<std::uint8_t> {
+            protocol::status::ServerStatusPayload payload =
+                state->services.status
+                    ? state->services.status(clientProtocol, host, address)
+                    : protocol::status::ServerStatusPayload{
+                          .description = wire::text::Component::text("Basalt Proxy"),
+                          .players =
+                              protocol::status::ServerStatusPayload::Players{
+                                  .max = static_cast<std::int32_t>(state->config.runtime.maxSessions),
+                                  .online = 0,
+                                  .sample = {}},
+                          .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
+                                                                                    buildInfo::kProtocolVersion},
+                          .favicon = std::nullopt};
+            wire::io::ByteBuffer body{1024}, framed{1024};
+            protocol::varInt::write(body, protocol::status::StatusResponsePacket::kId);
+            protocol::status::StatusResponsePacket{std::move(payload)}.write(body);
+            if (!protocol::packetFraming::writeUncompressed(framed, body.readable()))
+                return {};
+            return framed.toVector();
+        };
         packet.clear();
         frame.clear();
         protocol::varInt::write(packet, protocol::login::LoginDisconnectPacket::kId);
@@ -544,10 +553,10 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         if (!protocol::packetFraming::writeUncompressed(frame, packet.readable()))
             return std::unexpected("authentication rejection encoding failed");
         impl->authenticationFailure = frame.toVector();
-        if (impl->status.size() + 10 > Session::kBufferCapacity || impl->unavailable.size() > Session::kBufferCapacity)
+        if (impl->unavailable.size() > Session::kBufferCapacity)
             return std::unexpected("bootstrap responses exceed buffer limits");
-        impl->bootstrapBuffers = impl->buffers.acquire(impl->status.capacity() + impl->unavailable.capacity() +
-                                                       impl->authenticationFailure.capacity());
+        impl->bootstrapBuffers =
+            impl->buffers.acquire(impl->unavailable.capacity() + impl->authenticationFailure.capacity());
         if (!impl->bootstrapBuffers || impl->buffers.limit() - impl->buffers.used() < Session::kBufferBytes)
             return std::unexpected("global buffer budget cannot admit a bootstrap session");
         impl->owners.reserve(impl->config.runtime.ioLoops);
@@ -582,7 +591,7 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
     impl_->threads.clear();
     if (impl_->workers)
         impl_->workers->join();
-    std::vector<std::uint8_t>{}.swap(impl_->status);
+    impl_->statusSource = nullptr;
     std::vector<std::uint8_t>{}.swap(impl_->unavailable);
     std::vector<std::uint8_t>{}.swap(impl_->authenticationFailure);
     impl_->bootstrapBuffers.reset();

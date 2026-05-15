@@ -4,6 +4,7 @@
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
+#include <basalt/wire/protocol/status/StatusPackets.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -66,9 +67,13 @@ struct RuntimeServices {
     /// Told the host and protocol of every server-list request answered. Called on session owner threads.
     std::function<void(std::string_view host, std::int32_t protocol)> statusPing = {};
     /// Told a player's name and uuid once they are authenticated, before any backend is chosen.
-    std::function<void(std::string_view player, std::string_view uuid)> playerLogin = {};
+    std::function<void(std::string_view player, std::string_view uuid, std::string_view address)> playerLogin = {};
     /// Those commands, added to every command tree the proxy relays so clients know them and complete their arguments.
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {};
+    /// The server list answer for one ping; the proxy's own one-line answer when unset. Runs on owner threads.
+    std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
+                                                              std::string_view address)>
+        status = {};
 };
 
 class ProxyRuntime {

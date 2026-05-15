@@ -78,10 +78,9 @@ struct CandidateFixture {
         REQUIRE(slot);
         REQUIRE(storage);
         session = std::make_unique<ClientSession>(
-            std::move(*accepted), std::move(*slot), std::move(*storage), config.runtime,
-            std::span<const std::uint8_t>{}, unavailable, ClientSession::Clock::now(), false, false,
-            std::span<const std::uint8_t>{}, unavailable, [](auto) { return std::optional<std::stop_source>{}; },
-            routes,
+            std::move(*accepted), std::move(*slot), std::move(*storage), config.runtime, ClientSession::StatusSource{},
+            unavailable, ClientSession::Clock::now(), false, false, std::span<const std::uint8_t>{}, unavailable,
+            [](auto) { return std::optional<std::stop_source>{}; }, routes,
             [this](BackendAttempt attempt, auto) {
                 requested = attempt;
                 cancellation = std::stop_source{};

@@ -55,12 +55,14 @@ public:
     static constexpr std::size_t kBufferBytes = kBufferCapacity * 3;
     static constexpr std::size_t kAuthenticationBytes = 128 * 1024;
     static constexpr std::size_t kResolutionBytes = 16 * 1024;
+    using StatusSource = std::function<std::vector<std::uint8_t>(std::int32_t protocol, std::string_view host,
+                                                                 std::string_view address)>;
     using AuthenticationStart = std::function<std::optional<std::stop_source>(wire::auth::OnlineLoginRequest)>;
     using ResolutionStart = std::function<std::optional<std::stop_source>(BackendAttempt, Clock::time_point)>;
     ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
                   wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
-                  std::span<const std::uint8_t> status, std::span<const std::uint8_t> unavailable,
-                  Clock::time_point acceptedAt, bool online, bool checkAddress, std::span<const std::uint8_t> publicKey,
+                  StatusSource status, std::span<const std::uint8_t> unavailable, Clock::time_point acceptedAt,
+                  bool online, bool checkAddress, std::span<const std::uint8_t> publicKey,
                   std::span<const std::uint8_t> authFailure, AuthenticationStart authenticate,
                   const BackendRoutes& routes, ResolutionStart resolve,
                   const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
@@ -72,7 +74,7 @@ public:
                   std::function<void(std::string_view, std::string_view)> playerChat = {},
                   std::function<void(std::string_view, std::string_view)> playerKick = {},
                   std::function<void(std::string_view, std::int32_t)> statusPing = {},
-                  std::function<void(std::string_view, std::string_view)> playerLogin = {});
+                  std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin = {});
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -216,7 +218,7 @@ private:
     std::function<void(std::string_view, std::string_view)> playerChat_;
     std::function<void(std::string_view, std::string_view)> playerKick_;
     std::function<void(std::string_view, std::int32_t)> statusPing_;
-    std::function<void(std::string_view, std::string_view)> playerLogin_;
+    std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin_;
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
@@ -234,7 +236,7 @@ private:
     bool allocationReady_ = false;
     wire::io::TcpConnection connection_;
     const config::RuntimeConfig& settings_;
-    std::span<const std::uint8_t> status_;
+    StatusSource status_;
     std::span<const std::uint8_t> unavailable_;
     bool online_;
     bool checkAddress_;

@@ -2,6 +2,8 @@
 
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
+#include <basalt/wire/config/ConfigDirectory.hpp>
+#include <basalt/wire/config/ServerListConfig.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -96,7 +98,6 @@ struct PluginsConfig {
 struct BedrockConfig {
     bool enabled = false;
     std::uint16_t port = 19132;
-    std::string motd = "Basalt Proxy";
     std::string language;
     bool delegate = false;
 
@@ -150,5 +151,9 @@ struct ProxyConfig {
                                                                std::string_view directory,
                                                                const wire::common::toml::TomlTable* plugins = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
+
+[[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);
+
+[[nodiscard]] std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory);
 
 } // namespace basalt::proxy::config

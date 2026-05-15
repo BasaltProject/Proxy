@@ -29,8 +29,8 @@ std::string originOf(const wire::io::UdpEndpoint& peer) {
 
 } // namespace
 
-BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                             Route route, BedrockSession::Events events,
+BedrockStatus::BedrockStatus(std::uint16_t port, std::function<std::string()> motd, std::function<std::size_t()> online,
+                             std::size_t max, Route route, BedrockSession::Events events,
                              std::shared_ptr<const wire::text::LangTable> language, Lookup lookup,
                              std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated,
                              const config::AdmissionConfig& admission, BedrockSession::Commands commands)
@@ -44,7 +44,7 @@ BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function
 BedrockStatus::~BedrockStatus() { stop(); }
 
 std::string BedrockStatus::advertisement() const {
-    std::string line = "MCPE;" + motd_ + ";";
+    std::string line = "MCPE;" + (motd_ ? motd_() : std::string{"Basalt Proxy"}) + ";";
     line += std::to_string(wire::bedrock::kNativeBedrockProtocol) + ";";
     line += std::string{kGameVersion} + ";";
     const auto playing = static_cast<std::size_t>(

@@ -3,6 +3,8 @@
 #include "Console.hpp"
 #include "ForwardingKey.hpp"
 #include "NativeForwarding.hpp"
+#include "PlayerDirectory.hpp"
+#include "ServerListService.hpp"
 #include "bedrock/BedrockLanguage.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -96,7 +98,27 @@ int run(const cliCommand::Run& command) {
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
+    std::atomic<ProxyRuntime*> runtimeRef{nullptr};
+    auto players = detail::PlayerDirectory::open(".basalt/players.db");
+    if (!players) {
+        logger.error([&players] { return players.error(); });
+        return 1;
+    }
+    auto serverList = detail::ServerListService::create(
+        command.configDirectory, {.online = [&runtimeRef]() -> std::int32_t {
+                                      auto* live = runtimeRef.load(std::memory_order_acquire);
+                                      return live != nullptr ? static_cast<std::int32_t>(live->sessionCount()) : 0;
+                                  },
+                                  .slots = static_cast<std::int32_t>(configuration->runtime.maxSessions),
+                                  .players = players->get()});
+    if (!serverList) {
+        logger.error([&serverList] { return serverList.error(); });
+        return 1;
+    }
     RuntimeServices services;
+    services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
+        return (*serverList)->statusFor(protocol, host, address);
+    };
     const auto playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr ? host->playerCommandSpecs() : std::vector<PlayerCommandSpec>{};
@@ -119,7 +141,9 @@ int run(const cliCommand::Run& command) {
         if (auto* host_ = pluginHost.load(std::memory_order_acquire))
             host_->post({PlayerEventKind::kPing, {}, std::string{host}, {}, std::to_string(protocol)});
     };
-    services.playerLogin = [&pluginHost](std::string_view player, std::string_view uuid) {
+    services.playerLogin = [&pluginHost, &players, &serverList](std::string_view player, std::string_view uuid,
+                                                                std::string_view address) {
+        (*players)->recordLogin(uuid, player, (*serverList)->rememberIp() ? std::optional{address} : std::nullopt);
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLogin, std::string{player}, {}, std::string{uuid}, {}});
     };
@@ -132,6 +156,7 @@ int run(const cliCommand::Run& command) {
         logger.error([&runtime] { return runtime.error(); });
         return 1;
     }
+    runtimeRef.store(&*runtime, std::memory_order_release);
     signalStop.store(false);
     const auto oldInterrupt = std::signal(SIGINT, stopSignal);
     const auto oldTerminate = std::signal(SIGTERM, stopSignal);
@@ -143,6 +168,8 @@ int run(const cliCommand::Run& command) {
         auto fresh = proxy::config::load(command.configDirectory);
         if (!fresh)
             return "Reload rejected, nothing changed: " + fresh.error();
+        if (auto listed = (*serverList)->reload(); !listed)
+            return "Reload rejected, nothing changed: " + listed.error();
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
             return "Reload rejected, nothing changed: " + applied.error();
@@ -276,8 +303,8 @@ int run(const cliCommand::Run& command) {
             return 1;
         }
         bedrock = std::make_unique<detail::BedrockStatus>(
-            configuration->bedrock.port, configuration->bedrock.motd, [&runtime] { return runtime->sessionCount(); },
-            configuration->runtime.maxSessions,
+            configuration->bedrock.port, [&serverList] { return (*serverList)->bedrockMotd(); },
+            [&runtime] { return runtime->sessionCount(); }, configuration->runtime.maxSessions,
             [&configuration]() -> std::optional<proxy::config::BackendConfig> {
                 const auto routes = detail::BackendRoutes::create(*configuration);
                 if (!routes)
@@ -343,6 +370,7 @@ int run(const cliCommand::Run& command) {
     }
     console.request_stop();
     console.join();
+    runtimeRef.store(nullptr, std::memory_order_release);
     bedrockPlayers.store(nullptr, std::memory_order_release);
     bedrock.reset();
     pluginHost.store(nullptr, std::memory_order_release);

@@ -40,7 +40,7 @@ constexpr std::int32_t kLanguageEncodedLimit = 16 * 3;
 
 ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
                              wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
-                             std::span<const std::uint8_t> status, std::span<const std::uint8_t> unavailable,
+                             StatusSource status, std::span<const std::uint8_t> unavailable,
                              Clock::time_point acceptedAt, bool online, bool checkAddress,
                              std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
                              AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
@@ -53,14 +53,14 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::function<void(std::string_view, std::string_view)> playerChat,
                              std::function<void(std::string_view, std::string_view)> playerKick,
                              std::function<void(std::string_view, std::int32_t)> statusPing,
-                             std::function<void(std::string_view, std::string_view)> playerLogin)
+                             std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
       playerLogin_(std::move(playerLogin)), playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
-      connection_(std::move(connection)), settings_(settings), status_(status), unavailable_(unavailable),
+      connection_(std::move(connection)), settings_(settings), status_(std::move(status)), unavailable_(unavailable),
       online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
@@ -398,7 +398,7 @@ bool ClientSession::authenticated(
     }
     if (result) {
         if (playerLogin_)
-            playerLogin_(profile_->name, profile_->id.toString());
+            playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress());
         return route();
     }
     closing_ = true;
