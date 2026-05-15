@@ -123,6 +123,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Dropped items | yes (counts and item ids seen) |
 | Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
 | Moving a Bedrock player to a Paper 26.3 with Velocity forwarding and staying there | yes, with the Swarm bot; needs the proxy to end each position with the client tick packet and to send the address without the port |
+| A Bedrock player served by a Basalt Server over the session envelope (`[bedrock] delegate = true`, backend `forwarding = "basalt"`) | yes, the bot joined through the proxy, spawned and received 81 chunks and the command list; moving that player to another backend is not supported |
 | A backend that requires a Java resource pack: the proxy accepts it for the Bedrock player (an optional pack is declined); the pack is not shown | yes, with Paper 26.3 and `require-resource-pack=true`; without it the join never finishes |
 | The commands of the backend are offered to the Bedrock client so it accepts a slash command; each takes free text and no tab completion of arguments | yes, 102 commands seen by the bot on a Basalt Server, plus the 103rd of a proxy plugin |
 | A command a proxy plugin registered with `cmd` run by a Bedrock player | yes, the bot ran one and got the plugin's answer |

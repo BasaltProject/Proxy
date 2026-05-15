@@ -53,8 +53,8 @@ Checked with the Swarm Java bot through the Proxy against a Server built from it
 
 The envelope endpoint, the frame decoder and the forwarding request were fuzzed with libFuzzer under ASan and UBSan (2.8 million runs, no finding).
 
-Not done: Bedrock end to end. The Proxy half exists (it selects the capability for a Bedrock player only when `[bedrock] delegate = true` and the backend uses
-`forwarding = "basalt"`, opens the envelope with the identity and relays packets); the Server answers `Close(Unsupported)` until its half exists.
+Bedrock was checked end to end: the Swarm Bedrock bot joined through the Proxy (`[bedrock] delegate = true`) and a Basalt Server that serves it over the envelope; the bot spawned and received
+chunks and the command list. A fake backend also confirmed the identity frame and the `Disconnect` text reach the player.
 
 ## Bedrock (contract agreed with the Server; the Proxy half is in behind `[bedrock] delegate = true`)
 
