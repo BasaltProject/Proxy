@@ -71,6 +71,8 @@ struct RuntimeServices {
     /// Those commands, added to every command tree the proxy relays so clients know them and complete their arguments.
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {};
     /// The server list answer for one ping; the proxy's own one-line answer when unset. Runs on owner threads.
+    /// MiniMessage text a login is turned away with while the proxy is still starting; empty once it is ready.
+    std::function<std::optional<std::string>()> loadingMessage = {};
     std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
                                                               std::string_view address)>
         status = {};

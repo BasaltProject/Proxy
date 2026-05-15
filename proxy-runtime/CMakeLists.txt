@@ -42,6 +42,7 @@ basalt_module(proxy-runtime-core
         src/PendingCookies.cpp
         src/CookieCache.cpp
         src/IdentityRegistry.cpp
+        src/DefaultIcon.cpp
         src/PlayerDirectory.cpp
         src/ServerListService.cpp
         src/ProxyRuntime.cpp

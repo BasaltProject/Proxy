@@ -115,6 +115,7 @@ int run(const cliCommand::Run& command) {
         logger.error([&serverList] { return serverList.error(); });
         return 1;
     }
+    (*serverList)->setLoading(true);
     RuntimeServices services;
     services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
         return (*serverList)->statusFor(protocol, host, address);
@@ -147,7 +148,16 @@ int run(const cliCommand::Run& command) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLogin, std::string{player}, {}, std::string{uuid}, {}});
     };
-    services.playerEvents = [&pluginHost](PlayerEvent event) {
+    services.loadingMessage = [&serverList]() -> std::optional<std::string> {
+        if ((*serverList)->isLoading())
+            return std::string{"<red>The proxy is loading, please wait</red>"};
+        return std::nullopt;
+    };
+    services.playerEvents = [&pluginHost, &serverList](PlayerEvent event) {
+        if (event.kind == PlayerEventKind::kJoin)
+            (*serverList)->playerJoined(event.uuid, event.player);
+        else if (event.kind == PlayerEventKind::kLeave)
+            (*serverList)->playerLeft(event.uuid);
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post(std::move(event));
     };
@@ -363,6 +373,7 @@ int run(const cliCommand::Run& command) {
                                        return side != nullptr && side->connect(player, backend);
                                    }});
     }};
+    (*serverList)->setLoading(false);
     const auto result = runtime->run(stopping.get_token());
     if (updateChecker.joinable()) {
         updateChecker.request_stop();

@@ -12,7 +12,9 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,6 +39,14 @@ public:
     /// First line of the winning profile's MOTD as plain text, fit for the Bedrock advertisement.
     [[nodiscard]] std::string bedrockMotd();
 
+    void playerJoined(std::string_view uuid, std::string_view name);
+
+    void playerLeft(std::string_view uuid);
+
+    void setLoading(bool loading) { status_->setLoading(loading); }
+
+    [[nodiscard]] bool isLoading() const { return status_->isLoading(); }
+
     [[nodiscard]] bool rememberIp() const;
 
     /// Reads server_list.toml again; a broken file leaves the current one in place.
@@ -49,6 +59,8 @@ private:
     Sources sources_;
     wire::config::LiveValue<wire::config::ServerListConfig> config_;
     wire::common::placeholder::PlaceholderRegistry placeholders_;
+    std::mutex rosterMutex_;
+    std::map<std::string, std::string, std::less<>> roster_;
     std::unique_ptr<wire::config::ServerListStatus> status_;
 };
 

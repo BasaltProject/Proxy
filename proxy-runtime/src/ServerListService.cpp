@@ -1,5 +1,7 @@
 #include "ServerListService.hpp"
 
+#include "DefaultIcon.hpp"
+
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/config/BasicPlaceholders.hpp>
@@ -20,11 +22,19 @@ ServerListService::ServerListService(std::string directory, wire::config::Server
         return sources_.players != nullptr ? sources_.players->nameByAddress(address) : std::nullopt;
     };
     status_ = std::make_unique<wire::config::ServerListStatus>(
-        [this] { return config_.current(); }, placeholders_, [] { return std::vector<wire::config::ListedPlayer>{}; },
+        [this] { return config_.current(); }, placeholders_,
+        [this] {
+            std::vector<wire::config::ListedPlayer> listed;
+            const std::lock_guard lock{rosterMutex_};
+            for (const auto& [uuid, name] : roster_)
+                listed.push_back({.name = name, .uuid = uuid});
+            return listed;
+        },
         wire::config::ServerListStatus::Options{.slots = sources_.slots,
                                                 .versionName = std::string{buildInfo::kMinecraftVersion},
                                                 .protocolVersion = buildInfo::kProtocolVersion,
-                                                .configRoot = directory_},
+                                                .configRoot = directory_,
+                                                .builtInIcon = defaultIcon()},
         std::move(hooks), wire::common::Logger{"ServerList"});
 }
 
@@ -52,6 +62,17 @@ std::string ServerListService::bedrockMotd() {
     while (!line.empty() && line.back() == ' ')
         line.pop_back();
     return line.empty() ? "Basalt Proxy" : line.substr(0, 64);
+}
+
+void ServerListService::playerJoined(std::string_view uuid, std::string_view name) {
+    const std::lock_guard lock{rosterMutex_};
+    roster_[std::string{uuid}] = std::string{name};
+}
+
+void ServerListService::playerLeft(std::string_view uuid) {
+    const std::lock_guard lock{rosterMutex_};
+    if (const auto found = roster_.find(uuid); found != roster_.end())
+        roster_.erase(found);
 }
 
 bool ServerListService::rememberIp() const { return config_.current()->rememberIp(); }

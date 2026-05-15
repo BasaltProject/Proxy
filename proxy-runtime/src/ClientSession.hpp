@@ -74,7 +74,8 @@ public:
                   std::function<void(std::string_view, std::string_view)> playerChat = {},
                   std::function<void(std::string_view, std::string_view)> playerKick = {},
                   std::function<void(std::string_view, std::int32_t)> statusPing = {},
-                  std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin = {});
+                  std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin = {},
+                  std::function<std::optional<std::string>()> loadingMessage = {});
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -194,6 +195,9 @@ private:
     [[nodiscard]] bool resourcePackResponse();
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
+    /// Like queue, but a server list answer larger than one buffer is fed out in pieces, in order.
+    [[nodiscard]] bool queueOrdered(std::span<const std::uint8_t> bytes);
+    void refillFromTail();
     [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool recoverBackend();
     [[nodiscard]] bool recoveryFailed();
@@ -219,6 +223,7 @@ private:
     std::function<void(std::string_view, std::string_view)> playerKick_;
     std::function<void(std::string_view, std::int32_t)> statusPing_;
     std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin_;
+    std::function<std::optional<std::string>()> loadingMessage_;
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
@@ -237,6 +242,8 @@ private:
     wire::io::TcpConnection connection_;
     const config::RuntimeConfig& settings_;
     StatusSource status_;
+    std::vector<std::uint8_t> tail_;
+    std::size_t tailOffset_ = 0;
     std::span<const std::uint8_t> unavailable_;
     bool online_;
     bool checkAddress_;

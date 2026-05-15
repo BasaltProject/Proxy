@@ -53,10 +53,12 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::function<void(std::string_view, std::string_view)> playerChat,
                              std::function<void(std::string_view, std::string_view)> playerKick,
                              std::function<void(std::string_view, std::int32_t)> statusPing,
-                             std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin)
+                             std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin,
+                             std::function<std::optional<std::string>()> loadingMessage)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
-      playerLogin_(std::move(playerLogin)), playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
+      playerLogin_(std::move(playerLogin)), loadingMessage_(std::move(loadingMessage)),
+      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
@@ -132,6 +134,37 @@ bool ClientSession::queue(std::span<const std::uint8_t> bytes) {
         encryptor_->encrypt(output_.mutableSpan(offset));
     if (output_.readableBytes() >= settings_.highWaterBytes)
         backendPaused_ = true;
+    return true;
+}
+
+void ClientSession::refillFromTail() {
+    if (tailOffset_ >= tail_.size())
+        return;
+    output_.discardReadBytes();
+    const auto room = kBufferCapacity - output_.writerIndex();
+    const auto count = std::min(room, tail_.size() - tailOffset_);
+    if (count == 0)
+        return;
+    if (output_.readableBytes() == 0)
+        writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
+    output_.writeBytes(std::span{tail_}.subspan(tailOffset_, count));
+    relayCounters().towardClients.fetch_add(count, std::memory_order_relaxed);
+    tailOffset_ += count;
+    if (tailOffset_ == tail_.size()) {
+        tail_.clear();
+        tailOffset_ = 0;
+    }
+}
+
+bool ClientSession::queueOrdered(std::span<const std::uint8_t> bytes) {
+    constexpr std::size_t kTailLimit = 256 * 1024;
+    output_.discardReadBytes();
+    if (tail_.empty() && bytes.size() <= kBufferCapacity - output_.writerIndex())
+        return queue(bytes);
+    if (tail_.size() - tailOffset_ + bytes.size() > kTailLimit)
+        return false;
+    tail_.insert(tail_.end(), bytes.begin(), bytes.end());
+    refillFromTail();
     return true;
 }
 
@@ -362,6 +395,7 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
             if (output_.readableBytes() == 0) {
                 output_.clear();
                 writeDeadline_ = Clock::time_point::max();
+                refillFromTail();
             }
         }
     }

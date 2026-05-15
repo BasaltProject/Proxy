@@ -11,6 +11,7 @@
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
+#include <basalt/wire/text/MiniMessage.hpp>
 
 #include <algorithm>
 #include <array>
@@ -95,6 +96,15 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         if (!loginName || !wire::auth::validLoginName(*loginName))
             return false;
         name_ = std::move(*loginName);
+        if (loadingMessage_) {
+            if (const auto message = loadingMessage_()) {
+                closing_ = true;
+                frame_.clear();
+                protocol::varInt::write(frame_, protocol::login::LoginDisconnectPacket::kId);
+                protocol::login::LoginDisconnectPacket{wire::text::miniMessage::parse(*message)}.write(frame_);
+                return queuePacket(frame_.readable());
+            }
+        }
         if (!online_) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
             if (playerLogin_)
@@ -146,7 +156,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !status_)
             return false;
         const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress());
-        if (answer.empty() || !queue(answer))
+        if (answer.empty() || !queueOrdered(answer))
             return false;
         if (statusPing_)
             statusPing_(virtualHost_, statusProtocol_);
@@ -165,7 +175,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         pong[0] = 9;
         std::ranges::copy(frame_.readable(), pong.begin() + 1);
         closing_ = true;
-        return queue(pong);
+        return queueOrdered(pong);
     }
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
     return true;
