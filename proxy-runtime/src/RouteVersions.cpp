@@ -71,6 +71,11 @@ bool backendVerified(std::int32_t protocol) noexcept {
     return std::ranges::find(kVerified, protocol) != kVerified.end();
 }
 
+bool upwardVerified(std::int32_t protocol) noexcept {
+    namespace versions = wire::multiversion::protocolVersions;
+    return protocol == versions::kV26_2;
+}
+
 LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
     namespace versions = wire::multiversion::protocolVersions;
     if (protocol >= versions::kV26_2)
@@ -89,6 +94,8 @@ std::expected<void, RouteRefusal> resolveRoute(std::int32_t clientProtocol, std:
     constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
     if (backendProtocol != kNative) {
         if (backendProtocol == clientProtocol && backendVerified(backendProtocol))
+            return {};
+        if ((clientProtocol == kNative || clientProtocol == 0) && upwardVerified(backendProtocol))
             return {};
         return std::unexpected(clientProtocol == kNative ? RouteRefusal::kBackendUnsupported
                                                          : RouteRefusal::kNoTranslation);

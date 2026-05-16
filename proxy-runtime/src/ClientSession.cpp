@@ -182,7 +182,69 @@ bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
     return translation_ ? queueTranslated(packet) : queueNative(packet);
 }
 
+bool ClientSession::upgrades(std::int32_t backendProtocol) const {
+    return clientProtocol_ == 0 && !translation_ && upwardVerified(backendProtocol);
+}
+
+bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame) {
+    namespace protocol = wire::protocol;
+    if (!upward_) {
+        upward_ = wire::multiversion::java::javaTranslators::upChainFor(backend()->protocol());
+        if (!upward_)
+            return false;
+    }
+    wire::io::ByteBuffer view;
+    view.writeBytes(frame);
+    const auto id = protocol::varInt::read(view);
+    if (view.failed())
+        return false;
+    const std::vector<std::uint8_t> body{view.readable().begin(), view.readable().end()};
+    bool ok = true;
+    upward_->chain().clientbound(protocolState(), id, body,
+                                 [&](std::int32_t upId, std::span<const std::uint8_t> bytes) {
+                                     if (!ok)
+                                         return;
+                                     wire::io::ByteBuffer whole;
+                                     protocol::varInt::write(whole, upId);
+                                     whole.writeBytes(bytes);
+                                     ok = backendFrame(whole.readable());
+                                 });
+    return ok;
+}
+
+bool ClientSession::downgradeFrame(BackendLogin& target, std::span<const std::uint8_t> frame) {
+    namespace protocol = wire::protocol;
+    if (!upward_) {
+        upward_ = wire::multiversion::java::javaTranslators::upChainFor(target.protocol());
+        if (!upward_)
+            return false;
+    }
+    const auto phase = target.phase();
+    const auto state = phase == BackendLogin::Phase::kPlay            ? protocol::ProtocolState::Play
+                       : phase == BackendLogin::Phase::kConfiguration ? protocol::ProtocolState::Configuration
+                                                                      : protocol::ProtocolState::Login;
+    wire::io::ByteBuffer view;
+    view.writeBytes(frame);
+    const auto id = protocol::varInt::read(view);
+    if (view.failed())
+        return false;
+    const std::vector<std::uint8_t> body{view.readable().begin(), view.readable().end()};
+    bool ok = true;
+    upward_->chain().serverbound(state, id, body, [&](std::int32_t downId, std::span<const std::uint8_t> bytes) {
+        if (!ok)
+            return;
+        wire::io::ByteBuffer whole;
+        protocol::varInt::write(whole, downId);
+        whole.writeBytes(bytes);
+        ok = static_cast<bool>(target.queue(whole.readable()));
+    });
+    return ok;
+}
+
 bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t> frame) {
+    if (upgrades(target.protocol()) && (target.phase() == BackendLogin::Phase::kConfiguration ||
+                                        target.phase() == BackendLogin::Phase::kPlay))
+        return downgradeFrame(target, frame);
     if (rawProtocol(target.protocol())) {
         const auto phase = target.phase();
         if (legacyRaw_ && (phase == BackendLogin::Phase::kConfiguration ||
@@ -240,7 +302,7 @@ bool ClientSession::acceptsBackend(const config::BackendConfig& backend) const {
         return protocol == clientProtocol_;
     if (ids_)
         return protocol == clientProtocol_ || protocol == kNative;
-    return protocol == kNative;
+    return protocol == kNative || upgrades(protocol);
 }
 
 bool ClientSession::legacyClient() const {

@@ -100,6 +100,8 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
             return false;
         bytes = idIn_.readable();
     }
+    if (relay && upgrades(backend()->protocol()))
+        return upgradeFrame(bytes);
     return backendFrame(bytes);
 }
 

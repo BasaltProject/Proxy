@@ -10,6 +10,8 @@ enum class RouteRefusal { kClientUnsupported, kBackendUnsupported, kNoTranslatio
 /// Client protocols with a route to a native backend that has been exercised against a real client or bot.
 [[nodiscard]] bool translatedClientVerified(std::int32_t protocol) noexcept;
 
+[[nodiscard]] bool upwardVerified(std::int32_t protocol) noexcept;
+
 /// Older backend protocols a same-version client may reach untranslated, exercised against a real server and bot.
 [[nodiscard]] bool backendVerified(std::int32_t protocol) noexcept;
 
