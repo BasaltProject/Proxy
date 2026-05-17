@@ -14,13 +14,14 @@ route for before it enters a state it cannot leave.
 | 26.3 | 26.3 (Basalt Server, Paper) | native | relayed as is |
 | 1.8 to 26.2 (see below) | 26.3 | translated | the Wire chain rewrites packets between versions |
 | N | N, for the versions below | same version | relayed untranslated; only packet ids are read through the version's tables |
-| 26.3 | 26.2 (`protocol = 776`) | carried upward | the Wire chain read upward: ids, login, chunks and light, particles, movement, advancements, command parsers, trim materials and the three registries 26.3 added |
-| 26.3 | anything older than 26.2 | refused | no translation upward exists |
+| 26.3 | 26.2 (`protocol = 776`), 26.1 (775) or 1.21.11 (774) | carried upward | the Wire chain read upward: ids, login, chunks and light, particles, movement, advancements, command parsers, trim materials and the three registries 26.3 added |
+| 26.3 | anything older than 1.21.11 | refused | no translation upward exists |
 | N | M, N different from M, M not 26.3 | refused | |
 
-A 26.3 client reached a real Paper 26.2 through the proxy with the Swarm bot and the independent frame recorder (joined, 29 keep-alives answered, teleport confirmed,
+A 26.3 client reached a real Paper 26.2, Paper 26.1.2 and Paper 1.21.11 through the proxy with the Swarm bot and the independent frame recorder (joined, 29 keep-alives answered, teleport confirmed,
 the command tree identical to what a 26.2 bot sees directly, commands, summon and block use). It also moved four times between two Paper 26.2 and between a Paper 26.2 and a
-Basalt Server 26.3 in one connection. Not converted: the brewing stand's accepted items (the client has no list, so it will not take items in the UI) and the item
+Basalt Server 26.3 in one connection. The registries of 1.21.11 were rewritten into 26.1's and checked against what a real 26.1 server sends (two entries differ, both vanilla data changes: the lunge enchantment
+and the End's sky light colour). Not converted: the brewing stand's accepted items (the client has no list, so it will not take items in the UI) and the item
 components that changed shape (a trim with an inline material, pot decorations, teleport effects). No graphical client has been tried.
 
 A network may mix both kinds of backend for clients from 1.20.2 on: a 26.2 client moves between a Basalt Server 26.3 (translated) and a Paper 26.2
