@@ -73,7 +73,7 @@ bool backendVerified(std::int32_t protocol) noexcept {
 
 bool upwardVerified(std::int32_t protocol) noexcept {
     namespace versions = wire::multiversion::protocolVersions;
-    return protocol == versions::kV26_2 || protocol == versions::kV26_1;
+    return protocol == versions::kV26_2 || protocol == versions::kV26_1 || protocol == versions::kV1_21_11;
 }
 
 LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
