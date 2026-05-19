@@ -45,6 +45,7 @@ basalt_module(proxy-runtime-core
         src/DefaultIcon.cpp
         src/PlayerDirectory.cpp
         src/ServerListService.cpp
+        src/UiService.cpp
         src/ProxyRuntime.cpp
         src/UpdateChecker.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text

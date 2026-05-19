@@ -1,0 +1,39 @@
+# The bar across the top of the screen.
+#
+# Off by default. It sits over the game and the client gives it to real bosses, so a proxy that turns it on is
+# spending attention it cannot get back. A backend usually has bars of its own, which is why `[ui] priority` below
+# defaults to "backend".
+#
+# Profiles work exactly as in server_list.toml: highest priority among those switched on with `active` or whose
+# every `when` holds, falling back to the one marked `default`.
+#
+# `progress` is 0.0 to 1.0 and can be a placeholder, which makes the bar a gauge rather than a label; a value
+# outside the range is clamped.
+#
+# color:   pink, blue, red, green, yellow, purple, white
+# overlay: progress (a solid bar), notched_6, notched_10, notched_12, notched_20
+
+enabled = false
+
+# Who draws this when the backend sends its own: "proxy" keeps what this file says and discards the backend's,
+# "backend" lets the backend's version through and only draws this one when the backend sends nothing.
+[ui]
+priority = "backend"
+
+# How often each player's bar is redrawn, in ticks (20 = one second).
+update-interval-ticks = 20
+
+[profiles.default]
+default = true
+text = "<white>%basalt_animation_website%</white>   <gray>%basalt_server_online%/%basalt_server_max_players% online</gray>"
+color = "white"
+overlay = "notched_20"
+progress = "1.0"
+
+# [profiles.busy]
+# priority = 10
+# when = ["%basalt_server_online% >= 40"]
+# text = "<yellow>Busy</yellow> <gray>%basalt_server_online%/%basalt_server_max_players%</gray>"
+# color = "yellow"
+# overlay = "progress"
+# progress = "%basalt_server_online%"

@@ -1,0 +1,40 @@
+# The header and footer of the player list, the panel you see holding Tab.
+#
+# JAVA ONLY. Bedrock has no player list to decorate.
+#
+# Off by default. The proxy draws it for the whole network, so it does not flicker when a player changes backend.
+#
+# Profiles work exactly as in server_list.toml: highest priority among those switched on with `active` or whose
+# every `when` holds, falling back to the one marked `default`. Text is MiniMessage, one entry per line, with the
+# same %placeholders% as everywhere else, animations included.
+
+enabled = false
+
+# Who draws this when the backend sends its own: "proxy" keeps what this file says and discards the backend's,
+# "backend" lets the backend's version through and only draws this one when the backend sends nothing.
+[ui]
+priority = "proxy"
+
+# How often each player's list is redrawn, in ticks (20 = one second). 0 sends it once on join and never again.
+# A redraw only becomes a packet when the text it produces changed, so a static panel stays free.
+update-interval-ticks = 20
+
+[profiles.default]
+default = true
+header = [
+    " ",
+    "<bold><gradient:gray:white>BASALT PROXY</gradient></bold>",
+    "<gray>%basalt_animation_website%</gray>",
+    " ",
+]
+footer = [
+    " ",
+    "<gray>Players <white>%basalt_server_online%/%basalt_server_max_players%</white></gray>",
+    " ",
+]
+
+# A second profile, to show the shape. Delete it or make it yours.
+# [profiles.staff]
+# priority = 10
+# when = ["%basalt_player_known% = true"]
+# header = ["<red>STAFF</red>"]

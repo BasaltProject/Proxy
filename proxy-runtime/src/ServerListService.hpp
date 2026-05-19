@@ -47,6 +47,8 @@ public:
 
     [[nodiscard]] bool isLoading() const { return status_->isLoading(); }
 
+    [[nodiscard]] wire::common::placeholder::PlaceholderRegistry& placeholders() noexcept { return placeholders_; }
+
     [[nodiscard]] bool rememberIp() const;
 
     /// Reads server_list.toml again; a broken file leaves the current one in place.

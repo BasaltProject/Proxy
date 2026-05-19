@@ -5,6 +5,7 @@
 #include "NativeForwarding.hpp"
 #include "PlayerDirectory.hpp"
 #include "ServerListService.hpp"
+#include "UiService.hpp"
 #include "bedrock/BedrockLanguage.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -115,6 +116,11 @@ int run(const cliCommand::Run& command) {
         logger.error([&serverList] { return serverList.error(); });
         return 1;
     }
+    auto ui = detail::UiService::create(command.configDirectory, (*serverList)->placeholders());
+    if (!ui) {
+        logger.error([&ui] { return ui.error(); });
+        return 1;
+    }
     (*serverList)->setLoading(true);
     RuntimeServices services;
     services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
@@ -178,8 +184,14 @@ int run(const cliCommand::Run& command) {
         auto fresh = proxy::config::load(command.configDirectory);
         if (!fresh)
             return "Reload rejected, nothing changed: " + fresh.error();
+        if (auto checked = proxy::config::loadServerList(command.configDirectory); !checked)
+            return "Reload rejected, nothing changed: " + checked.error();
+        if (auto checked = proxy::config::loadUi(command.configDirectory); !checked)
+            return "Reload rejected, nothing changed: " + checked.error();
         if (auto listed = (*serverList)->reload(); !listed)
             return "Reload rejected, nothing changed: " + listed.error();
+        if (auto drawn = (*ui)->reload(); !drawn)
+            return "Reload rejected, nothing changed: " + drawn.error();
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
             return "Reload rejected, nothing changed: " + applied.error();

@@ -2,8 +2,10 @@
 
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
+#include <basalt/wire/config/AnimationsConfig.hpp>
 #include <basalt/wire/config/ConfigDirectory.hpp>
 #include <basalt/wire/config/ServerListConfig.hpp>
+#include <basalt/wire/config/UiConfigs.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -155,5 +157,15 @@ struct ProxyConfig {
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);
 
 [[nodiscard]] std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory);
+
+/// tab_list.toml, boss_bar.toml, scoreboard.toml and animations.toml, read together so a reload swaps all or none.
+struct UiConfig {
+    wire::config::TabListConfig tabList = wire::config::TabListConfig::disabled();
+    wire::config::BossBarConfig bossBar = wire::config::BossBarConfig::disabled();
+    wire::config::ScoreboardConfig scoreboard = wire::config::ScoreboardConfig::disabled();
+    wire::config::AnimationsConfig animations;
+};
+
+[[nodiscard]] std::expected<UiConfig, std::string> loadUi(std::string_view directory);
 
 } // namespace basalt::proxy::config
