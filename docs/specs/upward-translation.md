@@ -35,6 +35,7 @@ reported on these routes. No graphical client has been tried.
 
 - Item components whose shape changed (a trim with an inline material, pot decorations, teleport effects on consumables, and so on).
 - The section fluid count when the server is older than 26.1: it is the number of blocks, which can only be too high.
-- Wolf and bee anger times and the mannequin's arm, whose entity data changed type in 1.21.11.
+- Wolf and bee anger times and the avatar's main hand, whose entity data changed type in 1.21.11: from a 1.21.9 or 1.21.10 server they are dropped, because a client
+  that gets another type for a field disconnects.
 - Anything older than 1.21.9: from 1.21.7 down the player's entity data moves indices, shoulder entities change type and the border
   centre depends on the dimension's coordinate scale, none of which the entity data reader can express yet.
