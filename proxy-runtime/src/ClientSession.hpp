@@ -242,8 +242,8 @@ private:
     wire::io::TcpConnection connection_;
     const config::RuntimeConfig& settings_;
     StatusSource status_;
-    std::vector<std::uint8_t> tail_;
-    std::size_t tailOffset_ = 0;
+    /// The part of an answer that did not fit output_ yet; charged to the session budget like every buffer.
+    wire::io::ByteBuffer tail_;
     std::span<const std::uint8_t> unavailable_;
     bool online_;
     bool checkAddress_;
