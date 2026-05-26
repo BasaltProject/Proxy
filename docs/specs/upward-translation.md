@@ -37,5 +37,7 @@ reported on these routes. No graphical client has been tried.
 - The section fluid count when the server is older than 26.1: it is the number of blocks, which can only be too high.
 - Wolf and bee anger times and the avatar's main hand, whose entity data changed type in 1.21.11: from a 1.21.9 or 1.21.10 server they are dropped, because a client
   that gets another type for a field disconnects.
-- Anything older than 1.21.5: not carried yet. 1.21.6 only renumbered; 1.21.5 adds the dialog registry, the difficulty as a number and sneaking as an input. The 1.21.7 step itself covers the player's entity data moving indices and the shoulder parrots changing
+- Anything older than 1.21.5. The 1.21.5 protocol changed too much to cross in one more step: the client sends container clicks with hashed item components, which the server of 1.21.4
+  needs as full stacks (so the proxy would have to remember every stack it showed the client), and chunks, heightmaps, text components, entity data and structured item data changed shape.
+  1.21.6 only renumbered; 1.21.5 adds the dialog registry, the difficulty as a number and sneaking as an input.
   from a compound to a variant (through a hook of the entity data reader), and the border centre divided by the dimension's coordinate scale.
