@@ -25,7 +25,6 @@ namespace basalt::proxy::runtime::detail {
 class ServerListService {
 public:
     struct Sources {
-        std::function<std::int32_t()> online;
         std::int32_t slots = 0;
         PlayerDirectory* players = nullptr;
     };

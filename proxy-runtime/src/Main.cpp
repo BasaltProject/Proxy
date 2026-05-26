@@ -99,19 +99,14 @@ int run(const cliCommand::Run& command) {
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
-    std::atomic<ProxyRuntime*> runtimeRef{nullptr};
     auto players = detail::PlayerDirectory::open(".basalt/players.db");
     if (!players) {
         logger.error([&players] { return players.error(); });
         return 1;
     }
     auto serverList = detail::ServerListService::create(
-        command.configDirectory, {.online = [&runtimeRef]() -> std::int32_t {
-                                      auto* live = runtimeRef.load(std::memory_order_acquire);
-                                      return live != nullptr ? static_cast<std::int32_t>(live->sessionCount()) : 0;
-                                  },
-                                  .slots = static_cast<std::int32_t>(configuration->runtime.maxSessions),
-                                  .players = players->get()});
+        command.configDirectory,
+        {.slots = static_cast<std::int32_t>(configuration->runtime.maxSessions), .players = players->get()});
     if (!serverList) {
         logger.error([&serverList] { return serverList.error(); });
         return 1;
@@ -172,7 +167,6 @@ int run(const cliCommand::Run& command) {
         logger.error([&runtime] { return runtime.error(); });
         return 1;
     }
-    runtimeRef.store(&*runtime, std::memory_order_release);
     signalStop.store(false);
     const auto oldInterrupt = std::signal(SIGINT, stopSignal);
     const auto oldTerminate = std::signal(SIGTERM, stopSignal);
@@ -393,7 +387,6 @@ int run(const cliCommand::Run& command) {
     }
     console.request_stop();
     console.join();
-    runtimeRef.store(nullptr, std::memory_order_release);
     bedrockPlayers.store(nullptr, std::memory_order_release);
     bedrock.reset();
     pluginHost.store(nullptr, std::memory_order_release);

@@ -15,7 +15,11 @@ ServerListService::ServerListService(std::string directory, wire::config::Server
     : directory_(std::move(directory)), sources_(std::move(sources)), config_(std::move(initial)) {
     wire::config::registerBasicPlaceholders(placeholders_, {.versionName = std::string{buildInfo::kMinecraftVersion},
                                                             .protocolVersion = buildInfo::kProtocolVersion,
-                                                            .online = sources_.online,
+                                                            .online =
+                                                                [this] {
+                                                                    const std::lock_guard lock{rosterMutex_};
+                                                                    return static_cast<std::int32_t>(roster_.size());
+                                                                },
                                                             .maxPlayers = [slots = sources_.slots] { return slots; }});
     wire::config::ServerListStatus::Hooks hooks;
     hooks.playerByAddress = [this](const std::string& address) {
