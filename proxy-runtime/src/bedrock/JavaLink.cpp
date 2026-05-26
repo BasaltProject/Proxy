@@ -1,7 +1,9 @@
 #include "JavaLink.hpp"
 
 #include "../NativeForwarding.hpp"
+#include "../RouteVersions.hpp"
 
+#include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -36,7 +38,10 @@ constexpr std::int32_t kPlayPong = 0x2d;
 JavaLink::JavaLink(config::BackendConfig backend, wire::auth::SessionProfile profile, std::string clientAddress,
                    std::uint16_t clientPort, Events events, const NativeForwarding* native, std::string originId)
     : backend_(std::move(backend)), profile_(std::move(profile)), clientAddress_(std::move(clientAddress)),
-      clientPort_(clientPort), events_(std::move(events)), native_(native), originId_(std::move(originId)) {}
+      clientPort_(clientPort), events_(std::move(events)), native_(native), originId_(std::move(originId)) {
+    if (backend_.protocol != 0 && backend_.protocol != buildInfo::kProtocolVersion && upwardVerified(backend_.protocol))
+        upward_ = wire::multiversion::java::javaTranslators::upChainFor(backend_.protocol);
+}
 
 bool JavaLink::begin(std::chrono::milliseconds budget) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
@@ -100,6 +105,19 @@ void JavaLink::pump() {
 }
 
 void JavaLink::sendFrame(std::int32_t id, std::span<const std::uint8_t> body) {
+    if (upward_ && (state_ == State::kConfiguration || state_ == State::kPlay)) {
+        const auto state =
+            state_ == State::kPlay ? protocol::ProtocolState::Play : protocol::ProtocolState::Configuration;
+        const std::vector<std::uint8_t> copy{body.begin(), body.end()};
+        upward_->chain().serverbound(state, id, copy, [this](std::int32_t older, std::span<const std::uint8_t> bytes) {
+            wire::io::ByteBuffer frame;
+            protocol::varInt::write(frame, older);
+            frame.writeBytes(bytes);
+            if (!login_ || !login_->queue(frame.readable(), 8 * 1024 * 1024))
+                close("the backend connection is full");
+        });
+        return;
+    }
     scratch_.clear();
     protocol::varInt::write(scratch_, id);
     scratch_.writeBytes(body);
@@ -120,14 +138,32 @@ void JavaLink::handle(std::span<const std::uint8_t> packet) {
         close("the backend sent a malformed packet");
         return;
     }
+    if (upward_ && (state_ == State::kConfiguration || state_ == State::kPlay)) {
+        const auto state =
+            state_ == State::kPlay ? protocol::ProtocolState::Play : protocol::ProtocolState::Configuration;
+        const std::vector<std::uint8_t> rest{body.readable().begin(), body.readable().end()};
+        upward_->chain().clientbound(state, id, rest, [this](std::int32_t newer, std::span<const std::uint8_t> bytes) {
+            wire::io::ByteBuffer converted;
+            converted.writeBytes(bytes);
+            dispatch(newer, converted);
+        });
+        return;
+    }
+    if (state_ == State::kDelegated) {
+        if (events_.relay)
+            events_.relay(packet);
+        return;
+    }
+    dispatch(id, body);
+}
+
+void JavaLink::dispatch(std::int32_t id, wire::io::ByteBuffer& body) {
     if (state_ == State::kLogin)
         handleLogin(id, body);
     else if (state_ == State::kConfiguration)
         handleConfiguration(id, body);
     else if (state_ == State::kPlay)
         handlePlay(id, body);
-    else if (state_ == State::kDelegated && events_.relay)
-        events_.relay(packet);
 }
 
 void JavaLink::relay(std::span<const std::uint8_t> packet) {
