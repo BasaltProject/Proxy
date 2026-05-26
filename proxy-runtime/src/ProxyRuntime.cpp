@@ -163,6 +163,8 @@ struct ProxyRuntime::Impl {
                 runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
                 runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
                 runtime.services.playerLogin, runtime.services.loadingMessage);
+            if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
+                session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);

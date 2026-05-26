@@ -18,7 +18,7 @@ bool ClientSession::backendChallenge(bool ping) {
     if (!published)
         return false;
     frame_.clear();
-    wire::protocol::varInt::write(frame_, ping ? (state_ == State::kConfiguration ? 0x05 : 0x3d)
+    wire::protocol::varInt::write(frame_, ping ? (state_ == State::kConfiguration ? 0x05 : 0x3e)
                                           : state_ == State::kConfiguration
                                               ? wire::protocol::configuration::KeepAlivePacket::kId
                                               : wire::protocol::play::PlayKeepAlivePacket::kClientboundId);

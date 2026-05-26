@@ -2,6 +2,8 @@
 
 #include <basalt/proxy/runtime/BackendChangeRequest.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
+#include <basalt/wire/config/UiConfigs.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
@@ -73,6 +75,9 @@ struct RuntimeServices {
     /// The server list answer for one ping; the proxy's own one-line answer when unset. Runs on owner threads.
     /// MiniMessage text a login is turned away with while the proxy is still starting; empty once it is ready.
     std::function<std::optional<std::string>()> loadingMessage = {};
+    /// The tab list, boss bar and scoreboard the proxy draws; unset draws nothing. Runs on owner threads.
+    std::function<std::shared_ptr<const wire::config::UiConfigs>()> uiConfigs = {};
+    const wire::common::placeholder::PlaceholderRegistry* placeholders = nullptr;
     std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
                                                               std::string_view address)>
         status = {};

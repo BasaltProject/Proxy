@@ -149,6 +149,8 @@ int run(const cliCommand::Run& command) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLogin, std::string{player}, {}, std::string{uuid}, {}});
     };
+    services.uiConfigs = [&ui] { return (*ui)->panels(); };
+    services.placeholders = &(*serverList)->placeholders();
     services.loadingMessage = [&serverList]() -> std::optional<std::string> {
         if ((*serverList)->isLoading())
             return std::string{"<red>The proxy is loading, please wait</red>"};

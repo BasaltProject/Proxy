@@ -66,8 +66,9 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
       unavailable_(unavailable), online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
-      clientSettings_(0, memory_), idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_), frame_(0, memory_),
-      output_(0, memory_), readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
+      uiFrame_(0, memory_), clientSettings_(0, memory_), idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_),
+      frame_(0, memory_), output_(0, memory_),
+      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
     buffers.reset();
     allocationReady_ =
         input_.tryReserve(kBufferCapacity) && frame_.tryReserve(kBufferCapacity) && output_.tryReserve(kBufferCapacity);
@@ -96,16 +97,21 @@ std::string_view ClientSession::playerName() const {
 }
 
 bool ClientSession::accounted() const {
-    return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() + tail_.capacity() +
-                                       pendingCookies_.allocated() + pendingKeepAlives_.allocated() +
-                                       pendingPings_.allocated() + cookieCache_.allocated() +
-                                       resourcePacks_.allocated() + clientSettings_.capacity() + idIn_.capacity() +
-                                       idOut_.capacity() + (activeBackend_ ? activeBackend_->allocated() : 0) +
-                                       (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
-                                   localBuffers_.used();
+    return allocationReady_ &&
+           input_.capacity() + frame_.capacity() + output_.capacity() + tail_.capacity() + uiFrame_.capacity() +
+                   pendingCookies_.allocated() + pendingKeepAlives_.allocated() + pendingPings_.allocated() +
+                   cookieCache_.allocated() + resourcePacks_.allocated() + clientSettings_.capacity() +
+                   idIn_.capacity() + idOut_.capacity() + (activeBackend_ ? activeBackend_->allocated() : 0) +
+                   (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
+               localBuffers_.used();
 }
 
 ClientSession::Clock::time_point ClientSession::deadline() const {
+    const auto base = baseDeadline();
+    return closing_ ? base : std::min(base, uiDeadline_);
+}
+
+ClientSession::Clock::time_point ClientSession::baseDeadline() const {
     auto result = closing_ ? writeDeadline_
                            : std::min(frontendPaused_ ? Clock::time_point::max() : readDeadline_, writeDeadline_);
     if (!closing_ &&
@@ -440,6 +446,10 @@ bool ClientSession::authenticated(
 bool ClientSession::timedOut(Clock::time_point now) {
     if (now < deadline())
         return true;
+    if (!closing_ && now >= uiDeadline_ && now < baseDeadline()) {
+        uiTick(now);
+        return true;
+    }
     if (!closing_ &&
         (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting) &&
         now >= connectDeadline_ && now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ &&

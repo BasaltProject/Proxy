@@ -211,7 +211,11 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
             backpressure();
         }
         const bool shaped = !legacyRaw_;
-        if (shaped && id == (state_ == State::kConfiguration ? 0x05 : 0x3d))
+        if (shaped && state_ == State::kPlay && uiBackendPacket(id)) {
+            backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+            return true;
+        }
+        if (shaped && id == (state_ == State::kConfiguration ? 0x05 : 0x3e))
             return backendChallenge(true);
         const bool transfer =
             shaped && id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
@@ -241,6 +245,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
             if (candidateBackend_ || connectionStage_ != ConnectionStage::kIdle)
                 discardCandidate();
             startingConfiguration_ = true;
+            uiLeavePlay();
         } else if (state_ == State::kConfiguration && id == wire::protocol::configuration::kFinishConfigurationId) {
             if (finishingConfiguration_ || frame_.readableBytes() != 0)
                 return false;
@@ -268,8 +273,8 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
                 return true;
             }
         }
-        const auto packPushId = state_ == State::kConfiguration ? 0x09 : 0x51;
-        const auto packPopId = state_ == State::kConfiguration ? 0x08 : 0x50;
+        const auto packPushId = state_ == State::kConfiguration ? 0x09 : 0x52;
+        const auto packPopId = state_ == State::kConfiguration ? 0x08 : 0x51;
         if (shaped && (id == packPushId || id == packPopId))
             return backendResourcePack(id == packPushId);
         const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;

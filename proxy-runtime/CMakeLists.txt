@@ -26,6 +26,7 @@ basalt_module(proxy-runtime-core
         src/ClientSessionRouting.cpp
         src/ClientSessionTranslation.cpp
         src/ClientSessionChat.cpp
+        src/ClientSessionUi.cpp
         src/ClientSessionHandshake.cpp
         src/IdRenumbering.cpp
         src/ForwardingKey.cpp

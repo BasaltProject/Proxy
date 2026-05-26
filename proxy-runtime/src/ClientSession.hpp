@@ -12,6 +12,9 @@
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
+#include <basalt/wire/config/PlayerUi.hpp>
+#include <basalt/wire/config/ServerListConfig.hpp>
 #include <basalt/wire/io/BudgetMemoryResource.hpp>
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
@@ -76,6 +79,14 @@ public:
                   std::function<void(std::string_view, std::int32_t)> statusPing = {},
                   std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin = {},
                   std::function<std::optional<std::string>()> loadingMessage = {});
+
+    struct UiSource {
+        std::function<std::shared_ptr<const wire::config::UiConfigs>()> configs;
+        const wire::common::placeholder::PlaceholderRegistry* placeholders = nullptr;
+    };
+
+    void useUi(UiSource source) { uiSource_ = std::move(source); }
+
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -116,6 +127,7 @@ public:
     [[nodiscard]] bool ready(const wire::io::IoReady& event);
     [[nodiscard]] wire::io::IoInterest interest() const;
     [[nodiscard]] Clock::time_point deadline() const;
+    [[nodiscard]] Clock::time_point baseDeadline() const;
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 
@@ -273,6 +285,20 @@ private:
     std::unique_ptr<BackendLogin> candidateBackend_;
     bool finishingConfiguration_ = false;
     bool startingConfiguration_ = false;
+    /// The proxy-drawn tab list, boss bar and scoreboard; see ClientSessionUi.cpp.
+    [[nodiscard]] bool uiBackendPacket(std::int32_t id);
+    void uiTick(Clock::time_point now);
+    void uiLeavePlay();
+    UiSource uiSource_;
+    std::unique_ptr<wire::config::PlayerUi> ui_;
+    std::optional<wire::config::PingRequest> uiRequest_;
+    wire::common::placeholder::PlaceholderContext uiContext_;
+    wire::io::ByteBuffer uiFrame_;
+    Clock::time_point uiDeadline_ = Clock::time_point::max();
+    std::int64_t uiTick_ = 0;
+    std::uint8_t uiYielded_ = 0;
+    bool uiReady_ = false;
+    bool uiSendFailed_ = false;
     bool switchingBackend_ = false;
     bool changeWhenPrepared_ = false;
     bool recovering_ = false;

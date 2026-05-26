@@ -159,10 +159,7 @@ struct ProxyConfig {
 [[nodiscard]] std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory);
 
 /// tab_list.toml, boss_bar.toml, scoreboard.toml and animations.toml, read together so a reload swaps all or none.
-struct UiConfig {
-    wire::config::TabListConfig tabList = wire::config::TabListConfig::disabled();
-    wire::config::BossBarConfig bossBar = wire::config::BossBarConfig::disabled();
-    wire::config::ScoreboardConfig scoreboard = wire::config::ScoreboardConfig::disabled();
+struct UiConfig : wire::config::UiConfigs {
     wire::config::AnimationsConfig animations;
 };
 

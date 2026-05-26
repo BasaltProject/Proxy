@@ -63,6 +63,7 @@ bool ClientSession::beginPreparedChange() {
     if (!queuePacket(start))
         return false;
     startingConfiguration_ = true;
+    uiLeavePlay();
     switchingBackend_ = true;
     constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
     return !legacyClient() || synthesizeClientPacket(kConfigurationAcknowledgedId);

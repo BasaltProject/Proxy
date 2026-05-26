@@ -19,6 +19,8 @@ public:
 
     [[nodiscard]] std::shared_ptr<const config::UiConfig> current() const { return config_.current(); }
 
+    [[nodiscard]] std::shared_ptr<const wire::config::UiConfigs> panels() const { return config_.current(); }
+
     [[nodiscard]] std::expected<void, std::string> reload();
 
 private:

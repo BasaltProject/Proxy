@@ -405,7 +405,7 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         return response;
     };
     const auto publishPack = [&](io::TcpConnection& peer, bool configuration) {
-        std::vector<std::uint8_t> packet{0, static_cast<std::uint8_t>(configuration ? 0x09 : 0x51)};
+        std::vector<std::uint8_t> packet{0, static_cast<std::uint8_t>(configuration ? 0x09 : 0x52)};
         packet.insert(packet.end(), originalPackId.begin(), originalPackId.end());
         constexpr std::string_view url = "https://example.invalid/pack.zip";
         packet.push_back(static_cast<std::uint8_t>(url.size()));
@@ -508,7 +508,7 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         auto expectedResponse = keepalive;
         expectedResponse[1] = 0x1c;
         REQUIRE(fixture.read(next, expectedResponse.size()) == expectedResponse);
-        std::vector<std::uint8_t> removal{18, 0x50, 1};
+        std::vector<std::uint8_t> removal{18, 0x51, 1};
         removal.insert(removal.end(), originalPackId.begin(), originalPackId.end());
         REQUIRE(next.write(removal));
         std::copy(currentPack.begin(), currentPack.end(), removal.begin() + 3);
@@ -520,7 +520,7 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         afterRemoval.insert(afterRemoval.end(), replacementAccepted.begin(), replacementAccepted.end());
         REQUIRE(fixture.client.write(afterRemoval));
         REQUIRE(fixture.read(next, 19) == responseForPack(originalPackId, false, 3));
-        const std::vector<std::uint8_t> removeAll{2, 0x50, 0};
+        const std::vector<std::uint8_t> removeAll{2, 0x51, 0};
         REQUIRE(next.write(removeAll));
         REQUIRE(fixture.read(fixture.client, removeAll.size()) == removeAll);
         REQUIRE(next.write(keepalive));
