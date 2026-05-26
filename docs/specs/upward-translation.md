@@ -10,7 +10,7 @@ no route for before any state is entered.
 - `wire-multiversion` keeps one table set per step (`Tables776` is 26.3 to 26.2, and so on). A step going up reads the same table inverted
   (`invertedTables`): the runs of constant difference are bijections, so their inverse is exact, and what the older version has no name
   for is simply absent.
-- A step is a `ProtocolLink` (`Link776Up`, `Link775Up`, `Link774Up`, `Link773Up`, `Link772Up`). Clientbound, the chain runs the steps from the
+- A step is a `ProtocolLink` (`Link776Up`, `Link775Up`, `Link774Up`, `Link773Up`, `Link772Up`, a plain renumbering for 1.21.6, `Link770Up`). Clientbound, the chain runs the steps from the
   server's side to the client's; serverbound it runs them the other way, each step seeing a packet by its own numbering
   (`ProtocolChain` built with `stepwise = true`). A step may claim a client packet its server has no id for
   (`serverboundForeign`, used for the attack and spectate packets of 26.1).
@@ -37,5 +37,5 @@ reported on these routes. No graphical client has been tried.
 - The section fluid count when the server is older than 26.1: it is the number of blocks, which can only be too high.
 - Wolf and bee anger times and the avatar's main hand, whose entity data changed type in 1.21.11: from a 1.21.9 or 1.21.10 server they are dropped, because a client
   that gets another type for a field disconnects.
-- Anything older than 1.21.7: not carried yet. The 1.21.7 step itself covers the player's entity data moving indices and the shoulder parrots changing
+- Anything older than 1.21.5: not carried yet. 1.21.6 only renumbered; 1.21.5 adds the dialog registry, the difficulty as a number and sneaking as an input. The 1.21.7 step itself covers the player's entity data moving indices and the shoulder parrots changing
   from a compound to a variant (through a hook of the entity data reader), and the border centre divided by the dimension's coordinate scale.
