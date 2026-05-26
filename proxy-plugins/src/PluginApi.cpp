@@ -1,5 +1,6 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
 
 #include <algorithm>
@@ -17,48 +18,6 @@ constexpr std::int64_t kMaxKeys = 1000;
 constexpr std::size_t kMaxLine = 4096;
 constexpr std::array<std::string_view, 7> kBuiltinCommands = {"help", "servers", "status", "reload",
                                                               "send", "stop",    "plugins"};
-
-void pushToml(LuaArgs& lua, const wire::common::toml::TomlTable& table);
-
-void pushTomlValue(LuaArgs& lua, const wire::common::toml::TomlValue& value) {
-    if (const auto* text = value.get<std::string>(); text != nullptr) {
-        lua.pushString(*text);
-    } else if (const auto* whole = value.get<std::int64_t>(); whole != nullptr) {
-        lua.pushInteger(*whole);
-    } else if (const auto* real = value.get<double>(); real != nullptr) {
-        lua.pushNumber(*real);
-    } else if (const auto* flag = value.get<bool>(); flag != nullptr) {
-        lua.pushBoolean(*flag);
-    } else if (const auto* list = value.get<std::vector<wire::common::toml::TomlValue>>(); list != nullptr) {
-        lua.pushTable();
-        std::int64_t position = 1;
-        for (const auto& element : *list) {
-            pushTomlValue(lua, element);
-            lua.setIndex(position++);
-        }
-    } else if (const auto* nested = value.get<wire::common::toml::TomlTable>(); nested != nullptr) {
-        pushToml(lua, *nested);
-    } else {
-        lua.pushNil();
-    }
-}
-
-void pushToml(LuaArgs& lua, const wire::common::toml::TomlTable& table) {
-    lua.pushTable();
-    for (const std::string& key : table.keys()) {
-        const auto* value = table.find(key);
-        if (value == nullptr)
-            continue;
-        pushTomlValue(lua, *value);
-        lua.setField(key);
-        if (key.find('-') != std::string::npos) {
-            std::string underscored = key;
-            std::ranges::replace(underscored, '-', '_');
-            pushTomlValue(lua, *value);
-            lua.setField(underscored);
-        }
-    }
-}
 
 void pushHandle(LuaArgs& lua, std::shared_ptr<std::atomic<bool>> cancelled) {
     lua.pushTable();
@@ -181,7 +140,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     }
     lua.setGlobal("log");
 
-    pushToml(lua, config);
+    wire::plugins::pushToml(lua, config);
     lua.setGlobal("config");
 
     // The metatable every player table shares, and the one the console source has.
