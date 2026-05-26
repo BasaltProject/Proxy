@@ -48,8 +48,8 @@ Two goals drive every decision:
 | Language | C++23 native core; no external JVM required |
 | Target version | Minecraft 26.3 (protocol 777) |
 | Distribution | Native binaries per platform |
-| Backends | Any Minecraft server; native 26.3 backends today |
-| Plugin API | Lua, `.bppkg` packages (not implemented yet) |
+| Backends | Any Minecraft server; 26.3 natively, and older ones from 1.21.5 to 26.2 for 26.3 clients |
+| Plugin API | Lua, `.bppkg` packages (working; see `examples/proxy-plugin`) |
 | Configuration | A `proxy.toml` and a `backends.toml`, generated with comments |
 | License | GPL-3.0 |
 
@@ -138,12 +138,12 @@ tree under the address and undefined sanitizers.
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
 | Login crypto and session verification | Implemented; simulated-endpoint tests |
 | Native backend login, configuration and play relay | Offline vanilla, Paper and Basalt 26.3 bot gates pass; graphical client pending |
-| Server switching | Implemented against simulated backends; real worlds unvalidated |
+| Server switching | Verified with the Swarm bot between real Paper and Basalt backends in one connection; graphical client pending |
 | Player forwarding | Velocity modern tested with offline Paper and Basalt; legacy modes have fixture coverage |
 | Online profiles and graphical clients | Not validated |
-| Translation handover to a Basalt Server backend | Not started |
-| Older Java clients and Bedrock clients | Not started |
-| Plugins and the Lua runtime | Not started |
+| Translation handover to a Basalt Server backend | Working for Java and Bedrock players over the session envelope (bot-verified) |
+| Older Java clients, 26.3 clients on older servers, and Bedrock clients | Older clients from 1.8 and 26.3 clients on 1.21.5 to 26.2 bot-verified; Bedrock bridge bot-verified; no graphical client yet. See `docs/compatibility-matrix.md` |
+| Plugins and the Lua runtime | Working, sandboxed, hot reload; Linux only so far |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
 ## Related repositories
