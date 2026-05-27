@@ -129,6 +129,8 @@ void BedrockSession::screenOpened(std::span<const std::uint8_t> body) {
 }
 
 void BedrockSession::windowContent(const play::ContainerSetContentPacket& packet) {
+    if (!window_)
+        return;
     for (std::size_t slot = 0; slot < window_->items.size() && slot < packet.items.size(); ++slot)
         window_->items[slot] = packet.items[slot];
     if (!window_->shown) {
@@ -141,6 +143,8 @@ void BedrockSession::windowContent(const play::ContainerSetContentPacket& packet
 }
 
 void BedrockSession::drawWindow() {
+    if (!window_)
+        return;
     std::vector<bedrock::BedrockItemStack> items;
     items.reserve(window_->items.size());
     for (const auto& item : window_->items)
@@ -235,7 +239,8 @@ bool BedrockSession::clickFor(const bedrock::BedrockStackAction& action) {
             return true;
         }
         if (source) {
-            const std::int32_t held = itemAt(*source) ? itemAt(*source)->count : 0;
+            const auto& stack = itemAt(*source);
+            const std::int32_t held = stack ? stack->count : 0;
             click(*source, action.count >= held ? 1 : 0, Mode::Throw);
             return true;
         }
