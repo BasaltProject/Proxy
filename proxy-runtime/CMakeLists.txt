@@ -6,7 +6,13 @@ basalt_module(proxy-runtime-core
         src/BedrockStatus.cpp
         src/bedrock/BedrockLanguage.cpp
         src/bedrock/JavaLink.cpp
+        src/bedrock/BedrockEntities.cpp
+        src/bedrock/BedrockInput.cpp
+        src/bedrock/BedrockMessages.cpp
+        src/bedrock/BedrockPlayerState.cpp
         src/bedrock/BedrockSession.cpp
+        src/bedrock/BedrockWindows.cpp
+        src/bedrock/BedrockWorld.cpp
         src/BackendChangeRequest.cpp
         src/BackendRoutes.cpp
         src/BackendAttempts.cpp
@@ -16,6 +22,8 @@ basalt_module(proxy-runtime-core
         src/BackendLoginIdentity.cpp
         src/BackendLoginCookies.cpp
         src/ClientSession.cpp
+        src/ClientSessionRouting.cpp
+        src/ClientSessionTranslation.cpp
         src/ClientSessionChat.cpp
         src/ClientSessionHandshake.cpp
         src/IdRenumbering.cpp
