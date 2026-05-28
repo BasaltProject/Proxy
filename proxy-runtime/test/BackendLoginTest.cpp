@@ -7,9 +7,9 @@
 #include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
 #include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
-#include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/SessionEnvelope.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 
 #include <filesystem>
