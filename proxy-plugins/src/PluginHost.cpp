@@ -1,5 +1,6 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
 #include <basalt/wire/plugins/PluginFolder.hpp>
 #include <basalt/wire/plugins/PluginOrder.hpp>
@@ -219,9 +220,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
         return;
     }
     PluginApi::install(*this, *plugin, manifest, config);
-    auto chunk =
-        plugin->sandbox->compile(std::string_view{reinterpret_cast<const char*>(source->data()), source->size()},
-                                 "@" + id + "/" + manifest.main);
+    auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);
     if (!chunk) {
         report("compile failed: " + chunk.error().message);
         return;

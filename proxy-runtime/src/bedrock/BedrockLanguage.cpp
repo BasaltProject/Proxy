@@ -1,5 +1,6 @@
 #include "BedrockLanguage.hpp"
 
+#include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
 #include <basalt/wire/io/ZipReader.hpp>
 
@@ -32,7 +33,7 @@ std::expected<std::shared_ptr<const wire::text::LangTable>, std::string> loadBed
             return std::unexpected("bedrock.language: " + name + " has no " + std::string{kEntry});
         json = std::move(*entry);
     }
-    auto table = wire::text::parseLangTable({reinterpret_cast<const char*>(json.data()), json.size()});
+    auto table = wire::text::parseLangTable(wire::common::asText(json));
     if (!table)
         return std::unexpected("bedrock.language: " + name + " is not a language file");
     return std::make_shared<const wire::text::LangTable>(std::move(*table));
