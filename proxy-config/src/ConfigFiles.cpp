@@ -1,6 +1,8 @@
 #include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 
+#include <deque>
+
 namespace basalt::proxy::config {
 
 wire::config::ConfigDirectory configDirectory(std::string_view directory) {
@@ -9,7 +11,59 @@ wire::config::ConfigDirectory configDirectory(std::string_view directory) {
         wire::config::UpgradeRules{.version = "26.3",
                                    .files = {{"proxy.toml",
                                               {"network", "runtime", "admission", "forwarding", "logging", "bedrock",
-                                               "reload", "translation"}}}}};
+                                               "reload", "translation", "access"}}}}};
+}
+
+std::expected<wire::config::GroupsConfig, std::string> loadGroups(std::string_view directory) {
+    const auto files = configDirectory(directory);
+    const auto root = files.load(wire::config::GroupsConfig::kFileName, kGroupsDefaultToml);
+    if (!root)
+        return std::unexpected(root.error());
+    return wire::config::GroupsConfig::parse(*root, files.pathOf(wire::config::GroupsConfig::kFileName));
+}
+
+std::expected<wire::config::CommandsConfig, std::string> loadCommands(std::string_view directory) {
+    const auto files = configDirectory(directory);
+    const auto root = files.load(wire::config::CommandsConfig::kFileName, kCommandsDefaultToml);
+    if (!root)
+        return std::unexpected(root.error());
+    return wire::config::CommandsConfig::parse(*root, files.pathOf(wire::config::CommandsConfig::kFileName));
+}
+
+std::string MessageSet::text(std::string_view section, std::string_view key) const {
+    if (const auto* custom = custom_.find(section, key))
+        return *custom;
+    if (const auto* shipped = defaults_.find(section, key))
+        return *shipped;
+    return {};
+}
+
+std::expected<MessageSet, std::string> loadMessages(std::string_view directory) {
+    const auto files = configDirectory(directory);
+    const std::string path = files.pathOf(wire::config::MessageCatalog::kFileName);
+    const auto shipped = wire::common::toml::parse(kMessagesDefaultToml);
+    if (!shipped)
+        return std::unexpected("the built-in messages.toml does not parse");
+    std::deque<std::string> names;
+    std::vector<std::vector<std::string_view>> keys;
+    std::vector<wire::config::MessageSection> sections;
+    for (const std::string_view section : {"kick", "command"}) {
+        keys.emplace_back();
+        if (const auto* table = shipped->table(section))
+            for (const auto& key : table->keys())
+                keys.back().push_back(names.emplace_back(key));
+        sections.push_back({section, keys.back()});
+    }
+    auto defaults = wire::config::MessageCatalog::parse(*shipped, "built-in messages.toml", sections);
+    if (!defaults)
+        return std::unexpected(defaults.error());
+    const auto root = files.load(wire::config::MessageCatalog::kFileName, kMessagesDefaultToml);
+    if (!root)
+        return std::unexpected(root.error());
+    auto custom = wire::config::MessageCatalog::parse(*root, path, sections);
+    if (!custom)
+        return std::unexpected(custom.error());
+    return MessageSet{std::move(*custom), std::move(*defaults)};
 }
 
 std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory) {

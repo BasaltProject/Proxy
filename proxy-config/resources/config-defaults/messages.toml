@@ -1,0 +1,107 @@
+# What the proxy says when it turns a player away, removes them or answers a command. Every text is MiniMessage and
+# takes the %placeholders% named next to it, plus the same %basalt_*% ones as everywhere else. Leave one empty to keep
+# the text shipped with the proxy; a missing key does the same.
+#
+# Reload with the `reload` command; running sessions pick the new text up on their next message.
+
+[kick]
+# Shown on a login refused because the player, or their address, is banned. %reason% is the reason given when the ban
+# was made and %expires% the date it ends, or "never".
+banned = "<red>You are banned from this network.</red>\n<gray>Reason: %reason%</gray>\n<gray>Expires: %expires%</gray>"
+banned-ip = "<red>Your address is banned from this network.</red>\n<gray>Reason: %reason%</gray>\n<gray>Expires: %expires%</gray>"
+
+# The whitelist is on and the player is not on it.
+not-whitelisted = "<red>You are not whitelisted on this network.</red>"
+
+# No backend of the route accepted the player.
+unavailable = "<red>No server is available right now. Please try again shortly.</red>"
+
+# The client's game version is not one this proxy can speak.
+unsupported-version = "<red>Your game version is not supported on this network.</red>"
+
+# The version is supported, but no backend of the route can take it.
+no-compatible-server = "<red>No server here can take your game version.</red>"
+
+# A second login of a player who is already connected.
+already-connected = "<red>This player is already connected.</red>"
+
+# Authentication failed or could not be completed.
+login-failed = "<red>Login could not be completed.</red>"
+
+# What /kick tells the player. %reason% is the reason typed after the name.
+kicked = "<red>You have been kicked from this network.</red>\n<gray>%reason%</gray>"
+
+# Refused by the network access limits (limits.toml, connection throttle, username-pattern, packet and spam limits).
+connection-throttled = "<red>Connection throttled! Please wait before reconnecting.</red>"
+invalid-name = "<red>Invalid characters in username</red>"
+packet-rate = "<red>Kicked for exceeding packet rate limit</red>"
+spam = "<red>Kicked for spamming</red>"
+unsigned-chat = "<red>Received a chat packet with a missing or invalid signature.</red>"
+
+[command]
+# The reason used when /kick, /ban give none.
+default-reason = "No reason given"
+
+# Answers shared by every command.
+unknown = "<red>Unknown command. Try /help.</red>"
+no-permission = "<red>You do not have permission to use this command.</red>"
+usage = "<red>Usage: /%usage%</red>"
+busy = "<red>The proxy is busy. Try again in a moment.</red>"
+unknown-player = "<red>%player% has not joined this network before.</red>"
+not-online = "<red>%player% is not online.</red>"
+unknown-server = "<red>There is no server called %server%.</red>"
+
+# /help. %usage% and %description% describe one command.
+help-header = "<gold>Commands you can use:</gold>"
+help-entry = "<yellow>/%usage%</yellow> <gray>%description%</gray>"
+
+# /list and /glist. %online%, %players%, %server% (the backend), %count% and %total%.
+list = "<yellow>There are %online% player(s) online:</yellow> %players%"
+glist-server = "<yellow>[%server%]</yellow> <gray>(%count%)</gray> %players%"
+glist-total = "<yellow>Total players online: %total%</yellow>"
+
+# /server and /send. %server% and %player% are what the command named.
+server-current = "<yellow>You are connected to %server%. Available: %servers%</yellow>"
+server-sending = "<green>Sending you to %server%.</green>"
+send-ok = "<green>Sending %player% to %server%.</green>"
+# What the proxy answered to a move, after waiting for it: the player was not found, cannot move now (not in play, already
+# there or another change is under way), the queue was full or the proxy stopped first.
+send-not-found = "<red>%player% is not online.</red>"
+send-unavailable = "<red>%player% cannot be moved to %server% right now.</red>"
+send-busy = "<red>The proxy is busy. Try again in a moment.</red>"
+send-stopped = "<red>The proxy stopped before the move completed.</red>"
+server-players-only = "<red>Only players can use /server. Use /send from the console.</red>"
+
+# /stop, /reload and /plugins.
+stopping = "<yellow>Stopping the proxy.</yellow>"
+plugins = "<yellow>Plugins (%count%):</yellow> %plugins%"
+
+# /op and /deop. %player% is the name given.
+op-ok = "<green>%player% is now an operator.</green>"
+deop-ok = "<green>%player% is no longer an operator.</green>"
+
+# /group. %player%, %group% and %groups% (every group in groups.toml).
+group-unknown = "<red>There is no group called %group%. Groups: %groups%</red>"
+group-set = "<green>%player% is now in group %group%.</green>"
+group-info = "<yellow>%player% is in group %group%.</yellow>"
+group-list = "<yellow>Groups:</yellow> %groups%"
+group-members = "<yellow>%group% (%count%):</yellow> %players%"
+
+# /whitelist. %player% is the name given and %players% a list of names.
+whitelist-on = "<green>The whitelist is on.</green>"
+whitelist-off = "<green>The whitelist is off.</green>"
+whitelist-added = "<green>%player% is now whitelisted.</green>"
+whitelist-removed = "<green>%player% is no longer whitelisted.</green>"
+whitelist-already = "<red>%player% is already whitelisted.</red>"
+whitelist-not-listed = "<red>%player% is not whitelisted.</red>"
+whitelist-list = "<yellow>Whitelisted (%count%):</yellow> %players%"
+
+# /ban, /pardon and /banlist. %player%, %reason%, %count% and %players%.
+ban-ok = "<green>Banned %player%: %reason%</green>"
+ban-already = "<red>%player% is already banned.</red>"
+pardon-ok = "<green>Unbanned %player%.</green>"
+pardon-not-banned = "<red>%player% is not banned.</red>"
+banlist = "<yellow>Banned (%count%):</yellow> %players%"
+
+# /kick. %player% is the name given.
+kick-ok = "<green>Kicked %player%.</green>"

@@ -11,7 +11,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy,
-                {"network", "runtime", "admission", "forwarding", "logging", "bedrock", "reload", "translation"}, "");
+                {"network", "runtime", "admission", "forwarding", "logging", "bedrock", "reload", "translation", "access"}, "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
                 {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
@@ -119,6 +119,11 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     reader.scalar(reload, "watch-files", result.reload.watchFiles, "reload.");
     reader.integer(reload, "interval-ms", result.reload.intervalMs, 250, 600000, "reload.");
 
+    const auto* access = reader.child(proxy, "access");
+    reader.keys(access, {"whitelist", "enforce-whitelist"}, "access.");
+    reader.scalar(access, "whitelist", result.access.whitelist, "access.");
+    reader.scalar(access, "enforce-whitelist", result.access.enforceWhitelist, "access.");
+
     const auto* translation = reader.child(proxy, "translation");
     reader.keys(translation, {"mode"}, "translation.");
     std::string mode = "auto";
@@ -135,8 +140,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     if (pluginsTable) {
         detail::Reader plugins{std::string{directory} + "/plugins.toml", {}};
         plugins.keys(pluginsTable,
-                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size", "allow",
-                      "operators"},
+                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size", "allow"},
                      "");
         plugins.scalar(pluginsTable, "enabled", result.plugins.enabled, "");
         plugins.scalar(pluginsTable, "directory", result.plugins.directory, "");
@@ -145,8 +149,6 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                         "");
         plugins.integer(pluginsTable, "memory-mib", result.plugins.memoryMib, 1, 1024, "");
         plugins.integer(pluginsTable, "queue-size", result.plugins.queueSize, 1, 65536, "");
-        if (const auto* operators = pluginsTable->find("operators"))
-            result.plugins.operators = plugins.strings(operators, "operators");
         if (const auto* allow = plugins.child(*pluginsTable, "allow")) {
             for (const auto& id : allow->keys()) {
                 auto names = plugins.strings(allow->find(id), "allow." + id);

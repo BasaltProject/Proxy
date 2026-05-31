@@ -9,8 +9,7 @@ memory-mib = 32
 # Events waiting for the plugin thread. A full queue drops the newest event and counts it.
 queue-size = 256
 
-# Players who may run a plugin command that is declared with a permission, by name.
-# operators = ["Steve"]
+# Who may run a plugin command that is declared with a permission is decided by groups.toml, like any other command.
 
 # What each plugin may do beyond logging, listening, registering commands and reading the server list. A plugin whose plugin.toml
 # asks for more than is granted here does not load. Permissions: commands (run console commands), network, packets.

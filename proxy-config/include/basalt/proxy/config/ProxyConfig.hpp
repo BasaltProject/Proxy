@@ -3,7 +3,10 @@
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
 #include <basalt/wire/config/AnimationsConfig.hpp>
+#include <basalt/wire/config/CommandsConfig.hpp>
 #include <basalt/wire/config/ConfigDirectory.hpp>
+#include <basalt/wire/config/MessageCatalog.hpp>
+#include <basalt/wire/config/Permissions.hpp>
 #include <basalt/wire/config/ServerListConfig.hpp>
 #include <basalt/wire/config/UiConfigs.hpp>
 
@@ -91,8 +94,6 @@ struct PluginsConfig {
     std::size_t queueSize = 256;
     /// Plugin id to the permissions the operator grants it; a manifest asking for more is not loaded.
     std::map<std::string, std::vector<std::string>> allow;
-    /// Players who may run a plugin command that asks for a permission.
-    std::vector<std::string> operators;
 
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };
@@ -104,6 +105,13 @@ struct BedrockConfig {
     bool delegate = false;
 
     friend bool operator==(const BedrockConfig&, const BedrockConfig&) = default;
+};
+
+struct AccessConfig {
+    bool whitelist = false;
+    bool enforceWhitelist = false;
+
+    friend bool operator==(const AccessConfig&, const AccessConfig&) = default;
 };
 
 struct ReloadConfig {
@@ -142,6 +150,7 @@ struct ProxyConfig {
     PluginsConfig plugins;
     BedrockConfig bedrock;
     ReloadConfig reload;
+    AccessConfig access;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;
@@ -155,6 +164,26 @@ struct ProxyConfig {
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);
+
+/// A groups.toml, commands.toml or messages.toml with its built-in defaults filled in where the file says nothing.
+[[nodiscard]] std::expected<wire::config::GroupsConfig, std::string> loadGroups(std::string_view directory);
+[[nodiscard]] std::expected<wire::config::CommandsConfig, std::string> loadCommands(std::string_view directory);
+
+class MessageSet {
+public:
+    MessageSet() = default;
+    MessageSet(wire::config::MessageCatalog custom, wire::config::MessageCatalog defaults)
+        : custom_(std::move(custom)), defaults_(std::move(defaults)) {}
+
+    /// The operator's text, or the shipped one; empty only for a key that does not exist.
+    [[nodiscard]] std::string text(std::string_view section, std::string_view key) const;
+
+private:
+    wire::config::MessageCatalog custom_;
+    wire::config::MessageCatalog defaults_;
+};
+
+[[nodiscard]] std::expected<MessageSet, std::string> loadMessages(std::string_view directory);
 
 [[nodiscard]] std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory);
 

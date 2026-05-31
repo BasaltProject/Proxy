@@ -2,12 +2,14 @@
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
+#include <basalt/wire/protocol/play/HudPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
 #include <basalt/wire/text/MiniMessage.hpp>
@@ -51,7 +53,7 @@ constexpr std::size_t kMaxAddedNodes = 512;
 } // namespace
 
 bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
-    auto specs = playerCommandSpecs_ ? playerCommandSpecs_() : std::vector<PlayerCommandSpec>{};
+    auto specs = playerCommandSpecs_ && profile_ ? playerCommandSpecs_(profile_->name) : std::vector<PlayerCommandSpec>{};
     if (specs.empty())
         return queuePacket(original);
     wire::io::ByteBuffer view;
@@ -66,6 +68,9 @@ bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
     for (const std::int32_t child : tree->nodes[rootIndex].children)
         if (child >= 0 && static_cast<std::size_t>(child) < tree->nodes.size())
             taken.push_back(tree->nodes[static_cast<std::size_t>(child)].name.value_or(std::string{}));
+    backendCommands_.clear();
+    for (const std::string& name : taken)
+        backendCommands_.push_back(wire::common::placeholder::lowercaseAscii(name));
     const std::size_t original_count = tree->nodes.size();
     std::map<std::string, std::int32_t> literals;
     const auto child = [&](std::int32_t parent, const std::string& name) -> std::int32_t {
@@ -102,6 +107,8 @@ bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
             node.kind = play::CommandNodeData::Kind::Argument;
             node.name = argument.name;
             node.parser = parserOf(argument);
+            if (argument.suggest)
+                node.suggestionId = "minecraft:ask_server";
             node.executable = i + 1 >= firstOptional;
             tree->nodes.push_back(std::move(node));
             tree->nodes[static_cast<std::size_t>(at)].children.push_back(index);
@@ -114,6 +121,21 @@ bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
     wire::protocol::varInt::write(out, play::CommandsPacket::kId);
     tree->write(out);
     return queuePacket(out.readable());
+}
+
+bool ClientSession::answerSuggestions(const play::CommandSuggestionRequestPacket& request) {
+    const auto options = commandSuggestions_(profile_->name, request.command);
+    if (!options)
+        return false;
+    const auto word = request.command.rfind(' ');
+    const auto start = static_cast<std::int32_t>(word == std::string::npos ? 0 : word + 1);
+    play::CommandSuggestionsPacket answer{request.id, start, static_cast<std::int32_t>(request.command.size()) - start, {}};
+    for (const std::string& option : *options)
+        answer.suggestions.push_back({option, std::nullopt});
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, play::CommandSuggestionsPacket::kId);
+    answer.write(frame_);
+    return queuePacket(frame_.readable());
 }
 
 void ClientSession::tell(std::string_view text) {

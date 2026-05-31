@@ -109,6 +109,8 @@ bool BedrockStatus::start() {
             if (found->second.session->begin()) {
                 const std::lock_guard lock{orders_};
                 playing_.insert(found->second.session->name());
+            } else if (found->second.session->turnedAway()) {
+                found->second.session.reset();
             } else {
                 wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
                 found->second.session.reset();

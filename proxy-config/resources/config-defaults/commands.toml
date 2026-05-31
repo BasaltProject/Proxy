@@ -1,0 +1,49 @@
+# Commands: which permission each one asks for, whether it exists at all, what it
+# answers, and any command of your own.
+#
+# This file NAMES the permission a command requires. It does not decide who has
+# it: that is groups.toml. The two read in one direction and only one:
+#
+#   commands.toml  ->  "/ban requires basalt.command.ban"
+#   groups.toml    ->  "the moderator group has basalt.command.ban"
+#
+# Every command already asks for `basalt.command.<name>` without being listed
+# here. This file is only for changing that. What the built-in commands answer is
+# in messages.toml, under [command].
+#
+# The proxy's own commands are: help, list, glist, server, send, stop, reload,
+# plugins, op, deop, group, whitelist, ban, pardon, banlist and kick.
+
+[commands]
+# One table per command you want to change. Every key is optional.
+#
+# [commands.glist]
+# # The permission it asks for, instead of basalt.command.glist.
+# permission = "basalt.command.moderator"
+# # false removes it: it stops existing, and stops being sent to clients, rather
+# # than existing and refusing. Aliases go with it.
+# enabled = true
+# # Extra names for the same command, on top of the ones it ships with.
+# aliases = ["gl"]
+
+[custom]
+# Commands of your own: a name, a permission, and what they answer. Enough for
+# the /discord and /rules that would otherwise need a plugin, and no more than
+# that: anything with logic in it is a plugin, not a config entry.
+#
+# `message` is MiniMessage, one entry per line, and takes the same %placeholders%
+# as everywhere else. `permission` defaults to basalt.command.<name>, so remember
+# to grant it in groups.toml or nobody will be able to run it. To let everyone
+# use one, add its permission to the default group.
+#
+# [custom.discord]
+# message = ["<blue>Chat with us: https://discord.gg/example</blue>"]
+# aliases = ["dc"]
+#
+# [custom.online]
+# permission = "basalt.command.help"
+# message = ["<gray>%basalt_server_online% of %basalt_server_max_players% playing.</gray>"]
+
+[options]
+# Write a line to the log for every command a player runs.
+log-commands = true

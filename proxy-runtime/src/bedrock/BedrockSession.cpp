@@ -81,6 +81,13 @@ bool BedrockSession::begin() {
     javaName_ = profile.name;
     javaUuid_ = profile.id.toString();
     profile_ = std::move(profile);
+    if (commands_.login) {
+        if (const auto refused = commands_.login(javaName_, javaUuid_, address_)) {
+            turnedAway_ = true;
+            leave(wire::text::toPlainText(wire::text::miniMessage::parse(*refused)));
+            return false;
+        }
+    }
     return openLink();
 }
 

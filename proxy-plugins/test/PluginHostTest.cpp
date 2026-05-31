@@ -84,10 +84,10 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
         lines.push_back(std::string{plugin} + ": " + std::string{line});
         ready.notify_all();
     };
+    hooks.hasPermission = [](std::string_view player, std::string_view) { return player == "Admin"; };
     plugins::PluginSettings settings;
     settings.directory = root.string();
     settings.limits.instructionsPerTurn = 20000;
-    settings.operators = {"Admin"};
     auto host = plugins::PluginHost::start(settings, hooks);
     REQUIRE(host);
     CHECK((*host)->loaded() == 6);

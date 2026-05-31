@@ -63,15 +63,8 @@ bool ClientSession::routeNext() {
     if (!profile_)
         return false;
     if (!identityClaimed_) {
-        if (!identities_.claim(profile_->id)) {
-            closing_ = true;
-            frame_.clear();
-            wire::protocol::varInt::write(frame_, wire::protocol::login::LoginDisconnectPacket::kId);
-            wire::protocol::login::LoginDisconnectPacket{
-                wire::text::Component::text("This player is already connected.")}
-                .write(frame_);
-            return queuePacket(frame_.readable());
-        }
+        if (!identities_.claim(profile_->id))
+            return refuseWith("already-connected", "This player is already connected.");
         identityClaimed_ = true;
     }
     while (nextTarget_ < targets_.size() && ((recovering_ && recoveryVisited_.test(targets_[nextTarget_])) ||
@@ -84,8 +77,7 @@ bool ClientSession::routeNext() {
             discardCandidate();
             return true;
         }
-        closing_ = true;
-        return queue(unavailable_);
+        return refuseWith("unavailable", "No server is available right now. Please try again shortly.");
     }
     if (settings_.sessionBufferBytes <
         kBufferBytes + kResolutionBytes + (profileStorage_ ? profileStorage_->size() : 0))
@@ -163,8 +155,7 @@ bool ClientSession::dial() {
             return true;
         }
         closeBackends();
-        closing_ = true;
-        return queue(unavailable_);
+        return refuseWith("unavailable", "No server is available right now. Please try again shortly.");
     }
     if (!activeBackend_)
         state_ = State::kBackendLogin;

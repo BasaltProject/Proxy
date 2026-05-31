@@ -2,7 +2,15 @@ basalt_module(proxy-runtime-core
     SOURCES
         src/BuildInfo.cpp
         src/Cli.cpp
+        src/AccessControl.cpp
+        src/BuiltinAccessCommands.cpp
+        src/BuiltinCommands.cpp
+        src/CommandDispatcher.cpp
+        src/CommandService.cpp
         src/Console.cpp
+        src/Messages.cpp
+        src/OnlineRoster.cpp
+        src/PermissionService.cpp
         src/Admission.cpp
         src/BedrockStatus.cpp
         src/bedrock/BedrockLanguage.cpp

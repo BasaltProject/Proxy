@@ -22,6 +22,7 @@
 #include <basalt/wire/io/TcpSocket.hpp>
 #include <basalt/wire/multiversion/java/JavaTranslators.hpp>
 #include <basalt/wire/protocol/ProtocolState.hpp>
+#include <basalt/wire/protocol/play/HudPackets.hpp>
 
 #include <array>
 #include <bitset>
@@ -72,12 +73,14 @@ public:
                   std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                   const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
                   std::function<bool(std::string_view, std::string_view)> playerCommand = {},
-                  std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {},
+                  std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs = {},
                   config::TranslationMode translation = config::TranslationMode::Auto,
                   std::function<void(std::string_view, std::string_view)> playerChat = {},
                   std::function<void(std::string_view, std::string_view)> playerKick = {},
                   std::function<void(std::string_view, std::int32_t)> statusPing = {},
-                  std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin = {},
+                  std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin = {},
+                  std::function<std::string(std::string_view)> kickText = {},
+                  std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions = {},
                   std::function<std::optional<std::string>()> loadingMessage = {});
 
     struct UiSource {
@@ -184,7 +187,10 @@ private:
     std::int32_t clientProtocol_ = 0;
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;
+    [[nodiscard]] bool answerSuggestions(const wire::protocol::play::CommandSuggestionRequestPacket& request);
     [[nodiscard]] bool refuse(std::string_view text);
+    [[nodiscard]] bool refuseMiniMessage(std::string_view text);
+    [[nodiscard]] bool refuseWith(std::string_view key, std::string_view fallback);
     void trackBossBar(std::span<const std::uint8_t> body);
     void trackPlayerList(std::int32_t id, std::span<const std::uint8_t> body);
     [[nodiscard]] bool clearClientState();
@@ -234,9 +240,12 @@ private:
     std::function<void(std::string_view, std::string_view)> playerChat_;
     std::function<void(std::string_view, std::string_view)> playerKick_;
     std::function<void(std::string_view, std::int32_t)> statusPing_;
-    std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin_;
+    std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin_;
+    std::function<std::string(std::string_view)> kickText_;
     std::function<std::optional<std::string>()> loadingMessage_;
-    std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs_;
+    std::vector<std::string> backendCommands_;
+    std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs_;
+    std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
@@ -35,8 +36,6 @@ struct PluginSettings {
     std::size_t queueSize = 256;
     /// Plugin id to permission names (commands, network, packets) the operator grants.
     std::map<std::string, std::vector<std::string>> allow;
-    /// Player names allowed to run a command a plugin guards with a permission.
-    std::vector<std::string> operators;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.
@@ -50,6 +49,10 @@ struct PluginHooks {
     std::function<void(std::string_view player, std::string_view reason)> kick;
     /// Runs a console line as the operator would; true when the line named a command.
     std::function<bool(std::string_view line)> console;
+    /// Where plugin commands are registered, so players and the console reach them like the proxy's own.
+    runtime::CommandDispatcher* commands = nullptr;
+    /// Whether a player's group grants a permission node.
+    std::function<bool(std::string_view player, std::string_view node)> hasPermission;
 };
 
 /// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
@@ -69,7 +72,9 @@ public:
 
     /// The same for a command typed by a player; the call is queued for the plugin thread.
     [[nodiscard]] bool playerCommand(std::string_view player, std::string_view line);
-    [[nodiscard]] std::vector<runtime::PlayerCommandSpec> playerCommandSpecs() const;
+
+    /// Names of the loaded plugins.
+    [[nodiscard]] std::vector<std::string> names();
 
     /// Drops every plugin, reads the packages again and resumes; queued events and per-plugin data are kept.
     [[nodiscard]] std::size_t reload();

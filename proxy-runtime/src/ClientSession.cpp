@@ -12,6 +12,7 @@
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
 #include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -22,6 +23,7 @@
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
+#include <basalt/wire/protocol/play/HudPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
@@ -48,17 +50,19 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                              const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
                              std::function<bool(std::string_view, std::string_view)> playerCommand,
-                             std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs,
+                             std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs,
                              config::TranslationMode translation,
                              std::function<void(std::string_view, std::string_view)> playerChat,
                              std::function<void(std::string_view, std::string_view)> playerKick,
                              std::function<void(std::string_view, std::int32_t)> statusPing,
-                             std::function<void(std::string_view, std::string_view, std::string_view)> playerLogin,
+                             std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
+                             std::function<std::string(std::string_view)> kickText,
+                             std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
                              std::function<std::optional<std::string>()> loadingMessage)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
-      playerLogin_(std::move(playerLogin)), loadingMessage_(std::move(loadingMessage)),
-      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
+      playerLogin_(std::move(playerLogin)), kickText_(std::move(kickText)), loadingMessage_(std::move(loadingMessage)),
+      playerCommandSpecs_(std::move(playerCommandSpecs)), commandSuggestions_(std::move(commandSuggestions)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
@@ -235,7 +239,20 @@ bool ClientSession::packet() {
             wire::io::ByteBuffer view;
             view.writeBytes(frame_.readable());
             const std::string command = protocol::readString(view, 256);
-            if (!view.failed() && playerCommand_(profile_->name, command))
+            const auto root = command.substr(0, command.find(' '));
+            const bool theBackends = root.find(':') == std::string::npos &&
+                                     std::ranges::find(backendCommands_, wire::common::placeholder::lowercaseAscii(
+                                                                             root.starts_with('/') ? root.substr(1) : root)) !=
+                                         backendCommands_.end();
+            if (!view.failed() && !theBackends && playerCommand_(profile_->name, command))
+                return true;
+        }
+        if (shaped && state_ == State::kPlay && commandSuggestions_ && profile_ &&
+            id == protocol::play::CommandSuggestionRequestPacket::kId) {
+            wire::io::ByteBuffer view;
+            view.writeBytes(frame_.readable());
+            const auto request = protocol::play::CommandSuggestionRequestPacket::read(view);
+            if (request && !view.failed() && answerSuggestions(*request))
                 return true;
         }
         if (shaped && state_ == State::kPlay && playerChat_ && profile_ &&
@@ -436,11 +453,13 @@ bool ClientSession::authenticated(
     }
     if (result) {
         if (playerLogin_)
-            playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress());
+            if (const auto turnedAway =
+                    playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
+                return refuseMiniMessage(*turnedAway);
         return route();
     }
     closing_ = true;
-    return queue(authFailure_);
+    return refuseWith("login-failed", "Login could not be completed.");
 }
 
 bool ClientSession::timedOut(Clock::time_point now) {

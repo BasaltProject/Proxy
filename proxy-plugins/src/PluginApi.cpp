@@ -16,8 +16,36 @@ constexpr std::size_t kMaxKey = 128;
 constexpr std::size_t kMaxValue = 64 * 1024;
 constexpr std::int64_t kMaxKeys = 1000;
 constexpr std::size_t kMaxLine = 4096;
-constexpr std::array<std::string_view, 7> kBuiltinCommands = {"help", "servers", "status", "reload",
-                                                              "send", "stop",    "plugins"};
+constexpr std::array<std::string_view, 16> kBuiltinCommands = {
+    "help", "list", "glist", "server", "send", "stop", "reload", "plugins",
+    "op",   "deop", "group", "whitelist", "ban", "pardon", "banlist", "kick"};
+
+runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::CommandExecutor executor) {
+    using Type = wire::plugins::CommandArgumentType;
+    std::vector<runtime::CommandNode> chain;
+    chain.push_back(runtime::CommandNode::literal(spec.literals.front()));
+    for (std::size_t i = 1; i < spec.literals.size(); ++i)
+        chain.push_back(runtime::CommandNode::literal(spec.literals[i]));
+    for (const auto& argument : spec.arguments) {
+        const auto kind = argument.type == Type::Text    ? runtime::ArgumentKind::Text
+                          : argument.type == Type::Int   ? runtime::ArgumentKind::Int
+                          : argument.type == Type::Float ? runtime::ArgumentKind::Float
+                          : argument.type == Type::Bool  ? runtime::ArgumentKind::Bool
+                                                         : runtime::ArgumentKind::Word;
+        chain.push_back(runtime::CommandNode::argument(argument.name, kind, argument.optional)
+                            .range(argument.min, argument.max));
+    }
+    runtime::CommandNode node = std::move(chain.back());
+    node.executes(std::move(executor));
+    chain.pop_back();
+    while (!chain.empty()) {
+        runtime::CommandNode parent = std::move(chain.back());
+        chain.pop_back();
+        parent.then(std::move(node));
+        node = std::move(parent);
+    }
+    return node;
+}
 
 void pushHandle(LuaArgs& lua, std::shared_ptr<std::atomic<bool>> cancelled) {
     lua.pushTable();
@@ -40,6 +68,12 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
     lua.setField("server");
     lua.pushBoolean(false);
     lua.setField("is_console");
+    wire::lua::pushHostFunction(lua, "player.has_permission", [host = plugin.host, name = player.name](LuaArgs& args) {
+        const std::string node = args.checkString(2);
+        args.pushBoolean(host->hooks_.hasPermission && host->hooks_.hasPermission(name, node));
+        return 1;
+    });
+    lua.setField("has_permission");
     // A table that reads and writes this plugin's values for this player in the database.
     PluginHost* host = plugin.host;
     PluginHost::Plugin* self = &plugin;
@@ -267,6 +301,21 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     });
     lua.setGlobal("broadcast");
 
+    wire::lua::pushHostFunction(lua, "has_permission", [server](LuaArgs& args) {
+        std::string who;
+        if (args.isTable(1)) {
+            args.pushField(1, "name");
+            who = args.isString(-1) ? args.toText(-1) : std::string{};
+            args.pop(1);
+        } else {
+            who = args.checkString(1);
+        }
+        const std::string node = args.checkString(2);
+        args.pushBoolean(server->hooks_.hasPermission && server->hooks_.hasPermission(who, node));
+        return 1;
+    });
+    lua.setGlobal("has_permission");
+
     const bool commands = manifest.capabilities.commands;
     wire::lua::pushHostFunction(lua, "run", [server, self, commands](LuaArgs& args) {
         if (!commands)
@@ -398,7 +447,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                            });
         if (!valid)
             return args.fail("command names are 1..32 characters of a-z, 0-9, '_' and '-'");
-        if (std::ranges::find(kBuiltinCommands, root) != kBuiltinCommands.end())
+        if (!server->hooks_.commands && std::ranges::find(kBuiltinCommands, root) != kBuiltinCommands.end())
             return args.fail("'" + root + "' is a command of the proxy itself");
         auto entry = std::make_unique<PluginHost::Entry>();
         entry->plugin = self;
@@ -409,6 +458,20 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         if (std::ranges::any_of(entries,
                                 [&](const auto& other) { return other->spec.literals == entry->spec.literals; }))
             return args.fail("'" + entry->spec.usage() + "' is already registered");
+        if (server->hooks_.commands) {
+            runtime::CommandRegistration registration;
+            registration.root = nodeOf(entry->spec, [server](const runtime::CommandContext& context) {
+                if (context.source().console)
+                    static_cast<void>(server->command(context.line()));
+                else
+                    static_cast<void>(server->playerCommand(context.source().name, context.line()));
+            });
+            registration.permission = entry->spec.permission.value_or(std::string{});
+            registration.description = "Command of the plugin " + self->name + ".";
+            registration.owner = "plugin:" + self->id + "/";
+            if (auto added = server->hooks_.commands->add(std::move(registration)); !added)
+                return args.fail(added.error());
+        }
         entries.push_back(std::move(entry));
         return 0;
     });

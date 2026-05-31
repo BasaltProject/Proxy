@@ -193,7 +193,7 @@ void BedrockSession::commandList(std::span<const std::uint8_t> body) {
             commands.push_back({*node.name, {}});
     }
     if (commands_.specs) {
-        for (const auto& spec : commands_.specs()) {
+        for (const auto& spec : commands_.specs(javaName_)) {
             if (spec.literals.empty() || commands.size() >= kMaxCommands)
                 continue;
             const auto known = [&](const bedrock::CommandInfo& info) { return info.name == spec.literals.front(); };

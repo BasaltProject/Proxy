@@ -33,9 +33,13 @@ public:
 
     struct Commands {
         std::function<bool(std::string_view player, std::string_view command)> run;
-        std::function<std::vector<runtime::PlayerCommandSpec>()> specs;
+        std::function<std::vector<runtime::PlayerCommandSpec>(std::string_view)> specs;
         std::function<bool(std::string_view player, std::string_view backend)> connect;
         std::function<std::vector<std::string>()> servers;
+        /// The same login gate Java players pass; a returned MiniMessage turns the player away.
+        std::function<std::optional<std::string>(std::string_view name, std::string_view uuid,
+                                                 std::string_view address)>
+            login;
     };
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
@@ -47,6 +51,8 @@ public:
     BedrockSession& operator=(const BedrockSession&) = delete;
 
     [[nodiscard]] const std::string& name() const noexcept { return javaName_; }
+
+    [[nodiscard]] bool turnedAway() const noexcept { return turnedAway_; }
 
     void tell(std::string_view miniMessage);
     void kick(std::string_view miniMessage);
@@ -155,6 +161,7 @@ private:
     wire::auth::SessionProfile profile_;
     std::string javaName_;
     std::string javaUuid_;
+    bool turnedAway_ = false;
     bool announced_ = false;
     std::unique_ptr<JavaLink> link_;
     std::vector<std::string> biomeKeys_;

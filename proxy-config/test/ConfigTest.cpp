@@ -102,3 +102,17 @@ secret = 'synthetic-secret'
     CHECK(result->backends[0].protocol == BackendConfig::kClientProtocol);
     CHECK(result->backends[1].protocol == BackendConfig{}.protocol);
 }
+
+TEST_CASE("the shipped groups and commands files parse and keep the default and operator groups") {
+    const auto groups = toml::parse(kGroupsDefaultToml);
+    REQUIRE(groups);
+    const auto parsed = basalt::wire::config::GroupsConfig::parse(*groups, "groups.toml");
+    REQUIRE(parsed);
+    CHECK(parsed->resolve(std::nullopt, "basalt.command.server"));
+    CHECK_FALSE(parsed->resolve(std::nullopt, "basalt.command.ban"));
+    CHECK(parsed->resolve(parsed->operatorGroup().name, "basalt.command.ban"));
+
+    const auto commands = toml::parse(kCommandsDefaultToml);
+    REQUIRE(commands);
+    CHECK(basalt::wire::config::CommandsConfig::parse(*commands, "commands.toml"));
+}

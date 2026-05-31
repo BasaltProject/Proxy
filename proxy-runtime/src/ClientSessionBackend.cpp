@@ -354,7 +354,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     closing_ = true;
     if (id != wire::protocol::login::LoginDisconnectPacket::kId) {
         closeBackends();
-        return queue(unavailable_);
+        return refuseWith("unavailable", "No server is available right now. Please try again shortly.");
     }
     const auto reason = wire::protocol::readString(frame_);
     if (frame_.failed() || frame_.readableBytes() != 0 || !wire::common::parseJson(reason))

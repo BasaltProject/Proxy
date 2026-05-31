@@ -228,6 +228,8 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     plugin->sandbox->refill();
     if (auto ran = plugin->sandbox->run(*chunk); !ran) {
         report("failed while loading: " + ran.error().message);
+        if (hooks_.commands)
+            hooks_.commands->removeOwners("plugin:" + id + "/");
         std::unique_lock lock{commandsMutex_};
         for (auto& [root, entries] : commands_)
             std::erase_if(entries, [&](const auto& entry) { return entry->plugin == plugin.get(); });
@@ -243,6 +245,8 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
 std::size_t PluginHost::reload() {
     std::lock_guard serial{reloadMutex_};
     shutdown();
+    if (hooks_.commands)
+        hooks_.commands->removeOwners("plugin:");
     {
         std::unique_lock lock{commandsMutex_};
         commands_.clear();
@@ -295,27 +299,12 @@ bool PluginHost::playerCommand(std::string_view player, std::string_view line) {
     return true;
 }
 
-std::vector<runtime::PlayerCommandSpec> PluginHost::playerCommandSpecs() const {
-    using Kind = runtime::PlayerCommandSpec::Kind;
-    std::shared_lock lock{commandsMutex_};
-    std::vector<runtime::PlayerCommandSpec> specs;
-    for (const auto& [root, entries] : commands_) {
-        for (const auto& entry : entries) {
-            runtime::PlayerCommandSpec described;
-            described.literals = entry->spec.literals;
-            for (const auto& argument : entry->spec.arguments) {
-                using Type = wire::plugins::CommandArgumentType;
-                const Kind kind = argument.type == Type::Text    ? Kind::kText
-                                  : argument.type == Type::Int   ? Kind::kInt
-                                  : argument.type == Type::Float ? Kind::kFloat
-                                  : argument.type == Type::Bool  ? Kind::kBool
-                                                                 : Kind::kWord;
-                described.arguments.push_back({argument.name, kind, argument.optional, argument.min, argument.max});
-            }
-            specs.push_back(std::move(described));
-        }
-    }
-    return specs;
+std::vector<std::string> PluginHost::names() {
+    std::lock_guard serial{reloadMutex_};
+    std::vector<std::string> result;
+    for (const auto& [id, installed] : installed_)
+        result.push_back(installed.second.name.empty() ? id : installed.second.name);
+    return result;
 }
 
 const PluginHost::Player* PluginHost::findPlayer(std::string_view name) const {
@@ -331,8 +320,7 @@ const PluginHost::Player* PluginHost::findPlayer(std::string_view name) const {
 bool PluginHost::allowed(const Player& player, const std::optional<std::string>& permission) const {
     if (!permission)
         return true;
-    return std::ranges::any_of(settings_.operators,
-                               [&](const std::string& name) { return sameName(name, player.name); });
+    return hooks_.hasPermission && hooks_.hasPermission(player.name, *permission);
 }
 
 void PluginHost::run(std::stop_token stop) {

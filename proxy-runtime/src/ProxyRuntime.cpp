@@ -162,7 +162,8 @@ struct ProxyRuntime::Impl {
                 runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot,
                 runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
                 runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
-                runtime.services.playerLogin, runtime.services.loadingMessage);
+                runtime.services.playerLogin, runtime.services.kickText, runtime.services.commandSuggestions,
+                runtime.services.loadingMessage);
             if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())

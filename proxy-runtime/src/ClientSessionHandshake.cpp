@@ -19,6 +19,19 @@
 namespace basalt::proxy::runtime::detail {
 
 /// Everything a client sends before it has a backend: handshake, login start, encryption response and status.
+bool ClientSession::refuseMiniMessage(std::string_view text) {
+    closing_ = true;
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, wire::protocol::login::LoginDisconnectPacket::kId);
+    wire::protocol::login::LoginDisconnectPacket{wire::text::miniMessage::parse(text.substr(0, 2048))}.write(frame_);
+    return queuePacket(frame_.readable());
+}
+
+bool ClientSession::refuseWith(std::string_view key, std::string_view fallback) {
+    const std::string text = kickText_ ? kickText_(key) : std::string{};
+    return text.empty() ? refuse(fallback) : refuseMiniMessage(text);
+}
+
 bool ClientSession::refuse(std::string_view text) {
     closing_ = true;
     frame_.clear();
@@ -49,7 +62,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     return resolveRoute(hello->protocolVersion, speaksTo(backends_[target], hello->protocolVersion))
                         .has_value();
                 }))
-                return refuse("No server here can take your game version.");
+                return refuseWith("no-compatible-server", "No server here can take your game version.");
             if (hello->protocolVersion != buildInfo::kProtocolVersion) {
                 clientProtocol_ = hello->protocolVersion;
                 auto chain = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
@@ -84,7 +97,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             readDeadline_ = loginDeadline_;
             return true;
         } else if (hello->intent == protocol::handshake::ClientIntent::Login) {
-            return refuse("Your game version is not supported on this network.");
+            return refuseWith("unsupported-version", "Your game version is not supported on this network.");
         } else {
             return false;
         }
@@ -108,7 +121,9 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         if (!online_) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
             if (playerLogin_)
-                playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress());
+                if (const auto turnedAway =
+                        playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
+                    return refuseMiniMessage(*turnedAway);
             return route();
         }
         if (settings_.sessionBufferBytes < kBufferBytes + kAuthenticationBytes || publicKey_.empty() ||

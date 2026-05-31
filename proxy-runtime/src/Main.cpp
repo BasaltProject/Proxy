@@ -1,8 +1,14 @@
 #include "BackendRoutes.hpp"
 #include "BedrockStatus.hpp"
+#include "AccessControl.hpp"
+#include "BuiltinCommands.hpp"
+#include "CommandService.hpp"
 #include "Console.hpp"
 #include "ForwardingKey.hpp"
+#include "Messages.hpp"
 #include "NativeForwarding.hpp"
+#include "OnlineRoster.hpp"
+#include "PermissionService.hpp"
 #include "PlayerDirectory.hpp"
 #include "ServerListService.hpp"
 #include "UiService.hpp"
@@ -10,6 +16,7 @@
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
+#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
@@ -17,6 +24,7 @@
 #include <basalt/wire/common/logging/LogOutput.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/common/logging/Panic.hpp>
+#include <basalt/wire/config/BasicPlaceholders.hpp>
 #include <basalt/wire/io/LogFile.hpp>
 #include <basalt/wire/io/Platform.hpp>
 
@@ -99,6 +107,7 @@ int run(const cliCommand::Run& command) {
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
+    std::atomic<ProxyRuntime*> runtimeRef{nullptr};
     auto players = detail::PlayerDirectory::open(".basalt/players.db");
     if (!players) {
         logger.error([&players] { return players.error(); });
@@ -117,20 +126,89 @@ int run(const cliCommand::Run& command) {
         return 1;
     }
     (*serverList)->setLoading(true);
+    auto groups = proxy::config::loadGroups(command.configDirectory);
+    auto commandsConfig = proxy::config::loadCommands(command.configDirectory);
+    auto messageSet = proxy::config::loadMessages(command.configDirectory);
+    for (const std::string* problem : {groups ? nullptr : &groups.error(), commandsConfig ? nullptr : &commandsConfig.error(),
+                                       messageSet ? nullptr : &messageSet.error()}) {
+        if (problem != nullptr) {
+            logger.error([problem] { return *problem; });
+            return 1;
+        }
+    }
+    detail::OnlineRoster roster;
+    detail::PermissionService permissions{**players, std::move(*groups)};
+    detail::Messages messages{
+        std::move(*messageSet),
+        wire::config::BasicFacts{
+            .versionName = std::string{buildInfo::kMinecraftVersion},
+            .protocolVersion = buildInfo::kProtocolVersion,
+            .online = [&runtimeRef]() -> std::int32_t {
+                auto* live = runtimeRef.load(std::memory_order_acquire);
+                return live != nullptr ? static_cast<std::int32_t>(live->sessionCount()) : 0;
+            },
+            .maxPlayers = [slots = static_cast<std::int32_t>(configuration->runtime.maxSessions)] { return slots; }}};
+    detail::AccessControl access{**players, permissions, messages, configuration->access.whitelist};
+    std::atomic<bool> enforceWhitelist{configuration->access.enforceWhitelist};
+    bool whitelistSetting = configuration->access.whitelist;
+    const auto tellPlayer = [&runtimeRef, &bedrockPlayers](std::string_view player, std::string_view text) {
+        if (auto* live = runtimeRef.load(std::memory_order_acquire))
+            static_cast<void>(live->tellPlayer(player, text));
+        if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
+            bedrockSide->tell(player, text);
+    };
+    const auto kickPlayer = [&runtimeRef, &bedrockPlayers](std::string_view player, std::string_view reason) {
+        if (auto* live = runtimeRef.load(std::memory_order_acquire))
+            static_cast<void>(live->kickPlayer(player, reason));
+        if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
+            bedrockSide->kick(player, reason);
+    };
+    const auto backendNames = [&runtimeRef]() -> std::vector<std::string> {
+        auto* live = runtimeRef.load(std::memory_order_acquire);
+        return live != nullptr ? live->backendNames() : std::vector<std::string>{};
+    };
+    CommandDispatcher dispatcher{
+        [&permissions](const CommandSource& source, std::string_view node) { return permissions.has(source, node); },
+        CommandSuggestions{[&roster] {
+                               std::vector<std::string> names;
+                               for (const auto& entry : roster.all())
+                                   names.push_back(entry.name);
+                               return names;
+                           },
+                           backendNames, [&permissions] { return permissions.groupNames(); }}};
+    dispatcher.renderCustomWith([&messages](std::string_view text) { return messages.fill(text); });
+    dispatcher.configure(std::make_shared<const wire::config::CommandsConfig>(std::move(*commandsConfig)));
+    detail::CommandService commandService{dispatcher, messages};
+    const wire::common::Logger consoleLogger{"Console"};
+    const CommandSource consoleSource{"CONSOLE", true, [&consoleLogger](std::string_view miniMessage) {
+                                          consoleLogger.info([&] { return detail::Messages::plain(miniMessage); });
+                                      }};
+    const auto playerSource = [&tellPlayer](std::string_view name) {
+        return CommandSource{std::string{name}, false,
+                             [&tellPlayer, player = std::string{name}](std::string_view text) { tellPlayer(player, text); }};
+    };
+    std::stop_source stopping;
     RuntimeServices services;
     services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
         return (*serverList)->statusFor(protocol, host, address);
     };
-    const auto playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
-        auto* host = pluginHost.load(std::memory_order_acquire);
-        return host != nullptr ? host->playerCommandSpecs() : std::vector<PlayerCommandSpec>{};
+    const auto playerCommandSpecs = [&dispatcher, playerSource](std::string_view player) {
+        return dispatcher.specs(playerSource(player));
     };
-    const auto playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
-        auto* host = pluginHost.load(std::memory_order_acquire);
-        return host != nullptr && host->playerCommand(player, command);
+    const auto playerCommand = [&commandService, playerSource](std::string_view player, std::string_view line) {
+        return commandService.submit(playerSource(player), std::string{line});
     };
     services.playerCommandSpecs = playerCommandSpecs;
     services.playerCommand = playerCommand;
+    services.commandSuggestions = [&dispatcher, playerSource](std::string_view player,
+                                                              std::string_view line)
+        -> std::optional<std::vector<std::string>> {
+        const CommandSource source = playerSource(player);
+        if (!dispatcher.available(source, line))
+            return std::nullopt;
+        return dispatcher.suggest(source, line);
+    };
+    services.kickText = [&messages](std::string_view key) { return messages.kick(key); };
     services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kChat, std::string{player}, {}, {}, std::string{message}});
@@ -143,12 +221,21 @@ int run(const cliCommand::Run& command) {
         if (auto* host_ = pluginHost.load(std::memory_order_acquire))
             host_->post({PlayerEventKind::kPing, {}, std::string{host}, {}, std::to_string(protocol)});
     };
-    services.playerLogin = [&pluginHost, &players, &serverList](std::string_view player, std::string_view uuid,
-                                                                std::string_view address) {
-        (*players)->recordLogin(uuid, player, (*serverList)->rememberIp() ? std::optional{address} : std::nullopt);
+    const auto loginGate = [&](std::string_view player, std::string_view uuid,
+                               std::string_view address) -> std::optional<std::string> {
+        (*players)->post([&players, &permissions, &serverList, player = std::string{player}, uuid = std::string{uuid},
+                          address = std::string{address}] {
+            (*players)->recordLogin(uuid, player, (*serverList)->rememberIp() ? std::optional<std::string_view>{address}
+                                                                              : std::nullopt);
+            permissions.onLogin(uuid, player);
+        });
+        if (auto turnedAway = access.check(player, uuid, address))
+            return turnedAway;
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLogin, std::string{player}, {}, std::string{uuid}, {}});
+        return std::nullopt;
     };
+    services.playerLogin = loginGate;
     services.uiConfigs = [&ui] { return (*ui)->panels(); };
     services.placeholders = &(*serverList)->placeholders();
     services.loadingMessage = [&serverList]() -> std::optional<std::string> {
@@ -156,7 +243,8 @@ int run(const cliCommand::Run& command) {
             return std::string{"<red>The proxy is loading, please wait</red>"};
         return std::nullopt;
     };
-    services.playerEvents = [&pluginHost, &serverList](PlayerEvent event) {
+    services.playerEvents = [&pluginHost, &roster, &serverList](PlayerEvent event) {
+        roster.apply(event);
         if (event.kind == PlayerEventKind::kJoin)
             (*serverList)->playerJoined(event.uuid, event.player);
         else if (event.kind == PlayerEventKind::kLeave)
@@ -184,26 +272,90 @@ int run(const cliCommand::Run& command) {
             return "Reload rejected, nothing changed: " + checked.error();
         if (auto checked = proxy::config::loadUi(command.configDirectory); !checked)
             return "Reload rejected, nothing changed: " + checked.error();
+        auto freshGroups = proxy::config::loadGroups(command.configDirectory);
+        if (!freshGroups)
+            return "Reload rejected, nothing changed: " + freshGroups.error();
+        auto freshCommands = proxy::config::loadCommands(command.configDirectory);
+        if (!freshCommands)
+            return "Reload rejected, nothing changed: " + freshCommands.error();
+        auto freshMessages = proxy::config::loadMessages(command.configDirectory);
+        if (!freshMessages)
+            return "Reload rejected, nothing changed: " + freshMessages.error();
         if (auto listed = (*serverList)->reload(); !listed)
             return "Reload rejected, nothing changed: " + listed.error();
         if (auto drawn = (*ui)->reload(); !drawn)
             return "Reload rejected, nothing changed: " + drawn.error();
+        const auto freshAccess = fresh->access;
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
             return "Reload rejected, nothing changed: " + applied.error();
+        permissions.reload(std::move(*freshGroups));
+        dispatcher.configure(std::make_shared<const wire::config::CommandsConfig>(std::move(*freshCommands)));
+        messages.reload(std::move(*freshMessages));
+        enforceWhitelist.store(freshAccess.enforceWhitelist, std::memory_order_relaxed);
+        if (freshAccess.whitelist != whitelistSetting) {
+            whitelistSetting = freshAccess.whitelist;
+            access.setWhitelist(freshAccess.whitelist);
+        }
         std::string message =
             "Reloaded " + std::to_string(*applied) + " backend(s); sessions in progress keep their snapshot.";
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             message += " Reloaded " + std::to_string(host->reload()) + " plugin(s).";
         return message;
     };
+    detail::CommandEnvironment environment;
+    environment.players = players->get();
+    environment.permissions = &permissions;
+    environment.access = &access;
+    environment.roster = &roster;
+    environment.messages = &messages;
+    environment.dispatcher = &dispatcher;
+    environment.onlineMode = configuration->network.onlineMode;
+    environment.servers = backendNames;
+    environment.send = [&runtime, &bedrockPlayers](std::string_view player, std::string_view backend) {
+        auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire);
+        if (bedrockSide != nullptr && bedrockSide->connect(player, backend))
+            return detail::SendResult::kAccepted;
+        auto request = runtime->sendPlayer(player, backend);
+        if (!request)
+            return request.error() == BackendChangeError::kBusy ? detail::SendResult::kBusy
+                                                                : detail::SendResult::kNotFound;
+        for (int waited = 0; waited < 200; ++waited) {
+            if (const auto result = request->result()) {
+                switch (*result) {
+                case BackendChangeResult::kAccepted:
+                    return detail::SendResult::kAccepted;
+                case BackendChangeResult::kPlayerNotFound:
+                    return detail::SendResult::kNotFound;
+                case BackendChangeResult::kUnavailable:
+                    return detail::SendResult::kUnavailable;
+                case BackendChangeResult::kStopped:
+                    return detail::SendResult::kStopped;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{25});
+        }
+        return detail::SendResult::kBusy;
+    };
+    environment.kick = kickPlayer;
+    environment.reload = reloadConfiguration;
+    environment.status = [&runtime, &bedrockPlayers] {
+        auto* side = bedrockPlayers.load(std::memory_order_acquire);
+        return detail::statusText(*runtime, side != nullptr ? std::optional{side->playingCount()} : std::nullopt);
+    };
+    environment.stop = [&stopping] { stopping.request_stop(); };
+    environment.plugins = [&pluginHost] {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr ? host->names() : std::vector<std::string>{};
+    };
+    environment.enforceWhitelist = [&enforceWhitelist] { return enforceWhitelist.load(std::memory_order_relaxed); };
+    detail::registerBuiltinCommands(environment);
     std::unique_ptr<proxy::plugins::PluginHost> plugins;
     if (configuration->plugins.enabled) {
         proxy::plugins::PluginSettings settings;
         settings.directory = configuration->plugins.directory;
         settings.database = configuration->plugins.database;
         settings.allow = configuration->plugins.allow;
-        settings.operators = configuration->plugins.operators;
         settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
         settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
         settings.queueSize = configuration->plugins.queueSize;
@@ -215,19 +367,14 @@ int run(const cliCommand::Run& command) {
                 return true;
             return runtime->sendPlayer(player, backend).has_value();
         };
-        hooks.tell = [&runtime, &bedrockPlayers](std::string_view player, std::string_view text) {
-            static_cast<void>(runtime->tellPlayer(player, text));
-            if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
-                bedrockSide->tell(player, text);
+        hooks.tell = tellPlayer;
+        hooks.kick = kickPlayer;
+        hooks.console = [&commandService, &consoleSource](std::string_view line) {
+            return commandService.submit(consoleSource, std::string{line});
         };
-        hooks.kick = [&runtime, &bedrockPlayers](std::string_view player, std::string_view reason) {
-            static_cast<void>(runtime->kickPlayer(player, reason));
-            if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
-                bedrockSide->kick(player, reason);
-        };
-        hooks.console = [&pluginHost](std::string_view line) {
-            auto* host = pluginHost.load(std::memory_order_acquire);
-            return host != nullptr && host->command(line);
+        hooks.commands = &dispatcher;
+        hooks.hasPermission = [&permissions](std::string_view player, std::string_view node) {
+            return permissions.hasPlayer(player, node);
         };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
@@ -241,7 +388,6 @@ int run(const cliCommand::Run& command) {
         pluginHost.store(plugins.get(), std::memory_order_release);
         logger.info([&plugins] { return "Loaded " + std::to_string(plugins->loaded()) + " plugin(s)."; });
     }
-    std::stop_source stopping;
 #if !defined(_WIN32)
     const auto oldReload = std::signal(SIGHUP, reloadSignal);
 #endif
@@ -332,7 +478,8 @@ int run(const cliCommand::Run& command) {
                     return std::nullopt;
                 return configuration->backends[defaults.front()];
             },
-            [&pluginHost](PlayerEvent event) {
+            [&pluginHost, &roster](PlayerEvent event) {
+                roster.apply(event);
                 if (auto* host = pluginHost.load(std::memory_order_acquire))
                     host->post(std::move(event));
             },
@@ -350,7 +497,8 @@ int run(const cliCommand::Run& command) {
                                                  for (const auto& backend : configuration->backends)
                                                      names.push_back(backend.name);
                                                  return names;
-                                             }});
+                                             },
+                                             loginGate});
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
@@ -365,22 +513,8 @@ int run(const cliCommand::Run& command) {
         updateChecker = std::jthread{
             [&logger](std::stop_token stop) { updateChecker::checkAndAnnounce(buildInfo::kVersion, logger, stop); }};
     }
-    std::jthread console{[&](std::stop_token stop) {
-        detail::runConsole(
-            *runtime, configuration->backends, stopping, stop, reloadConfiguration,
-            [&pluginHost](std::string_view line) {
-                auto* host = pluginHost.load(std::memory_order_acquire);
-                return host != nullptr && host->command(line);
-            },
-            detail::BedrockConsole{[&bedrockPlayers]() -> std::size_t {
-                                       auto* side = bedrockPlayers.load(std::memory_order_acquire);
-                                       return side != nullptr ? side->playingCount() : 0;
-                                   },
-                                   [&bedrockPlayers](std::string_view player, std::string_view backend) {
-                                       auto* side = bedrockPlayers.load(std::memory_order_acquire);
-                                       return side != nullptr && side->connect(player, backend);
-                                   }});
-    }};
+    std::jthread console{
+        [&](std::stop_token stop) { detail::runConsole(commandService, dispatcher, stop); }};
     (*serverList)->setLoading(false);
     const auto result = runtime->run(stopping.get_token());
     if (updateChecker.joinable()) {

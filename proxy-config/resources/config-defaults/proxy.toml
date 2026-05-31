@@ -82,3 +82,10 @@ interval-ms = 2000
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.
 mode = "auto"
+
+[access]
+# Only let players on the whitelist connect. Who is on it is state, not configuration: it lives in .basalt/players.db and
+# is edited with /whitelist add and /whitelist remove. /whitelist on and off move this for the run; a restart follows this file.
+whitelist = false
+# Kick the players already online who are not on the whitelist whenever it is switched on or a name leaves it.
+enforce-whitelist = false
