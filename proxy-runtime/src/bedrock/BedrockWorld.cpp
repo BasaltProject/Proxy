@@ -9,6 +9,7 @@
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
 #include <basalt/wire/bedrock/BedrockJavaBlockEntities.hpp>
+#include <basalt/wire/bedrock/BedrockMapConversion.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
@@ -165,6 +166,18 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
     out.writeBytes(column);
     sendBedrock(BedrockPacket::LevelChunk, out);
     chunks_++;
+}
+
+void BedrockSession::mapChanged(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::MapItemDataPacket::read(in);
+    if (!packet)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeMapItemData(out, bedrock::bedrockMapOf(*packet, static_cast<std::uint8_t>(dimension_)),
+                              connection_.protocolVersion());
+    sendBedrock(BedrockPacket::ClientboundMapItemData, out);
 }
 
 void BedrockSession::teleported(std::span<const std::uint8_t> body) {

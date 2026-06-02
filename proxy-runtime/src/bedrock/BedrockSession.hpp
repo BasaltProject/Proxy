@@ -120,6 +120,7 @@ private:
     void rejectStackRequest(std::int32_t requestId);
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
+    void mapChanged(std::span<const std::uint8_t> body);
     void blockChanged(std::span<const std::uint8_t> body);
     void sectionChanged(std::span<const std::uint8_t> body);
     void batchFinished();

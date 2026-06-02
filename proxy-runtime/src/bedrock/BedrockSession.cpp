@@ -23,6 +23,7 @@
 #include <basalt/wire/protocol/play/HudPackets.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/protocol/play/ItemIds.hpp>
+#include <basalt/wire/protocol/play/MapPackets.hpp>
 #include <basalt/wire/protocol/play/PalettedContainer.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/PlayerStatePackets.hpp>
@@ -293,6 +294,8 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         screenOpened(body);
     else if (id == play::ContainerClosePacket::kClientboundId)
         screenClosed(body);
+    else if (id == play::MapItemDataPacket::kId)
+        mapChanged(body);
     else if (id == play::ClientboundBlockUpdatePacket::kId)
         blockChanged(body);
     else if (id == play::SectionBlocksUpdatePacket::kId)
