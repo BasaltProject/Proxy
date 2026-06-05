@@ -114,7 +114,9 @@ bool ClientSession::acknowledgePreparedChange() {
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::configuration::BrandPacket::kId);
     wire::protocol::writeString(frame_, wire::protocol::configuration::BrandPacket::kChannel);
-    wire::protocol::writeString(frame_, "Basalt Proxy");
+    wire::protocol::writeString(frame_, access_.settings && !access_.settings->general.brand.empty()
+                                            ? access_.settings->general.brand
+                                            : "Basalt Proxy");
     if (!queuePacket(frame_.readable()))
         return false;
     frame_.clear();

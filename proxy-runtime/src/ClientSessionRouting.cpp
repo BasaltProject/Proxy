@@ -147,7 +147,7 @@ bool ClientSession::dial() {
     dialAttempt_.reset();
     if (!profile_ ||
         !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_, virtualPort_,
-                                  connection_.remoteAddress(), connection_.remotePort(), nativeForwarding_, speaks)) {
+                                  clientAddress(), clientPort(), nativeForwarding_, speaks)) {
         if (recovering_)
             return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {

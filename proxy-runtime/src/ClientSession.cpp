@@ -3,6 +3,7 @@
 #include "BackendDial.hpp"
 #include "BackendLogin.hpp"
 #include "BackendRoutes.hpp"
+#include "Kicks.hpp"
 #include "LoginShapes.hpp"
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
@@ -14,6 +15,7 @@
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
+#include <basalt/wire/io/ProxyProtocol.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -34,6 +36,7 @@
 #include <utility>
 
 namespace basalt::proxy::runtime::detail {
+namespace proxyProtocol = wire::io::proxyProtocol;
 namespace {
 constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
 constexpr std::size_t kClientSettingsPacketLimit = 96;
@@ -58,7 +61,8 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
                              std::function<std::string(std::string_view)> kickText,
                              std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
-                             std::function<std::optional<std::string>()> loadingMessage)
+                             std::function<std::optional<std::string>()> loadingMessage,
+                             ClientAccess access)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
       playerLogin_(std::move(playerLogin)), kickText_(std::move(kickText)), loadingMessage_(std::move(loadingMessage)),
@@ -72,8 +76,16 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
       authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
       uiFrame_(0, memory_), clientSettings_(0, memory_), idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_),
       frame_(0, memory_), output_(0, memory_),
-      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
+      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}),
+      access_(std::move(access)) {
     buffers.reset();
+    if (access_.policy) {
+        limiter_ = wire::protocol::PacketLimiter{access_.settings->packetLimits};
+        chatSpam_.configure(access_.settings->limits.chatSpamThresholdSeconds);
+        commandSpam_.configure(access_.settings->limits.commandSpamThresholdSeconds);
+        if (access_.awaitHeader)
+            state_ = State::kProxyHeader;
+    }
     allocationReady_ =
         input_.tryReserve(kBufferCapacity) && frame_.tryReserve(kBufferCapacity) && output_.tryReserve(kBufferCapacity);
 }
@@ -123,7 +135,7 @@ ClientSession::Clock::time_point ClientSession::baseDeadline() const {
         result = std::min(result, connectDeadline_);
     if (!closing_ && recovering_)
         result = std::min(result, loginDeadline_);
-    return closing_ ? result : std::min(result, backendDeadline());
+    return closing_ ? result : std::min({result, backendDeadline(), joinRetryAt_});
 }
 
 wire::io::IoInterest ClientSession::interest() const {
@@ -233,7 +245,13 @@ bool ClientSession::packet() {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend() || id < 0 || (state_ == State::kConfiguration && id == kConfigurationAcknowledgedId))
             return false;
+        if (access_.policy && limiter_.active())
+            if (const auto handled = limited(id))
+                return *handled;
         const bool shaped = !legacyRaw_;
+        if (shaped && state_ == State::kPlay && access_.policy && profile_)
+            if (const auto handled = screenChat(id))
+                return *handled;
         if (shaped && state_ == State::kPlay && playerCommand_ && profile_ &&
             (id == protocol::play::ChatCommandPacket::kId || id == protocol::play::SignedChatCommandPacket::kId)) {
             wire::io::ByteBuffer view;
@@ -333,6 +351,17 @@ bool ClientSession::packet() {
 bool ClientSession::decode() {
     while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && state_ != State::Authenticating &&
            state_ != State::kBackendLogin) {
+        if (state_ == State::kProxyHeader) {
+            const auto header = proxyProtocol::parse(input_.readable());
+            if (header.status == proxyProtocol::Status::kNeedMore)
+                break;
+            if (header.status == proxyProtocol::Status::kInvalid)
+                return false;
+            input_.skip(header.consumed);
+            if (!acceptOrigin(header.address, header.port))
+                return false;
+            continue;
+        }
         const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
         const auto hint = wire::protocol::packetFraming::inspectFrame(
             input_.readable(), compression_.has_value(),
@@ -456,7 +485,7 @@ bool ClientSession::authenticated(
             if (const auto turnedAway =
                     playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
                 return refuseMiniMessage(*turnedAway);
-        return route();
+        return beginJoin();
     }
     closing_ = true;
     return refuseWith("login-failed", "Login could not be completed.");
@@ -469,6 +498,8 @@ bool ClientSession::timedOut(Clock::time_point now) {
         uiTick(now);
         return true;
     }
+    if (!closing_ && joinRetryAt_ != Clock::time_point::max() && now >= joinRetryAt_)
+        return beginJoin();
     if (!closing_ &&
         (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting) &&
         now >= connectDeadline_ && now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ &&
@@ -493,6 +524,67 @@ bool ClientSession::timedOut(Clock::time_point now) {
         return true;
     }
     return false;
+}
+
+} // namespace basalt::proxy::runtime::detail
+
+namespace basalt::proxy::runtime::detail {
+
+const std::string& ClientSession::clientAddress() const {
+    return originAddress_.empty() ? connection_.remoteAddress() : originAddress_;
+}
+
+std::uint16_t ClientSession::clientPort() const {
+    return originAddress_.empty() ? connection_.remotePort() : originPort_;
+}
+
+bool ClientSession::acceptOrigin(std::string_view address, std::uint16_t port) {
+    auto& policy = *access_.policy;
+    if (!address.empty()) {
+        originAddress_ = address;
+        originPort_ = port;
+    }
+    if (policy.admission.attempt(clientAddress(), Clock::now()) != AdmissionResult::Accepted)
+        return false;
+    access_.slot = policy.gate.open(clientAddress(), access_.settings->network.maxConnectionsPerAddress);
+    if (!access_.slot)
+        return false;
+    state_ = State::Handshake;
+    return true;
+}
+
+bool ClientSession::beginJoin() {
+    if (!access_.policy)
+        return route();
+    const auto wait = access_.policy->gate.joinWait(access_.settings->network.maxJoinsPerTick, Clock::now());
+    joinRetryAt_ = wait.value_or(Clock::time_point::max());
+    if (!wait)
+        return route();
+    state_ = State::kBackendLogin;
+    return true;
+}
+
+bool ClientSession::kickClient(std::string_view text) {
+    if (!inPlay())
+        return false;
+    kick(text);
+    return true;
+}
+
+std::optional<bool> ClientSession::limited(std::int32_t id) {
+    using Verdict = wire::protocol::PacketLimiter::Verdict;
+    const auto phase =
+        state_ == State::kPlay ? wire::protocol::packetNames::Phase::kPlay
+                               : wire::protocol::packetNames::Phase::kConfiguration;
+    switch (limiter_.receive(phase, legacyRaw_ ? -1 : id, Clock::now())) {
+    case Verdict::kAllow:
+        break;
+    case Verdict::kDrop:
+        return true;
+    case Verdict::kKick:
+        return kickClient(kicks::kPacketRate);
+    }
+    return std::nullopt;
 }
 
 } // namespace basalt::proxy::runtime::detail

@@ -12,12 +12,14 @@ namespace toml = basalt::wire::common::toml;
 
 namespace {
 std::expected<ProxyConfig, std::string> decode(std::string_view proxy,
-                                               std::string_view backends = kBackendsDefaultToml) {
+                                               std::string_view backends = kBackendsDefaultToml,
+                                               std::string_view limits = kLimitsDefaultToml) {
     auto p = toml::parse(proxy);
     auto b = toml::parse(backends);
-    if (!p || !b)
+    auto l = toml::parse(limits);
+    if (!p || !b || !l)
         return std::unexpected("synthetic fixture did not parse");
-    return fromToml(*p, *b, "config");
+    return fromToml(*p, *b, "config", nullptr, &*l);
 }
 } // namespace
 
@@ -48,7 +50,9 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
           "[network]\nonline_mod = false", "[runtime]\nio-loops = 0", "[runtime]\nworkers = 65",
           "[runtime]\nmax-buffered-bytes = 4096", "[runtime]\nlow-water-bytes = 4194304",
           "[runtime]\nlogin-timeout-ms = 0", "[runtime]\nupdate-checker = 'false'", "[admission]\nmax-origins = -1",
-          "[translation]\nmode = 'server'", "network = false"}) {
+          "[translation]\nmode = 'server'", "network = false", "[network]\nproxy-protocol = true",
+          "[network]\nproxy-protocol-trusted = ['not an address']", "[general]\nusername-pattern = '['",
+          "[query]\nport = 0"}) {
         CAPTURE(document);
         const auto result = decode(document);
         REQUIRE_FALSE(result);
@@ -116,3 +120,4 @@ TEST_CASE("the shipped groups and commands files parse and keep the default and 
     REQUIRE(commands);
     CHECK(basalt::wire::config::CommandsConfig::parse(*commands, "commands.toml"));
 }
+

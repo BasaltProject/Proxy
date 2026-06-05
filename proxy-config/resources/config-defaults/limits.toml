@@ -1,0 +1,31 @@
+# Limits: how much one connection may do before the proxy steps in. Everything here ships at
+# vanilla's value, so a fresh file changes nothing; tighten it on a network that is attacked or
+# has players you do not trust. These apply to a player's connection once it is in the configuration or play phase;
+# the handshake and login phases are bounded by the deadlines and admission settings in proxy.toml.
+
+[packets]
+# Kick a player who sends more than this many packets per second on average, as vanilla's rate-limit does.
+# 0 turns it off. A normal client sends well under 100 a second, so 500 is a sensible cap.
+rate-limit = 0
+
+# Limits for one kind of packet a client sends, written as the packet's name ("serverbound.chat_command",
+# "serverbound.command_suggestion_request" or "serverbound.place_recipe"; "serverbound.play.keep_alive" when the name
+# is also used by the configuration phase) and the most packets of it allowed per second. Past the cap, the ones in
+# [packets.drop] are ignored and the ones in [packets.kick] disconnect the player. The names are those of the
+# current protocol, whatever version the player's client speaks. NO VANILLA: vanilla has no such limits.
+[packets.drop]
+# "serverbound.command_suggestion_request" = 20
+
+[packets.kick]
+# "serverbound.place_recipe" = 200
+
+[spam]
+# Seconds of chat, or of commands, a player may send at the pace of one message a second before being
+# kicked for spamming, as vanilla's chat-spam-threshold-seconds and command-spam-threshold-seconds do.
+# Operators (the ones listed in plugins.toml) are never kicked. 0 turns the kick off.
+chat-threshold-seconds = 10
+command-threshold-seconds = 10
+
+# Commands that do not count toward the command spam limit, by name without the slash, as Spigot's
+# spam-exclusions does. NO VANILLA: vanilla counts every command.
+excluded-commands = []

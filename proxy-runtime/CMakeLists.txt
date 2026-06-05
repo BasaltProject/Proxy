@@ -11,7 +11,9 @@ basalt_module(proxy-runtime-core
         src/Messages.cpp
         src/OnlineRoster.cpp
         src/PermissionService.cpp
+        src/AccessPolicy.cpp
         src/Admission.cpp
+        src/QueryServer.cpp
         src/BedrockStatus.cpp
         src/bedrock/BedrockLanguage.cpp
         src/bedrock/JavaLink.cpp
@@ -108,6 +110,11 @@ basalt_test(proxy-runtime-network-test
     SOURCES
         test/NetworkTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-protocol
+)
+
+basalt_test(proxy-runtime-access-test
+    SOURCES test/AccessTest.cpp
+    DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
 )
 
 basalt_test(proxy-runtime-admission-test

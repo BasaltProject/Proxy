@@ -13,6 +13,54 @@ prevent-client-proxy-connections = false
 # -1 disables client compression; 0 compresses every packet.
 compression-threshold = 256
 
+# Expect a HAProxy PROXY protocol header (v1 or v2) at the start of every connection that comes from an address in
+# proxy-protocol-trusted, and take the player's address from it. Turn it on only behind a load balancer or hosting
+# panel that sends one. Connections from any other address are treated as ordinary ones and their header is never
+# believed, so a player cannot forge an address.
+proxy-protocol = false
+# The load balancers allowed to send a PROXY header: IP addresses or CIDR ranges, IPv4 or IPv6.
+# Must not be empty when proxy-protocol is on.
+# proxy-protocol-trusted = ["10.0.0.5", "192.168.0.0/24"]
+proxy-protocol-trusted = []
+
+# Milliseconds a player's address must wait between two login attempts (the CraftBukkit connection-throttle,
+# which ships as 4000). 0 turns it off. Loopback is never throttled, and neither are server list pings.
+# NO VANILLA: vanilla has no throttle.
+connection-throttle-ms = 0
+
+# Most connections open at once from one address, pings included. 0 means no limit. NO VANILLA.
+max-connections-per-address = 0
+
+# Most players let through the final step of logging in each tick (50 ms); the rest wait for the next one. Paper's
+# max-joins-per-tick (which ships as 5). 0 means no limit. NO VANILLA.
+max-joins-per-tick = 0
+
+[general]
+# Name sent to a player's client as the server brand (the F3 screen) when a backend switch rebuilds its
+# configuration. Empty sends "Basalt Proxy".
+brand = ""
+
+# Console commands to run once the proxy is listening, in order, each time it starts.
+# startup-commands = ["list"]
+startup-commands = []
+
+# A regular expression (ECMAScript) every player name must match to log in, on top of vanilla's own rule that a
+# name has at most 16 characters between "!" and "~". Empty applies only the vanilla rule. NO VANILLA when set.
+# username-pattern = "^[A-Za-z0-9_]+$"
+username-pattern = ""
+
+# Require signed chat from every player, as vanilla's enforce-secure-profile does, and say so in the server list.
+# Only takes effect in online mode: a chat message without a signature then disconnects the player.
+enforce-secure-profile = true
+
+[query]
+# Answer GameSpy 4 status queries over UDP, as vanilla's enable-query does, only for the server list sites and
+# monitoring tools that still speak it. IPv4 only. Off by default.
+enabled = false
+
+# UDP port the query listens on, vanilla's query.port. It may share the number of the Java port: one is TCP, the other UDP.
+port = 25565
+
 [runtime]
 # Session owners and a separate bounded pool for DNS, authentication and other slow work.
 io-loops = 2

@@ -11,7 +11,7 @@ wire::config::ConfigDirectory configDirectory(std::string_view directory) {
         wire::config::UpgradeRules{.version = "26.3",
                                    .files = {{"proxy.toml",
                                               {"network", "runtime", "admission", "forwarding", "logging", "bedrock",
-                                               "reload", "translation", "access"}}}}};
+                                               "reload", "translation", "access", "general", "query"}}}}};
 }
 
 std::expected<wire::config::GroupsConfig, std::string> loadGroups(std::string_view directory) {

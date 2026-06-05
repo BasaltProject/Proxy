@@ -70,6 +70,28 @@ struct Reader {
         }
     }
 
+    void stringList(const TomlTable* table, std::string_view key, std::vector<std::string>& destination,
+                    std::string_view prefix) {
+        const auto* value = table ? table->find(key) : nullptr;
+        if (!value)
+            return;
+        const auto* list = value->get<std::vector<TomlValue>>();
+        if (!list || list->size() > 1024) {
+            fail(std::string{prefix} + std::string{key}, "must be an array of at most 1024 strings");
+            return;
+        }
+        std::vector<std::string> result;
+        for (const auto& element : *list) {
+            const auto* text = element.get<std::string>();
+            if (!text || text->empty() || text->size() > 4096) {
+                fail(std::string{prefix} + std::string{key}, "must contain only nonempty strings");
+                return;
+            }
+            result.push_back(*text);
+        }
+        destination = std::move(result);
+    }
+
     std::vector<std::string> strings(const TomlValue* value, std::string_view field) {
         std::vector<std::string> result;
         const auto* list = value ? value->get<std::vector<TomlValue>>() : nullptr;

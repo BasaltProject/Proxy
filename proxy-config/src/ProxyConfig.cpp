@@ -1,21 +1,30 @@
 #include "ConfigReader.hpp"
 
+#include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <regex>
+
 namespace basalt::proxy::config {
 
 std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& backends,
-                                                 std::string_view directory, const detail::TomlTable* pluginsTable) {
+                                                 std::string_view directory, const detail::TomlTable* pluginsTable,
+                                                 const detail::TomlTable* limitsTable) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy,
-                {"network", "runtime", "admission", "forwarding", "logging", "bedrock", "reload", "translation", "access"}, "");
+                {"network", "general", "query", "runtime", "admission", "forwarding", "logging", "bedrock", "reload",
+                 "translation", "access"},
+                "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
                 {"bind", "port", "dual-stack", "online-mode", "accept-transfers", "prevent-client-proxy-connections",
-                 "compression-threshold"},
+                 "compression-threshold", "proxy-protocol", "proxy-protocol-trusted", "connection-throttle-ms",
+                 "max-connections-per-address", "max-joins-per-tick"},
                 "network.");
     reader.scalar(network, "bind", result.network.bind, "network.");
     reader.integer(network, "port", result.network.port, 1, 65535, "network.");
@@ -26,10 +35,42 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                   "network.");
     reader.integer(network, "compression-threshold", result.network.compressionThreshold, -1, 8 * 1024 * 1024,
                    "network.");
+    reader.scalar(network, "proxy-protocol", result.network.proxyProtocol, "network.");
+    reader.stringList(network, "proxy-protocol-trusted", result.network.proxyProtocolTrusted, "network.");
+    reader.integer(network, "connection-throttle-ms", result.network.connectionThrottleMs, 0, 3600000, "network.");
+    reader.integer(network, "max-connections-per-address", result.network.maxConnectionsPerAddress, 0, 65536,
+                   "network.");
+    reader.integer(network, "max-joins-per-tick", result.network.maxJoinsPerTick, 0, 65536, "network.");
+    for (const auto& entry : result.network.proxyProtocolTrusted)
+        if (!AddressRange::parse(entry))
+            reader.fail("network.proxy-protocol-trusted", "entry '" + entry + "' is not an IP address or CIDR range");
+    if (result.network.proxyProtocol && result.network.proxyProtocolTrusted.empty())
+        reader.fail("network.proxy-protocol-trusted", "must list the balancers allowed to send a PROXY header");
     if (!wire::io::TcpAddress::literal(result.network.bind, result.network.port))
         reader.fail("network.bind", "must be a literal IPv4 or IPv6 address");
     if (result.network.dualStack && result.network.bind.find(':') == std::string::npos)
         reader.fail("network.dual-stack", "requires an IPv6 bind address");
+
+    const auto* general = reader.child(proxy, "general");
+    reader.keys(general, {"brand", "startup-commands", "username-pattern", "enforce-secure-profile"}, "general.");
+    reader.scalar(general, "brand", result.general.brand, "general.");
+    reader.stringList(general, "startup-commands", result.general.startupCommands, "general.");
+    reader.scalar(general, "username-pattern", result.general.usernamePattern, "general.");
+    reader.scalar(general, "enforce-secure-profile", result.general.enforceSecureProfile, "general.");
+    if (result.general.brand.size() > 64)
+        reader.fail("general.brand", "must be at most 64 bytes");
+    if (!result.general.usernamePattern.empty()) {
+        try {
+            static_cast<void>(std::regex{result.general.usernamePattern});
+        } catch (const std::regex_error&) {
+            reader.fail("general.username-pattern", "is not a valid regular expression");
+        }
+    }
+
+    const auto* query = reader.child(proxy, "query");
+    reader.keys(query, {"enabled", "port"}, "query.");
+    reader.scalar(query, "enabled", result.query.enabled, "query.");
+    reader.integer(query, "port", result.query.port, 1, 65535, "query.");
 
     const auto* runtime = reader.child(proxy, "runtime");
     reader.keys(runtime,
@@ -165,6 +206,41 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         if (plugins.error)
             return std::unexpected(*plugins.error);
     }
+    if (limitsTable) {
+        detail::Reader limits{std::string{directory} + "/limits.toml", {}};
+        limits.keys(limitsTable, {"packets", "spam"}, "");
+        const auto* packets = limits.child(*limitsTable, "packets");
+        limits.keys(packets, {"rate-limit", "drop", "kick"}, "packets.");
+        limits.integer(packets, "rate-limit", result.limits.packetRateLimit, 0, 1 << 24, "packets.");
+        for (const auto action : {PacketRule::Action::kDrop, PacketRule::Action::kKick}) {
+            const std::string section = action == PacketRule::Action::kDrop ? "drop" : "kick";
+            const auto* rules = packets ? limits.child(*packets, section) : nullptr;
+            if (!rules)
+                continue;
+            for (const auto& name : rules->keys()) {
+                const auto address = wire::protocol::packetNames::resolve(name);
+                const auto limit = rules->integer(name);
+                if (!address || !address->serverbound)
+                    limits.fail("packets." + section + "." + name, "is not a packet a client sends");
+                else if (!limit || *limit < 1 || *limit > (1 << 24))
+                    limits.fail("packets." + section + "." + name, "must be a number of packets per second above 0");
+                else
+                    result.limits.packetRules.push_back(
+                        PacketRule{name, *address, static_cast<std::int32_t>(*limit), action});
+            }
+        }
+        const auto* spam = limits.child(*limitsTable, "spam");
+        limits.keys(spam, {"chat-threshold-seconds", "command-threshold-seconds", "excluded-commands"}, "spam.");
+        limits.integer(spam, "chat-threshold-seconds", result.limits.chatSpamThresholdSeconds, 0, 3600, "spam.");
+        limits.integer(spam, "command-threshold-seconds", result.limits.commandSpamThresholdSeconds, 0, 3600, "spam.");
+        limits.stringList(spam, "excluded-commands", result.limits.spamExcludedCommands, "spam.");
+        for (auto& name : result.limits.spamExcludedCommands) {
+            std::erase(name, '/');
+            std::ranges::transform(name, name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        }
+        if (limits.error)
+            return std::unexpected(*limits.error);
+    }
     if (reader.error)
         return std::unexpected(*reader.error);
     auto parsedBackends = detail::readBackends(result, backends, std::string{directory} + "/backends.toml");
@@ -184,7 +260,10 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto plugins = files.load("plugins.toml", kPluginsDefaultToml);
     if (!plugins)
         return std::unexpected(plugins.error());
-    return fromToml(*proxy, *backends, directory, &*plugins);
+    auto limits = files.load("limits.toml", kLimitsDefaultToml);
+    if (!limits)
+        return std::unexpected(limits.error());
+    return fromToml(*proxy, *backends, directory, &*plugins, &*limits);
 }
 
 } // namespace basalt::proxy::config

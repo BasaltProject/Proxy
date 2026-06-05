@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
 #include <basalt/wire/config/AnimationsConfig.hpp>
@@ -35,8 +36,50 @@ struct NetworkConfig {
     bool acceptTransfers = false;
     bool preventClientProxyConnections = false;
     std::int32_t compressionThreshold = 256;
+    bool proxyProtocol = false;
+    std::vector<std::string> proxyProtocolTrusted;
+    std::int32_t connectionThrottleMs = 0;
+    std::int32_t maxConnectionsPerAddress = 0;
+    std::int32_t maxJoinsPerTick = 0;
 
     friend bool operator==(const NetworkConfig&, const NetworkConfig&) = default;
+};
+
+struct GeneralConfig {
+    std::string brand;
+    std::vector<std::string> startupCommands;
+    std::string usernamePattern;
+    bool enforceSecureProfile = true;
+
+    friend bool operator==(const GeneralConfig&, const GeneralConfig&) = default;
+};
+
+struct QueryConfig {
+    bool enabled = false;
+    std::uint16_t port = 25565;
+
+    friend bool operator==(const QueryConfig&, const QueryConfig&) = default;
+};
+
+struct PacketRule {
+    enum class Action : std::uint8_t { kDrop, kKick };
+
+    std::string name;
+    wire::protocol::packetNames::Address address;
+    std::int32_t maxPerSecond = 0;
+    Action action = Action::kDrop;
+
+    friend bool operator==(const PacketRule&, const PacketRule&) = default;
+};
+
+struct LimitsConfig {
+    std::int32_t packetRateLimit = 0;
+    std::vector<PacketRule> packetRules;
+    std::int32_t chatSpamThresholdSeconds = 10;
+    std::int32_t commandSpamThresholdSeconds = 10;
+    std::vector<std::string> spamExcludedCommands;
+
+    friend bool operator==(const LimitsConfig&, const LimitsConfig&) = default;
 };
 
 struct RuntimeConfig {
@@ -143,6 +186,9 @@ struct HostRoute {
 
 struct ProxyConfig {
     NetworkConfig network;
+    GeneralConfig general;
+    QueryConfig query;
+    LimitsConfig limits;
     RuntimeConfig runtime;
     AdmissionConfig admission;
     ForwardingConfig forwarding;
@@ -160,7 +206,8 @@ struct ProxyConfig {
 [[nodiscard]] std::expected<ProxyConfig, std::string> fromToml(const wire::common::toml::TomlTable& proxy,
                                                                const wire::common::toml::TomlTable& backends,
                                                                std::string_view directory,
-                                                               const wire::common::toml::TomlTable* plugins = nullptr);
+                                                               const wire::common::toml::TomlTable* plugins = nullptr,
+                                                               const wire::common::toml::TomlTable* limits = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);

@@ -1,5 +1,6 @@
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
+#include "Kicks.hpp"
 #include "LoginShapes.hpp"
 #include "RouteVersions.hpp"
 
@@ -108,6 +109,13 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             translation_ || clientProtocol_ == 0 ? buildInfo::kProtocolVersion : clientProtocol_, frame_);
         if (!loginName || !wire::auth::validLoginName(*loginName))
             return false;
+        if (access_.policy) {
+            if (!access_.settings->allowsName(*loginName))
+                return refuse(kicks::kInvalidName);
+            if (access_.policy->gate.throttleLogin(clientAddress(), access_.settings->network.connectionThrottleMs,
+                                                   Clock::now()))
+                return refuse(kicks::kConnectionThrottled);
+        }
         name_ = std::move(*loginName);
         if (loadingMessage_) {
             if (const auto message = loadingMessage_()) {
@@ -124,7 +132,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                 if (const auto turnedAway =
                         playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
                     return refuseMiniMessage(*turnedAway);
-            return route();
+            return beginJoin();
         }
         if (settings_.sessionBufferBytes < kBufferBytes + kAuthenticationBytes || publicKey_.empty() ||
             !wire::auth::randomBytes(challenge_))
@@ -154,7 +162,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             key->encryptedChallenge.size() != 128 || output_.readableBytes() != 0)
             return false;
         wire::auth::OnlineLoginRequest request{name_,
-                                               checkAddress_ ? connection_.remoteAddress() : std::string{},
+                                               checkAddress_ ? clientAddress() : std::string{},
                                                challenge_,
                                                std::move(key->encryptedSecret),
                                                std::move(key->encryptedChallenge),

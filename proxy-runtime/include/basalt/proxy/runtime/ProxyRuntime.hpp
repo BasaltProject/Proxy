@@ -76,6 +76,8 @@ struct RuntimeServices {
         playerLogin = {};
     /// The text of one of the proxy's own refusals by its messages.toml key; empty keeps the built-in English one.
     std::function<std::string(std::string_view key)> kickText = {};
+    /// Whether a player is in the operator group; operators are exempt from the spam kick.
+    std::function<bool(std::string_view player)> isOperator = {};
     /// Those commands for one player, added to every command tree the proxy relays so clients know them.
     std::function<std::vector<PlayerCommandSpec>(std::string_view player)> playerCommandSpecs = {};
     /// Completions for the last word of a command line a player is typing, when it starts with a proxy command.
@@ -110,6 +112,8 @@ public:
     /// Thread-safe. Validates first, then swaps backends and routes atomically; fixed settings need a restart.
     [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
     [[nodiscard]] std::vector<std::string> backendNames() const;
+    /// Thread-safe. The players who have finished joining, in the order they did.
+    [[nodiscard]] std::vector<std::string> playerNames() const;
     /// Thread-safe. Queues a chat line for a player; true once handed to the session owners.
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.

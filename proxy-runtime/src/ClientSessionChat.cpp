@@ -1,5 +1,6 @@
 #include "BackendLogin.hpp"
 #include "ClientSession.hpp"
+#include "Kicks.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
@@ -15,6 +16,7 @@
 #include <basalt/wire/text/MiniMessage.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 
 namespace basalt::proxy::runtime::detail {
@@ -172,6 +174,35 @@ void ClientSession::kick(std::string_view reason) {
     else
         play::PlayDisconnectPacket{component}.write(frame_);
     static_cast<void>(queuePacket(frame_.readable()));
+}
+
+std::optional<bool> ClientSession::screenChat(std::int32_t id) {
+    const bool chat = id == play::ChatMessagePacket::kId;
+    const bool command = id == play::ChatCommandPacket::kId || id == play::SignedChatCommandPacket::kId;
+    if (!chat && !command)
+        return std::nullopt;
+    const auto& policy = *access_.settings;
+    bool counted = true;
+    wire::io::ByteBuffer view;
+    if (command && !policy.limits.spamExcludedCommands.empty()) {
+        view.writeBytes(frame_.readable());
+        std::string name = wire::protocol::readString(view, 256);
+        name.resize(name.find(' ') == std::string::npos ? name.size() : name.find(' '));
+        std::ranges::transform(name, name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        counted =
+            std::ranges::find(policy.limits.spamExcludedCommands, name) == policy.limits.spamExcludedCommands.end();
+    }
+    if (counted && !(chat ? chatSpam_ : commandSpam_).increment(Clock::now()) &&
+        !(access_.isOperator && access_.isOperator(profile_->name)))
+        return kickClient(kicks::kSpam);
+    if (chat && policy.general.enforceSecureProfile && online_ && clientProtocol_ == 0) {
+        view.clear();
+        view.writeBytes(frame_.readable());
+        const auto packet = play::ChatMessagePacket::read(view);
+        if (packet && !packet->signature)
+            return kickClient(kicks::kUnsignedChat);
+    }
+    return std::nullopt;
 }
 
 std::string ClientSession::playerUuid() const { return profile_ ? profile_->id.toString() : std::string{}; }

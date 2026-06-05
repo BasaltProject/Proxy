@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AccessPolicy.hpp"
 #include "BackendAttempts.hpp"
 #include "CookieCache.hpp"
 #include "IdRenumbering.hpp"
@@ -81,7 +82,8 @@ public:
                   std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin = {},
                   std::function<std::string(std::string_view)> kickText = {},
                   std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions = {},
-                  std::function<std::optional<std::string>()> loadingMessage = {});
+                  std::function<std::optional<std::string>()> loadingMessage = {},
+                  ClientAccess access = {});
 
     struct UiSource {
         std::function<std::shared_ptr<const wire::config::UiConfigs>()> configs;
@@ -140,7 +142,10 @@ public:
             return 3;
         if (state_ == State::kConfiguration)
             return 2;
-        return state_ == State::Handshake || state_ == State::StatusRequest || state_ == State::Ping ? 0 : 1;
+        return state_ == State::Handshake || state_ == State::StatusRequest || state_ == State::Ping ||
+                       state_ == State::kProxyHeader
+                   ? 0
+                   : 1;
     }
 
     [[nodiscard]] bool accounted() const;
@@ -149,6 +154,7 @@ public:
 
 private:
     enum class State {
+        kProxyHeader,
         Handshake,
         StatusRequest,
         Ping,
@@ -179,6 +185,14 @@ private:
     [[nodiscard]] bool queueLoginPacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool keepAliveVarInt() const;
     bool legacyRaw_ = false;
+    [[nodiscard]] bool acceptOrigin(std::string_view address, std::uint16_t port);
+    [[nodiscard]] bool beginJoin();
+    [[nodiscard]] bool kickClient(std::string_view text);
+    /// A verdict when the packet is not to travel on, which is what `packet()` then returns; empty to relay it.
+    [[nodiscard]] std::optional<bool> limited(std::int32_t id);
+    [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
+    [[nodiscard]] const std::string& clientAddress() const;
+    [[nodiscard]] std::uint16_t clientPort() const;
     config::TranslationMode translationMode_;
     [[nodiscard]] std::int32_t speaksTo(const config::BackendConfig& backend, std::int32_t client) const;
     [[nodiscard]] bool routeAllowed(std::int32_t client, const config::BackendConfig& backend) const;
@@ -334,6 +348,13 @@ private:
     Clock::time_point readDeadline_;
     Clock::time_point writeDeadline_ = Clock::time_point::max();
     Clock::time_point loginDeadline_;
+    ClientAccess access_;
+    std::string originAddress_;
+    std::uint16_t originPort_ = 0;
+    wire::protocol::PacketLimiter limiter_;
+    wire::protocol::SpamThrottle chatSpam_;
+    wire::protocol::SpamThrottle commandSpam_;
+    Clock::time_point joinRetryAt_ = Clock::time_point::max();
 };
 
 } // namespace basalt::proxy::runtime::detail

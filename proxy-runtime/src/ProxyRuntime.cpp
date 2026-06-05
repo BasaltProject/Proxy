@@ -1,3 +1,4 @@
+#include "AccessPolicy.hpp"
 #include "BackendChangeState.hpp"
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
@@ -83,6 +84,7 @@ struct Incoming {
     ResourceBudget::Reservation handoff;
     wire::io::TcpConnection connection;
     Clock::time_point acceptedAt;
+    detail::ClientAccess access;
 };
 
 struct AuthenticationReply {
@@ -124,12 +126,15 @@ struct ProxyRuntime::Impl {
             const auto found = sessions.find(id);
             if (found == sessions.end())
                 return;
-            if (found->second->announced && runtime.services.playerEvents)
-                runtime.services.playerEvents({PlayerEventKind::kLeave,
-                                               std::string{found->second->playerName()},
-                                               found->second->announcedBackend,
-                                               found->second->playerUuid(),
-                                               {}});
+            if (found->second->announced) {
+                runtime.forget(found->second->playerName());
+                if (runtime.services.playerEvents)
+                    runtime.services.playerEvents({PlayerEventKind::kLeave,
+                                                   std::string{found->second->playerName()},
+                                                   found->second->announcedBackend,
+                                                   found->second->playerUuid(),
+                                                   {}});
+            }
             detail::relayCounters().endedIn[found->second->phase()].fetch_add(1, std::memory_order_relaxed);
             loop.unwatch(found->second->handle());
             unwatchBackends(*found->second);
@@ -163,7 +168,7 @@ struct ProxyRuntime::Impl {
                 runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
                 runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
                 runtime.services.playerLogin, runtime.services.kickText, runtime.services.commandSuggestions,
-                runtime.services.loadingMessage);
+                runtime.services.loadingMessage, std::move(incoming->access));
             if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())
@@ -225,22 +230,25 @@ struct ProxyRuntime::Impl {
         }
 
         void announce(Session& session) {
-            if (!runtime.services.playerEvents || !session.inPlay())
+            if (!session.inPlay())
                 return;
             const auto backend = session.activeBackendName();
             if (!session.announced) {
                 session.announced = true;
                 session.announcedBackend = backend;
-                runtime.services.playerEvents({PlayerEventKind::kJoin,
-                                               std::string{session.playerName()},
-                                               session.announcedBackend,
-                                               session.playerUuid(),
-                                               {}});
+                runtime.remember(session.playerName());
+                if (runtime.services.playerEvents)
+                    runtime.services.playerEvents({PlayerEventKind::kJoin,
+                                                   std::string{session.playerName()},
+                                                   session.announcedBackend,
+                                                   session.playerUuid(),
+                                                   {}});
             } else if (backend != session.announcedBackend) {
                 const std::string from = session.announcedBackend;
                 session.announcedBackend = backend;
-                runtime.services.playerEvents({PlayerEventKind::kSwitch, std::string{session.playerName()},
-                                               session.announcedBackend, session.playerUuid(), from});
+                if (runtime.services.playerEvents)
+                    runtime.services.playerEvents({PlayerEventKind::kSwitch, std::string{session.playerName()},
+                                                   session.announcedBackend, session.playerUuid(), from});
             }
         }
 
@@ -327,9 +335,20 @@ struct ProxyRuntime::Impl {
                     throw std::runtime_error("listener accept failed");
                 }
                 const auto now = Clock::now();
-                if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted) {
-                    runtime.rejected.fetch_add(1, std::memory_order_relaxed);
-                    continue;
+                const auto settings = runtime.access.settings();
+                detail::ClientAccess origin{&runtime.access, settings, {},
+                                            settings->trustsUpstream(connection->remoteAddress()), runtime.services.isOperator};
+                if (!origin.awaitHeader) {
+                    if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted) {
+                        runtime.rejected.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    origin.slot = runtime.access.gate.open(connection->remoteAddress(),
+                                                           settings->network.maxConnectionsPerAddress);
+                    if (!origin.slot) {
+                        runtime.rejected.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
                 }
                 auto slot = runtime.slots.acquire(1);
                 auto allocation = runtime.buffers.acquire(Session::kBufferBytes);
@@ -339,8 +358,9 @@ struct ProxyRuntime::Impl {
                     continue;
                 }
                 runtime.accepted.fetch_add(1, std::memory_order_relaxed);
-                auto incoming = std::make_shared<Incoming>(Incoming{std::move(*slot), std::move(*allocation),
-                                                                    std::move(*handoff), std::move(*connection), now});
+                auto incoming =
+                    std::make_shared<Incoming>(Incoming{std::move(*slot), std::move(*allocation), std::move(*handoff),
+                                                        std::move(*connection), now, std::move(origin)});
                 auto& target = *runtime.owners[runtime.nextOwner++ % runtime.owners.size()];
                 auto submitted = target.mailbox.push([&target, incoming] { target.add(incoming); });
                 if (submitted)
@@ -427,6 +447,7 @@ struct ProxyRuntime::Impl {
     config::ProxyConfig config;
     SnapshotCell topology;
     Admission admission;
+    detail::AccessPolicy access;
     ResourceBudget slots;
     ResourceBudget buffers;
     ResourceBudget handoffs;
@@ -451,11 +472,25 @@ struct ProxyRuntime::Impl {
     std::atomic<std::uint64_t> accepted{0};
     std::atomic<std::uint64_t> rejected{0};
     std::size_t nextOwner = 0;
+    mutable std::mutex namesMutex;
+    std::vector<std::string> names;
+
+    void remember(std::string_view player) {
+        std::lock_guard lock{namesMutex};
+        names.emplace_back(player);
+    }
+
+    void forget(std::string_view player) {
+        std::lock_guard lock{namesMutex};
+        if (const auto found = std::ranges::find(names, player); found != names.end())
+            names.erase(found);
+    }
 
     explicit Impl(config::ProxyConfig settings)
-        : config(std::move(settings)), admission(config.admission), slots(config.runtime.maxSessions),
-          buffers(config.runtime.maxBufferedBytes), handoffs(config.runtime.maxPendingWork),
-          controls(config.runtime.maxPendingWork), identities(config.runtime.maxSessions) {}
+        : config(std::move(settings)), admission(config.admission), access(config, admission),
+          slots(config.runtime.maxSessions), buffers(config.runtime.maxBufferedBytes),
+          handoffs(config.runtime.maxPendingWork), controls(config.runtime.maxPendingWork),
+          identities(config.runtime.maxSessions) {}
 
     void stop() {
         stopped.store(true);
@@ -532,6 +567,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                           .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
                                                                                     buildInfo::kProtocolVersion},
                           .favicon = std::nullopt};
+            payload.enforcesSecureChat = state->config.general.enforceSecureProfile && state->config.network.onlineMode;
             wire::io::ByteBuffer body{1024}, framed{1024};
             protocol::varInt::write(body, protocol::status::StatusResponsePacket::kId);
             protocol::status::StatusResponsePacket{std::move(payload)}.write(body);
@@ -659,7 +695,15 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
         if (!same)
             fixed += (fixed.empty() ? "" : ", ") + std::string{section};
     };
-    compare(current.network == fresh.network, "[network]");
+    auto liveNetwork = fresh.network;
+    liveNetwork.proxyProtocol = current.network.proxyProtocol;
+    liveNetwork.proxyProtocolTrusted = current.network.proxyProtocolTrusted;
+    liveNetwork.connectionThrottleMs = current.network.connectionThrottleMs;
+    liveNetwork.maxConnectionsPerAddress = current.network.maxConnectionsPerAddress;
+    liveNetwork.maxJoinsPerTick = current.network.maxJoinsPerTick;
+    compare(current.network == liveNetwork, "[network] (bind, port, dual-stack, online-mode, transfers, compression)");
+    compare(current.general.enforceSecureProfile == fresh.general.enforceSecureProfile,
+            "[general] enforce-secure-profile");
     compare(current.runtime == fresh.runtime, "[runtime]");
     compare(current.admission == fresh.admission, "[admission]");
     compare(current.forwarding == fresh.forwarding, "[forwarding]");
@@ -677,6 +721,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     if (!forwarding)
         return std::unexpected(forwarding.error());
     const auto count = fresh.backends.size();
+    impl_->access.apply(fresh);
     impl_->topology.store(std::make_shared<const Topology>(
         Topology{std::move(fresh.backends), std::move(*routes), std::move(*forwarding)}));
     return count;
@@ -730,6 +775,11 @@ bool ProxyRuntime::kickPlayer(std::string_view player, std::string_view reason) 
             (void)destination->loop.wake();
     }
     return handed;
+}
+
+std::vector<std::string> ProxyRuntime::playerNames() const {
+    std::lock_guard lock{impl_->namesMutex};
+    return impl_->names;
 }
 
 std::vector<std::string> ProxyRuntime::backendNames() const {

@@ -10,6 +10,7 @@
 #include "OnlineRoster.hpp"
 #include "PermissionService.hpp"
 #include "PlayerDirectory.hpp"
+#include "QueryServer.hpp"
 #include "ServerListService.hpp"
 #include "UiService.hpp"
 #include "bedrock/BedrockLanguage.hpp"
@@ -37,6 +38,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -208,6 +210,7 @@ int run(const cliCommand::Run& command) {
             return std::nullopt;
         return dispatcher.suggest(source, line);
     };
+    services.isOperator = [&permissions](std::string_view player) { return permissions.isOperator(player); };
     services.kickText = [&messages](std::string_view key) { return messages.kick(key); };
     services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
@@ -264,6 +267,30 @@ int run(const cliCommand::Run& command) {
         logger.error([] { return std::string{"Could not install shutdown signal handlers."}; });
         return 1;
     }
+    std::mutex queryMutex;
+    std::unique_ptr<detail::QueryServer> query;
+    proxy::config::QueryConfig activeQuery;
+    const auto startQuery = [&](const proxy::config::QueryConfig& wanted) {
+        query.reset();
+        activeQuery = wanted;
+        if (!wanted.enabled)
+            return true;
+        query = detail::QueryServer::start(
+            wanted.port,
+            [&runtime, &configuration] {
+                detail::QueryServer::Info info;
+                info.serverName = "Basalt Proxy";
+                info.worldName = "world";
+                info.version = std::string{buildInfo::kMinecraftVersion};
+                info.hostIp = configuration->network.bind;
+                info.serverPort = configuration->network.port;
+                info.maxPlayers = static_cast<std::int32_t>(configuration->runtime.maxSessions);
+                info.players = runtime->playerNames();
+                return info;
+            },
+            logger);
+        return query != nullptr;
+    };
     const std::function<std::string()> reloadConfiguration = [&]() -> std::string {
         auto fresh = proxy::config::load(command.configDirectory);
         if (!fresh)
@@ -286,6 +313,8 @@ int run(const cliCommand::Run& command) {
         if (auto drawn = (*ui)->reload(); !drawn)
             return "Reload rejected, nothing changed: " + drawn.error();
         const auto freshAccess = fresh->access;
+        const auto freshQuery = fresh->query;
+        const bool startupChanged = fresh->general.startupCommands != configuration->general.startupCommands;
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
             return "Reload rejected, nothing changed: " + applied.error();
@@ -297,8 +326,18 @@ int run(const cliCommand::Run& command) {
             whitelistSetting = freshAccess.whitelist;
             access.setWhitelist(freshAccess.whitelist);
         }
-        std::string message =
-            "Reloaded " + std::to_string(*applied) + " backend(s); sessions in progress keep their snapshot.";
+        std::string message = "Reloaded " + std::to_string(*applied) +
+                              " backend(s), limits.toml, [general] and the access options of [network]; sessions in "
+                              "progress keep their snapshot.";
+        {
+            const std::lock_guard lock{queryMutex};
+            if (freshQuery != activeQuery) {
+                message += startQuery(freshQuery) ? (freshQuery.enabled ? " Query restarted." : " Query stopped.")
+                                                  : " Query could not bind its port and is off.";
+            }
+        }
+        if (startupChanged)
+            message += " startup-commands only run when the proxy starts.";
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             message += " Reloaded " + std::to_string(host->reload()) + " plugin(s).";
         return message;
@@ -508,13 +547,27 @@ int run(const cliCommand::Run& command) {
         bedrockPlayers.store(bedrock.get(), std::memory_order_release);
         logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
     }
+    {
+        const std::lock_guard lock{queryMutex};
+        if (!startQuery(configuration->query)) {
+            logger.error([] { return std::string{"Could not bind the query port."}; });
+            return 1;
+        }
+    }
     std::jthread updateChecker;
     if (configuration->runtime.updateChecker && updateChecker::parseVersion(buildInfo::kVersion).has_value()) {
         updateChecker = std::jthread{
             [&logger](std::stop_token stop) { updateChecker::checkAndAnnounce(buildInfo::kVersion, logger, stop); }};
     }
-    std::jthread console{
-        [&](std::stop_token stop) { detail::runConsole(commandService, dispatcher, stop); }};
+    std::jthread console{[&](std::stop_token stop) {
+        for (const auto& line : configuration->general.startupCommands) {
+            consoleLogger.info([&] { return "Startup command '" + line + "'"; });
+            commandService.run(consoleSource, line);
+            if (stopping.stop_requested())
+                return;
+        }
+        detail::runConsole(commandService, dispatcher, stop);
+    }};
     (*serverList)->setLoading(false);
     const auto result = runtime->run(stopping.get_token());
     if (updateChecker.joinable()) {
