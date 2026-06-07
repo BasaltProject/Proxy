@@ -17,7 +17,8 @@ CommandService::~CommandService() {
 
 void CommandService::run(const CommandSource& source, std::string_view line) {
     if (!source.console && dispatcher_->logCommands())
-        wire::common::Logger{"Commands"}.info([&] { return source.name + " issued proxy command: /" + std::string{line}; });
+        wire::common::Logger{"Commands"}.info(
+            [&] { return source.name + " issued proxy command: /" + std::string{line}; });
     const CommandResult result = dispatcher_->execute(source, line);
     switch (result.outcome) {
     case CommandOutcome::Executed:

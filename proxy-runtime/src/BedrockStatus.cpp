@@ -1,6 +1,7 @@
 #include "BedrockStatus.hpp"
 
 #include <basalt/wire/bedrock/BedrockPacketIds.hpp>
+#include <basalt/wire/bedrock/NetherNetIdentityStore.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 
 #include <algorithm>
@@ -9,10 +10,12 @@
 namespace basalt::proxy::runtime::detail {
 namespace {
 
-constexpr std::string_view kGameVersion = "1.26.50";
+constexpr std::string_view kGameVersion = wire::bedrock::kBedrockGameVersion;
 constexpr int kPollTimeoutMillis = 5;
 constexpr std::size_t kMaxHandshakes = 64;
 constexpr std::size_t kMaxOrders = 1024;
+constexpr std::uint64_t kNetherNetStatusRefreshMillis = 1000;
+constexpr std::string_view kNetherNetIdentityFile = ".basalt/nethernet-identity.der";
 constexpr std::string_view kTurnedAway = "Bedrock players cannot join this network yet.";
 
 std::uint64_t nowMillis() {
@@ -27,15 +30,23 @@ std::string originOf(const wire::io::UdpEndpoint& peer) {
            std::to_string((address >> 16) & 0xff) + "." + std::to_string(address >> 24);
 }
 
+std::string cleanLine(std::string_view text) {
+    std::string clean;
+    for (const char character : text)
+        clean += (character == ';' || character == '\n' || character == '\r') ? ' ' : character;
+    return clean;
+}
+
 } // namespace
 
-BedrockStatus::BedrockStatus(std::uint16_t port, std::function<std::string()> motd, std::function<std::size_t()> online,
-                             std::size_t max, Route route, BedrockSession::Events events,
-                             std::shared_ptr<const wire::text::LangTable> language, Lookup lookup,
-                             std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated,
-                             const config::AdmissionConfig& admission, BedrockSession::Commands commands)
-    : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
-      events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
+BedrockStatus::BedrockStatus(const config::BedrockConfig& options, std::function<std::string()> motd,
+                             std::function<std::size_t()> online, std::size_t max, Route route,
+                             BedrockSession::Events events, std::shared_ptr<const wire::text::LangTable> language,
+                             Lookup lookup, std::shared_ptr<const NativeForwarding> forwarding,
+                             bool requireAuthenticated, const config::AdmissionConfig& admission,
+                             BedrockSession::Commands commands)
+    : options_(options), port_(options.port), motd_(std::move(motd)), online_(std::move(online)), max_(max),
+      route_(std::move(route)), events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
       forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated), admission_(admission),
       commands_(std::move(commands)) {
     commands_.connect = [this](std::string_view player, std::string_view backend) { return connect(player, backend); };
@@ -52,92 +63,56 @@ std::string BedrockStatus::advertisement() const {
     line += std::to_string((online_ ? online_() : 0) + playing) + ";";
     line += std::to_string(max_) + ";";
     line += std::to_string(server_ ? server_->guid() : 0) + ";";
-    line += "Basalt Proxy;Survival;1;";
+    line += subMotd_ + ";Survival;1;";
     line += std::to_string(port()) + ";" + std::to_string(port()) + ";";
     return line;
 }
 
 bool BedrockStatus::start() {
-    wire::bedrock::RakServerConfig config;
-    config.port = port_;
-    config.guid = nowMillis() ^ 0x6261736c61747870ULL;
-    config.maxSessions = std::max(kMaxHandshakes, max_);
     auto keys = wire::bedrock::EcKeyPair::generate();
     if (!keys)
         return false;
     keys_ = std::make_shared<const wire::bedrock::EcKeyPair>(std::move(*keys));
-    server_ = std::make_unique<wire::bedrock::RakServer>(config);
-    if (!server_->start()) {
-        server_.reset();
-        return false;
-    }
-    server_->onAdvertise([this] { return advertisement(); });
-    server_->onConnect([this](wire::bedrock::RakSession& session) {
-        const std::string origin = originOf(session.peer());
-        if (admission_.attempt(origin) != AdmissionResult::Accepted) {
-            session.close();
-            return;
-        }
-        auto connection = std::make_unique<wire::bedrock::BedrockConnection>(session, keys_, std::string{kGameVersion});
-        wire::bedrock::BedrockConnection& raw = *connection;
-        const wire::io::UdpEndpoint peer = session.peer();
-        raw.onLogin([](const wire::bedrock::LoginRequest& login) {
-            wire::common::Logger{"Bedrock"}.info([&login] {
-                return login.name + " is joining from Bedrock" + (login.authenticated ? "" : " (unauthenticated)") +
-                       ".";
+    const wire::common::Logger logger{"Bedrock"};
+    if (options_.transport != config::BedrockTransport::NetherNet) {
+        wire::bedrock::RakServerConfig config;
+        config.port = port_;
+        config.guid = nowMillis() ^ 0x6261736c61747870ULL;
+        config.maxSessions = std::max(kMaxHandshakes, max_);
+        server_ = std::make_unique<wire::bedrock::RakServer>(config);
+        if (!server_->start()) {
+            logger.warn([this] { return "Could not bind UDP port " + std::to_string(port_) + " for RakNet."; });
+            server_.reset();
+        } else {
+            server_->onAdvertise([this] { return advertisement(); });
+            server_->onConnect([this](wire::bedrock::RakSession& session) { adopt(session, session.peer()); });
+            server_->onMessage([this](wire::bedrock::RakSession& session, std::span<const std::uint8_t> payload) {
+                if (const auto found = clients_.find(session.peer()); found != clients_.end())
+                    found->second.connection->receive(payload);
             });
-        });
-        raw.onReady([this, &raw, peer] {
-            if (requireAuthenticated_ && !raw.login().authenticated) {
-                wire::common::Logger{"Bedrock"}.info([&raw] {
-                    return raw.login().name +
-                           " was turned away: this proxy only lets in players signed in to Xbox Live.";
-                });
-                raw.disconnect("Sign in to Xbox Live to play here.");
-                return;
-            }
-            const auto found = clients_.find(peer);
-            const auto backend = route_ ? route_() : std::nullopt;
-            if (found == clients_.end() || !backend) {
-                wire::common::Logger{"Bedrock"}.warn(
-                    [] { return std::string{"No backend to send a Bedrock player to."}; });
-                raw.disconnect(kTurnedAway);
-                return;
-            }
-            found->second.session = std::make_unique<BedrockSession>(raw, *backend, originOf(peer), peer.port, events_,
-                                                                     language_, forwarding_, commands_);
-            if (found->second.session->begin()) {
-                const std::lock_guard lock{orders_};
-                playing_.insert(found->second.session->name());
-            } else if (found->second.session->turnedAway()) {
-                found->second.session.reset();
-            } else {
-                wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
-                found->second.session.reset();
-                raw.disconnect("The server could not be reached.");
-            }
-        });
-        raw.onPacket([this, peer](wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body) {
-            if (const auto found = clients_.find(peer); found != clients_.end() && found->second.session)
-                found->second.session->fromBedrock(packet, body);
-        });
-        clients_.insert_or_assign(peer, Client{std::move(connection), nullptr});
-    });
-    server_->onMessage([this](wire::bedrock::RakSession& session, std::span<const std::uint8_t> payload) {
-        if (const auto found = clients_.find(session.peer()); found != clients_.end())
-            found->second.connection->receive(payload);
-    });
-    server_->onDisconnect([this](wire::bedrock::RakSession& session) {
-        if (const auto found = clients_.find(session.peer()); found != clients_.end() && found->second.session) {
-            const std::lock_guard lock{orders_};
-            playing_.erase(found->second.session->name());
+            server_->onDisconnect([this](wire::bedrock::RakSession& session) { release(session.peer()); });
         }
-        clients_.erase(session.peer());
-    });
+    }
+    if (options_.transport != config::BedrockTransport::RakNet && !startNetherNet())
+        nether_.reset();
+    if (server_ == nullptr && nether_ == nullptr)
+        return false;
     running_.store(true);
     thread_ = std::jthread{[this] {
+        std::uint64_t statusAt = 0;
         while (running_.load()) {
-            server_->poll(nowMillis(), kPollTimeoutMillis);
+            if (server_) {
+                server_->poll(nowMillis(), kPollTimeoutMillis);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds{kPollTimeoutMillis});
+            }
+            if (nether_) {
+                nether_->drain();
+                if (const std::uint64_t now = nowMillis(); now - statusAt >= kNetherNetStatusRefreshMillis) {
+                    statusAt = now;
+                    refreshNetherNetStatus();
+                }
+            }
             std::vector<Order> orders;
             {
                 const std::lock_guard lock{orders_};
@@ -169,6 +144,122 @@ bool BedrockStatus::start() {
         }
     }};
     return true;
+}
+
+void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire::io::UdpEndpoint& peer,
+                          std::shared_ptr<wire::bedrock::NetherNetLink> link) {
+    if (admission_.attempt(originOf(peer)) != AdmissionResult::Accepted) {
+        if (link)
+            link->close();
+        else if (server_)
+            static_cast<wire::bedrock::RakSession&>(transport).close();
+        return;
+    }
+    auto connection = std::make_unique<wire::bedrock::BedrockConnection>(transport, keys_, std::string{kGameVersion});
+    wire::bedrock::BedrockConnection& raw = *connection;
+    raw.onLogin([](const wire::bedrock::LoginRequest& login) {
+        wire::common::Logger{"Bedrock"}.info([&login] {
+            return login.name + " is joining from Bedrock" + (login.authenticated ? "" : " (unauthenticated)") + ".";
+        });
+    });
+    raw.onReady([this, &raw, peer] {
+        if (requireAuthenticated_ && !raw.login().authenticated) {
+            wire::common::Logger{"Bedrock"}.info([&raw] {
+                return raw.login().name + " was turned away: this proxy only lets in players signed in to Xbox Live.";
+            });
+            raw.disconnect("Sign in to Xbox Live to play here.");
+            return;
+        }
+        const auto found = clients_.find(peer);
+        const auto backend = route_ ? route_() : std::nullopt;
+        if (found == clients_.end() || !backend) {
+            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"No backend to send a Bedrock player to."}; });
+            raw.disconnect(kTurnedAway);
+            return;
+        }
+        found->second.session = std::make_unique<BedrockSession>(raw, *backend, originOf(peer), peer.port, events_,
+                                                                 language_, forwarding_, commands_);
+        if (found->second.session->begin()) {
+            const std::lock_guard lock{orders_};
+            playing_.insert(found->second.session->name());
+        } else if (found->second.session->turnedAway()) {
+            found->second.session.reset();
+        } else {
+            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
+            found->second.session.reset();
+            raw.disconnect("The server could not be reached.");
+        }
+    });
+    raw.onPacket([this, peer](wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body) {
+        if (const auto found = clients_.find(peer); found != clients_.end() && found->second.session)
+            found->second.session->fromBedrock(packet, body);
+    });
+    if (link && !link->identityKey().empty())
+        raw.expectIdentity(link->identityKey());
+    clients_.insert_or_assign(peer, Client{std::move(connection), nullptr, std::move(link)});
+}
+
+void BedrockStatus::release(const wire::io::UdpEndpoint& peer) {
+    if (const auto found = clients_.find(peer); found != clients_.end() && found->second.session) {
+        const std::lock_guard lock{orders_};
+        playing_.erase(found->second.session->name());
+    }
+    clients_.erase(peer);
+}
+
+bool BedrockStatus::startNetherNet() {
+    const wire::common::Logger logger{"Bedrock"};
+    wire::bedrock::NetherNetConfig config;
+    config.signalingPort = port_;
+    if (options_.nethernetPort != 0)
+        config.icePort = options_.nethernetPort;
+    else if (server_)
+        config.icePort = static_cast<std::uint16_t>(port_ == 65535 ? port_ - 1 : port_ + 1);
+    config.advertiseHost = options_.advertiseAddress;
+    config.maxConnections = std::max(kMaxHandshakes, max_);
+    const auto identity = wire::bedrock::loadOrCreateNetherNetIdentity(std::string{kNetherNetIdentityFile});
+    if (identity.unreadable)
+        logger.warn([] { return "The saved NetherNet identity is unreadable, so a new one is made."; });
+    if (!identity.saved)
+        logger.warn([] { return "Could not save the NetherNet identity: players will be asked to trust it again."; });
+    config.identityKey = identity.key;
+    nether_ = std::make_unique<wire::bedrock::NetherNetServer>(std::move(config));
+    nether_->onStatus([this] {
+        const std::lock_guard guard{netherStatusLock_};
+        return netherStatus_;
+    });
+    nether_->onConnect(
+        [this](const std::shared_ptr<wire::bedrock::NetherNetLink>& link) { adopt(*link, link->peer(), link); });
+    nether_->onMessage(
+        [this](const std::shared_ptr<wire::bedrock::NetherNetLink>& link, std::span<const std::uint8_t> payload) {
+            if (const auto found = clients_.find(link->peer()); found != clients_.end() && found->second.link == link)
+                found->second.connection->receive(payload);
+        });
+    nether_->onDisconnect([this](const std::shared_ptr<wire::bedrock::NetherNetLink>& link) {
+        if (const auto found = clients_.find(link->peer()); found != clients_.end() && found->second.link == link)
+            release(link->peer());
+    });
+    refreshNetherNetStatus();
+    if (const auto started = nether_->start(); !started) {
+        logger.warn([this, &started] {
+            return "Could not start NetherNet: " + started.error() + ". It needs TCP port " + std::to_string(port_) +
+                   " and a UDP port of its own (`nethernet-port`).";
+        });
+        return false;
+    }
+    return true;
+}
+
+void BedrockStatus::refreshNetherNetStatus() {
+    wire::bedrock::NetherNetStatus snapshot;
+    snapshot.name = cleanLine(motd_ ? motd_() : std::string{"Basalt Proxy"});
+    snapshot.version = std::string{kGameVersion};
+    snapshot.level = subMotd_;
+    snapshot.protocol = static_cast<std::uint32_t>(wire::bedrock::kNativeBedrockProtocol);
+    snapshot.players = static_cast<std::uint32_t>((online_ ? online_() : 0) + clients_.size());
+    snapshot.maxPlayers = static_cast<std::uint32_t>(max_);
+    const std::lock_guard guard{netherStatusLock_};
+    netherStatus_ = std::move(snapshot);
 }
 
 void BedrockStatus::tell(std::string_view player, std::string_view miniMessage) {
@@ -204,6 +295,9 @@ void BedrockStatus::stop() {
     if (thread_.joinable())
         thread_.join();
     clients_.clear();
+    if (nether_)
+        nether_->stop();
+    nether_.reset();
     server_.reset();
 }
 

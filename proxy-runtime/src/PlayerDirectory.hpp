@@ -9,12 +9,12 @@
 #include <deque>
 #include <expected>
 #include <functional>
-#include <thread>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace basalt::proxy::runtime::detail {
 

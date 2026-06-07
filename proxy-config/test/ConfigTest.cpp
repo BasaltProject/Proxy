@@ -12,8 +12,7 @@ using namespace basalt::proxy::config;
 namespace toml = basalt::wire::common::toml;
 
 namespace {
-std::expected<ProxyConfig, std::string> decode(std::string_view proxy,
-                                               std::string_view backends = kBackendsDefaultToml,
+std::expected<ProxyConfig, std::string> decode(std::string_view proxy, std::string_view backends = kBackendsDefaultToml,
                                                std::string_view limits = kLimitsDefaultToml) {
     auto p = toml::parse(proxy);
     auto b = toml::parse(backends);
@@ -45,15 +44,26 @@ TEST_CASE("commented defaults produce online authentication, bounded owners "
 }
 
 TEST_CASE("invalid network and resource policy fails before opening sockets") {
-    for (auto document :
-         {"[network]\nport = -1", "[network]\nport = 65536", "[network]\nport = true",
-          "[network]\nonline-mode = 'false'", "[network]\nbind = 'hostname.test'", "[network]\ndual-stack = true",
-          "[network]\nonline_mod = false", "[runtime]\nio-loops = 0", "[runtime]\nworkers = 65",
-          "[runtime]\nmax-buffered-bytes = 4096", "[runtime]\nlow-water-bytes = 4194304",
-          "[runtime]\nlogin-timeout-ms = 0", "[runtime]\nupdate-checker = 'false'", "[admission]\nmax-origins = -1",
-          "[translation]\nmode = 'server'", "network = false", "[network]\nproxy-protocol = true",
-          "[network]\nproxy-protocol-trusted = ['not an address']", "[general]\nusername-pattern = '['",
-          "[query]\nport = 0"}) {
+    for (auto document : {"[network]\nport = -1",
+                          "[network]\nport = 65536",
+                          "[network]\nport = true",
+                          "[network]\nonline-mode = 'false'",
+                          "[network]\nbind = 'hostname.test'",
+                          "[network]\ndual-stack = true",
+                          "[network]\nonline_mod = false",
+                          "[runtime]\nio-loops = 0",
+                          "[runtime]\nworkers = 65",
+                          "[runtime]\nmax-buffered-bytes = 4096",
+                          "[runtime]\nlow-water-bytes = 4194304",
+                          "[runtime]\nlogin-timeout-ms = 0",
+                          "[runtime]\nupdate-checker = 'false'",
+                          "[admission]\nmax-origins = -1",
+                          "[translation]\nmode = 'server'",
+                          "network = false",
+                          "[network]\nproxy-protocol = true",
+                          "[network]\nproxy-protocol-trusted = ['not an address']",
+                          "[general]\nusername-pattern = '['",
+                          "[query]\nport = 0"}) {
         CAPTURE(document);
         const auto result = decode(document);
         REQUIRE_FALSE(result);

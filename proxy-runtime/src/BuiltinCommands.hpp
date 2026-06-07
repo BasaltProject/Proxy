@@ -43,8 +43,7 @@ struct PlayerIdentity {
 };
 
 /// A player the command can name: seen before, online now, or derivable offline.
-[[nodiscard]] std::optional<PlayerIdentity> resolvePlayer(const CommandEnvironment& environment,
-                                                          std::string_view name);
+[[nodiscard]] std::optional<PlayerIdentity> resolvePlayer(const CommandEnvironment& environment, std::string_view name);
 
 void ensureKnown(const CommandEnvironment& environment, const PlayerIdentity& player);
 

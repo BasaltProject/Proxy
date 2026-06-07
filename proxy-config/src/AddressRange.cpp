@@ -107,7 +107,8 @@ std::optional<AddressRange> AddressRange::parse(std::string_view text) {
     if (slash != std::string_view::npos) {
         const auto digits = text.substr(slash + 1);
         const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), prefix);
-        if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size() || prefix > (v4 ? 32U : 128U))
+        if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size() ||
+            prefix > (v4 ? 32U : 128U))
             return std::nullopt;
     }
     AddressRange range;

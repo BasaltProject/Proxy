@@ -55,97 +55,104 @@ void registerAccessCommands(const CommandEnvironment& env) {
         std::vector<std::string> names;
         for (const auto& entry : env.players->locked([&](auto&, auto& access) { return access.whitelist(); }))
             names.push_back(entry.name);
-        context.reply(env.messages->command("whitelist-list", {{"count", std::to_string(names.size())},
-                                                               {"players", joined(names)}}));
+        context.reply(env.messages->command("whitelist-list",
+                                            {{"count", std::to_string(names.size())}, {"players", joined(names)}}));
     }));
-    whitelist.then(Node::literal("add").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
-        const std::string name{context.text("player")};
-        const auto player = resolvePlayer(env, name);
-        if (!player) {
-            context.reply(env.messages->command("unknown-player", {{"player", name}}));
-            return;
-        }
-        const bool added = env.players->locked([&](auto&, auto& access) {
-            if (access.isWhitelisted(player->uuid))
-                return false;
-            access.addToWhitelist({.uuid = player->uuid, .name = player->name, .addedAtEpochSeconds = now()});
-            return true;
-        });
-        env.access->refresh();
-        context.reply(env.messages->command(added ? "whitelist-added" : "whitelist-already", {{"player", player->name}}));
-    })));
-    whitelist.then(Node::literal("remove").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
-        const std::string name{context.text("player")};
-        const bool removed = env.players->locked([&](auto&, auto& access) {
-            const auto entry = access.whitelistedByName(name);
-            return entry && access.removeFromWhitelist(entry->uuid);
-        });
-        env.access->refresh();
-        context.reply(env.messages->command(removed ? "whitelist-removed" : "whitelist-not-listed", {{"player", name}}));
-        if (removed)
-            kickNonWhitelisted(env);
-    })));
-    add(env, "whitelist", "Manages who may join while the whitelist is on.", std::move(whitelist));
-
-    const CommandExecutor banner = [env](const CommandContext& context) {
-            const std::string target{context.text("target")};
-            const std::string reason = context.has("reason")
-                                           ? std::string{context.text("reason")}
-                                           : Messages::plain(env.messages->command("default-reason"));
-            const bool ip = isAddress(target);
-            std::string subject = target;
-            std::string name;
-            if (!ip) {
-                const auto player = resolvePlayer(env, target);
-                if (!player) {
-                    context.reply(env.messages->command("unknown-player", {{"player", target}}));
-                    return;
-                }
-                subject = player->uuid;
-                name = player->name;
+    whitelist.then(
+        Node::literal("add").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
+            const std::string name{context.text("player")};
+            const auto player = resolvePlayer(env, name);
+            if (!player) {
+                context.reply(env.messages->command("unknown-player", {{"player", name}}));
+                return;
             }
-            const auto kind = ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player;
-            const bool banned = env.players->locked([&](auto&, auto& access) {
-                if (access.banOf(subject, kind))
+            const bool added = env.players->locked([&](auto&, auto& access) {
+                if (access.isWhitelisted(player->uuid))
                     return false;
-                access.ban({.subject = subject, .kind = kind, .name = name.empty() ? std::nullopt : std::optional{name},
-                            .reason = reason, .source = context.source().name,
-                            .createdAtEpochSeconds = now()});
+                access.addToWhitelist({.uuid = player->uuid, .name = player->name, .addedAtEpochSeconds = now()});
                 return true;
             });
             env.access->refresh();
-            if (!banned) {
-                context.reply(env.messages->command("ban-already", {{"player", target}}));
+            context.reply(
+                env.messages->command(added ? "whitelist-added" : "whitelist-already", {{"player", player->name}}));
+        })));
+    whitelist.then(Node::literal("remove").then(
+        Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
+            const std::string name{context.text("player")};
+            const bool removed = env.players->locked([&](auto&, auto& access) {
+                const auto entry = access.whitelistedByName(name);
+                return entry && access.removeFromWhitelist(entry->uuid);
+            });
+            env.access->refresh();
+            context.reply(
+                env.messages->command(removed ? "whitelist-removed" : "whitelist-not-listed", {{"player", name}}));
+            if (removed)
+                kickNonWhitelisted(env);
+        })));
+    add(env, "whitelist", "Manages who may join while the whitelist is on.", std::move(whitelist));
+
+    const CommandExecutor banner = [env](const CommandContext& context) {
+        const std::string target{context.text("target")};
+        const std::string reason = context.has("reason") ? std::string{context.text("reason")}
+                                                         : Messages::plain(env.messages->command("default-reason"));
+        const bool ip = isAddress(target);
+        std::string subject = target;
+        std::string name;
+        if (!ip) {
+            const auto player = resolvePlayer(env, target);
+            if (!player) {
+                context.reply(env.messages->command("unknown-player", {{"player", target}}));
                 return;
             }
-            context.reply(env.messages->command("ban-ok", {{"player", target}, {"reason", reason}}));
-            for (const auto& entry : env.roster->all())
-                if (ip ? false : entry.uuid == subject)
-                    env.kick(entry.name, env.access->banMessage("banned", reason, std::nullopt));
+            subject = player->uuid;
+            name = player->name;
+        }
+        const auto kind = ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player;
+        const bool banned = env.players->locked([&](auto&, auto& access) {
+            if (access.banOf(subject, kind))
+                return false;
+            access.ban({.subject = subject,
+                        .kind = kind,
+                        .name = name.empty() ? std::nullopt : std::optional{name},
+                        .reason = reason,
+                        .source = context.source().name,
+                        .createdAtEpochSeconds = now()});
+            return true;
+        });
+        env.access->refresh();
+        if (!banned) {
+            context.reply(env.messages->command("ban-already", {{"player", target}}));
+            return;
+        }
+        context.reply(env.messages->command("ban-ok", {{"player", target}, {"reason", reason}}));
+        for (const auto& entry : env.roster->all())
+            if (ip ? false : entry.uuid == subject)
+                env.kick(entry.name, env.access->banMessage("banned", reason, std::nullopt));
     };
     add(env, "ban", "Bans a player or an address.",
         Node::literal("ban").then(Node::argument("target", ArgumentKind::Word)
                                       .executes(banner)
                                       .then(Node::argument("reason", ArgumentKind::Text, true).executes(banner))));
     add(env, "pardon", "Lifts a ban.",
-        Node::literal("pardon").then(Node::argument("target", ArgumentKind::Word).executes([env](const CommandContext& context) {
-            const std::string target{context.text("target")};
-            const bool ip = isAddress(target);
-            std::string subject = target;
-            if (!ip) {
-                const auto player = resolvePlayer(env, target);
-                if (!player) {
-                    context.reply(env.messages->command("unknown-player", {{"player", target}}));
-                    return;
+        Node::literal("pardon").then(
+            Node::argument("target", ArgumentKind::Word).executes([env](const CommandContext& context) {
+                const std::string target{context.text("target")};
+                const bool ip = isAddress(target);
+                std::string subject = target;
+                if (!ip) {
+                    const auto player = resolvePlayer(env, target);
+                    if (!player) {
+                        context.reply(env.messages->command("unknown-player", {{"player", target}}));
+                        return;
+                    }
+                    subject = player->uuid;
                 }
-                subject = player->uuid;
-            }
-            const bool lifted = env.players->locked([&](auto&, auto& access) {
-                return access.pardon(subject, ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player);
-            });
-            env.access->refresh();
-            context.reply(env.messages->command(lifted ? "pardon-ok" : "pardon-not-banned", {{"player", target}}));
-        })));
+                const bool lifted = env.players->locked([&](auto&, auto& access) {
+                    return access.pardon(subject, ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player);
+                });
+                env.access->refresh();
+                context.reply(env.messages->command(lifted ? "pardon-ok" : "pardon-not-banned", {{"player", target}}));
+            })));
     add(env, "banlist", "Lists who is banned.", Node::literal("banlist").executes([env](const CommandContext& context) {
         std::vector<std::string> names;
         env.players->locked([&](auto&, auto& access) {
@@ -155,8 +162,8 @@ void registerAccessCommands(const CommandEnvironment& env) {
                 names.push_back(ban.subject);
             return 0;
         });
-        context.reply(env.messages->command("banlist", {{"count", std::to_string(names.size())},
-                                                        {"players", joined(names)}}));
+        context.reply(
+            env.messages->command("banlist", {{"count", std::to_string(names.size())}, {"players", joined(names)}}));
     }));
 
     const CommandExecutor kicker = [env](const CommandContext& context) {

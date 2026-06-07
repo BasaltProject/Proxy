@@ -92,8 +92,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
         Node::literal("help").executes([env](const CommandContext& context) {
             context.reply(env.messages->command("help-header"));
             for (const HelpEntry& entry : env.dispatcher->help(context.source()))
-                context.reply(env.messages->command("help-entry", {{"usage", entry.usage},
-                                                                   {"description", entry.description}}));
+                context.reply(
+                    env.messages->command("help-entry", {{"usage", entry.usage}, {"description", entry.description}}));
         }),
         {"?"});
 
@@ -102,8 +102,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
             std::vector<std::string> names;
             for (const auto& entry : env.roster->all())
                 names.push_back(entry.name);
-            context.reply(env.messages->command("list", {{"online", std::to_string(names.size())},
-                                                         {"players", joined(names)}}));
+            context.reply(
+                env.messages->command("list", {{"online", std::to_string(names.size())}, {"players", joined(names)}}));
         }));
 
     add(env, "glist", "Shows the players on every server.",
@@ -115,18 +115,18 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
             for (const auto& entry : entries)
                 byServer[entry.backend].push_back(entry.name);
             for (const auto& [server, names] : byServer)
-                context.reply(env.messages->command("glist-server", {{"server", server},
-                                                                     {"count", std::to_string(names.size())},
-                                                                     {"players", joined(names)}}));
+                context.reply(env.messages->command(
+                    "glist-server",
+                    {{"server", server}, {"count", std::to_string(names.size())}, {"players", joined(names)}}));
             context.reply(env.messages->command("glist-total", {{"total", std::to_string(entries.size())}}));
         }));
 
     Node server = Node::literal("server");
     server.executes([env](const CommandContext& context) {
         const auto current = env.roster->find(context.source().name);
-        context.reply(env.messages->command(
-            "server-current", {{"server", current ? current->backend : std::string{"-"}},
-                               {"servers", joined(env.servers())}}));
+        context.reply(
+            env.messages->command("server-current", {{"server", current ? current->backend : std::string{"-"}},
+                                                     {"servers", joined(env.servers())}}));
     });
     server.then(Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
         const std::string target{context.text("server")};
@@ -135,36 +135,38 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
         } else if (!hasServer(env, target)) {
             context.reply(env.messages->command("unknown-server", {{"server", target}}));
         } else {
-            context.reply(env.messages->command(sendMessageKey(env.send(context.source().name, target), "server-sending"),
-                                                {{"server", target}, {"player", context.source().name}}));
+            context.reply(
+                env.messages->command(sendMessageKey(env.send(context.source().name, target), "server-sending"),
+                                      {{"server", target}, {"player", context.source().name}}));
         }
     }));
     add(env, "server", "Moves you to another server.", std::move(server));
 
     add(env, "send", "Sends a player, or everyone, to a server.",
-        Node::literal("send").then(Node::argument("player", Kind::Player).then(
-            Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
-                const std::string target{context.text("server")};
-                const std::string who{context.text("player")};
-                if (!hasServer(env, target)) {
-                    context.reply(env.messages->command("unknown-server", {{"server", target}}));
-                    return;
-                }
-                std::vector<std::string> names;
-                if (who == "all") {
-                    for (const auto& entry : env.roster->all())
-                        names.push_back(entry.name);
-                } else if (const auto online = env.roster->find(who)) {
-                    names.push_back(online->name);
-                } else {
-                    context.reply(env.messages->command("not-online", {{"player", who}}));
-                    return;
-                }
-                for (const std::string& name : names) {
-                    context.reply(env.messages->command(sendMessageKey(env.send(name, target), "send-ok"),
-                                                        {{"player", name}, {"server", target}}));
-                }
-            }))));
+        Node::literal("send").then(
+            Node::argument("player", Kind::Player)
+                .then(Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
+                    const std::string target{context.text("server")};
+                    const std::string who{context.text("player")};
+                    if (!hasServer(env, target)) {
+                        context.reply(env.messages->command("unknown-server", {{"server", target}}));
+                        return;
+                    }
+                    std::vector<std::string> names;
+                    if (who == "all") {
+                        for (const auto& entry : env.roster->all())
+                            names.push_back(entry.name);
+                    } else if (const auto online = env.roster->find(who)) {
+                        names.push_back(online->name);
+                    } else {
+                        context.reply(env.messages->command("not-online", {{"player", who}}));
+                        return;
+                    }
+                    for (const std::string& name : names) {
+                        context.reply(env.messages->command(sendMessageKey(env.send(name, target), "send-ok"),
+                                                            {{"player", name}, {"server", target}}));
+                    }
+                }))));
 
     add(env, "status", "Shows the proxy's counters.",
         Node::literal("status").executes([env](const CommandContext& context) {
@@ -184,8 +186,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
     add(env, "plugins", "Lists the loaded plugins.",
         Node::literal("plugins").executes([env](const CommandContext& context) {
             const auto names = env.plugins ? env.plugins() : std::vector<std::string>{};
-            context.reply(env.messages->command("plugins", {{"count", std::to_string(names.size())},
-                                                            {"plugins", joined(names)}}));
+            context.reply(env.messages->command("plugins",
+                                                {{"count", std::to_string(names.size())}, {"plugins", joined(names)}}));
         }),
         {"pl"});
 
@@ -212,45 +214,47 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
     group.then(Node::literal("list").executes([env](const CommandContext& context) {
         context.reply(env.messages->command("group-list", {{"groups", joined(env.permissions->groupNames())}}));
     }));
-    group.then(Node::literal("get").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
-        const std::string name{context.text("player")};
-        context.reply(env.messages->command("group-info", {{"player", name},
-                                                           {"group", env.permissions->groupOf(name)}}));
-    })));
-    group.then(Node::literal("members").then(Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
-        const std::string name{context.text("group")};
-        if (!env.permissions->groupExists(name)) {
-            context.reply(env.messages->command("group-unknown", {{"group", name},
-                                                                  {"groups", joined(env.permissions->groupNames())}}));
-            return;
-        }
-        const auto members = env.permissions->membersOf(name);
-        context.reply(env.messages->command("group-members", {{"group", name},
-                                                              {"count", std::to_string(members.size())},
-                                                              {"players", joined(members)}}));
-    })));
-    group.then(Node::literal("set").then(Node::argument("player", Kind::Player).then(
-        Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
+    group.then(
+        Node::literal("get").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
             const std::string name{context.text("player")};
-            const std::string target{context.text("group")};
-            if (!env.permissions->groupExists(target)) {
-                context.reply(env.messages->command("group-unknown", {{"group", target},
-                                                                      {"groups", joined(env.permissions->groupNames())}}));
+            context.reply(
+                env.messages->command("group-info", {{"player", name}, {"group", env.permissions->groupOf(name)}}));
+        })));
+    group.then(Node::literal("members").then(
+        Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
+            const std::string name{context.text("group")};
+            if (!env.permissions->groupExists(name)) {
+                context.reply(env.messages->command(
+                    "group-unknown", {{"group", name}, {"groups", joined(env.permissions->groupNames())}}));
                 return;
             }
-            const auto player = resolvePlayer(env, name);
-            if (!player) {
-                context.reply(env.messages->command("unknown-player", {{"player", name}}));
-                return;
-            }
-            ensureKnown(env, *player);
-            const std::string lowered = wire::common::placeholder::lowercaseAscii(target);
-            const bool toDefault = lowered == env.permissions->defaultGroup();
-            static_cast<void>(
-                env.permissions->setGroup(player->name, toDefault ? std::nullopt : std::optional{lowered}));
-            context.reply(env.messages->command("group-set", {{"player", player->name},
-                                                              {"group", lowered}}));
-        }))));
+            const auto members = env.permissions->membersOf(name);
+            context.reply(env.messages->command(
+                "group-members",
+                {{"group", name}, {"count", std::to_string(members.size())}, {"players", joined(members)}}));
+        })));
+    group.then(Node::literal("set").then(
+        Node::argument("player", Kind::Player)
+            .then(Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
+                const std::string name{context.text("player")};
+                const std::string target{context.text("group")};
+                if (!env.permissions->groupExists(target)) {
+                    context.reply(env.messages->command(
+                        "group-unknown", {{"group", target}, {"groups", joined(env.permissions->groupNames())}}));
+                    return;
+                }
+                const auto player = resolvePlayer(env, name);
+                if (!player) {
+                    context.reply(env.messages->command("unknown-player", {{"player", name}}));
+                    return;
+                }
+                ensureKnown(env, *player);
+                const std::string lowered = wire::common::placeholder::lowercaseAscii(target);
+                const bool toDefault = lowered == env.permissions->defaultGroup();
+                static_cast<void>(
+                    env.permissions->setGroup(player->name, toDefault ? std::nullopt : std::optional{lowered}));
+                context.reply(env.messages->command("group-set", {{"player", player->name}, {"group", lowered}}));
+            }))));
     add(env, "group", "Manages permission groups and who is in them.", std::move(group));
 
     registerAccessCommands(env);

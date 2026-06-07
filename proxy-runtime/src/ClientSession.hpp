@@ -79,11 +79,12 @@ public:
                   std::function<void(std::string_view, std::string_view)> playerChat = {},
                   std::function<void(std::string_view, std::string_view)> playerKick = {},
                   std::function<void(std::string_view, std::int32_t)> statusPing = {},
-                  std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin = {},
+                  std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)>
+                      playerLogin = {},
                   std::function<std::string(std::string_view)> kickText = {},
-                  std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions = {},
-                  std::function<std::optional<std::string>()> loadingMessage = {},
-                  ClientAccess access = {});
+                  std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)>
+                      commandSuggestions = {},
+                  std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {});
 
     struct UiSource {
         std::function<std::shared_ptr<const wire::config::UiConfigs>()> configs;
@@ -114,7 +115,9 @@ public:
     [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
     [[nodiscard]] std::string playerUuid() const;
+
     [[nodiscard]] std::int32_t clientProtocol() const noexcept { return clientProtocol_; }
+
     [[nodiscard]] bool candidatePrepared() const;
     [[nodiscard]] bool beginPreparedChange();
     [[nodiscard]] bool commitLegacyChange();

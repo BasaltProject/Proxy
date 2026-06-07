@@ -17,8 +17,8 @@ constexpr std::size_t kMaxValue = 64 * 1024;
 constexpr std::int64_t kMaxKeys = 1000;
 constexpr std::size_t kMaxLine = 4096;
 constexpr std::array<std::string_view, 16> kBuiltinCommands = {
-    "help", "list", "glist", "server", "send", "stop", "reload", "plugins",
-    "op",   "deop", "group", "whitelist", "ban", "pardon", "banlist", "kick"};
+    "help", "list", "glist", "server",    "send", "stop",   "reload",  "plugins",
+    "op",   "deop", "group", "whitelist", "ban",  "pardon", "banlist", "kick"};
 
 runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::CommandExecutor executor) {
     using Type = wire::plugins::CommandArgumentType;
@@ -32,8 +32,8 @@ runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::Com
                           : argument.type == Type::Float ? runtime::ArgumentKind::Float
                           : argument.type == Type::Bool  ? runtime::ArgumentKind::Bool
                                                          : runtime::ArgumentKind::Word;
-        chain.push_back(runtime::CommandNode::argument(argument.name, kind, argument.optional)
-                            .range(argument.min, argument.max));
+        chain.push_back(
+            runtime::CommandNode::argument(argument.name, kind, argument.optional).range(argument.min, argument.max));
     }
     runtime::CommandNode node = std::move(chain.back());
     node.executes(std::move(executor));

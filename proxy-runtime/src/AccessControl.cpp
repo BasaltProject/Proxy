@@ -29,8 +29,8 @@ std::string dateOf(std::int64_t epochSeconds) {
 
 std::string AccessControl::banMessage(std::string_view key, std::string_view reason,
                                       std::optional<std::int64_t> expiresAt) const {
-    return messages_->kick(key, {{"reason", std::string{reason}},
-                                 {"expires", expiresAt ? dateOf(*expiresAt) : std::string{"never"}}});
+    return messages_->kick(
+        key, {{"reason", std::string{reason}}, {"expires", expiresAt ? dateOf(*expiresAt) : std::string{"never"}}});
 }
 
 AccessControl::AccessControl(PlayerDirectory& players, PermissionService& permissions, const Messages& messages,

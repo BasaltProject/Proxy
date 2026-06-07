@@ -14,8 +14,8 @@
 #include <basalt/wire/auth/SessionKeyPair.hpp>
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
-#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/io/ProxyProtocol.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -37,47 +37,45 @@
 
 namespace basalt::proxy::runtime::detail {
 namespace proxyProtocol = wire::io::proxyProtocol;
+
 namespace {
 constexpr std::int32_t kConfigurationAcknowledgedId = 0x10;
 constexpr std::size_t kClientSettingsPacketLimit = 96;
 constexpr std::int32_t kLanguageEncodedLimit = 16 * 3;
 } // namespace
 
-ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
-                             wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
-                             StatusSource status, std::span<const std::uint8_t> unavailable,
-                             Clock::time_point acceptedAt, bool online, bool checkAddress,
-                             std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
-                             AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
-                             const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                             std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
-                             const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
-                             std::function<bool(std::string_view, std::string_view)> playerCommand,
-                             std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs,
-                             config::TranslationMode translation,
-                             std::function<void(std::string_view, std::string_view)> playerChat,
-                             std::function<void(std::string_view, std::string_view)> playerKick,
-                             std::function<void(std::string_view, std::int32_t)> statusPing,
-                             std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
-                             std::function<std::string(std::string_view)> kickText,
-                             std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
-                             std::function<std::optional<std::string>()> loadingMessage,
-                             ClientAccess access)
+ClientSession::ClientSession(
+    wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
+    wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings, StatusSource status,
+    std::span<const std::uint8_t> unavailable, Clock::time_point acceptedAt, bool online, bool checkAddress,
+    std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
+    AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
+    const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
+    std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
+    const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
+    std::function<bool(std::string_view, std::string_view)> playerCommand,
+    std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs,
+    config::TranslationMode translation, std::function<void(std::string_view, std::string_view)> playerChat,
+    std::function<void(std::string_view, std::string_view)> playerKick,
+    std::function<void(std::string_view, std::int32_t)> statusPing,
+    std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
+    std::function<std::string(std::string_view)> kickText,
+    std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
+    std::function<std::optional<std::string>()> loadingMessage, ClientAccess access)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
       playerLogin_(std::move(playerLogin)), kickText_(std::move(kickText)), loadingMessage_(std::move(loadingMessage)),
-      playerCommandSpecs_(std::move(playerCommandSpecs)), commandSuggestions_(std::move(commandSuggestions)), slot_(std::move(slot)),
-      localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
-      pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
-      resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
-      connection_(std::move(connection)), settings_(settings), status_(std::move(status)), tail_(0, memory_),
-      unavailable_(unavailable), online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
-      compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
-      authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
-      uiFrame_(0, memory_), clientSettings_(0, memory_), idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_),
-      frame_(0, memory_), output_(0, memory_),
-      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}),
-      access_(std::move(access)) {
+      playerCommandSpecs_(std::move(playerCommandSpecs)), commandSuggestions_(std::move(commandSuggestions)),
+      slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
+      memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), pendingKeepAlives_(memory_),
+      pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_), resourcePacks_(memory_), identities_(identities),
+      nativeForwarding_(nativeForwarding), connection_(std::move(connection)), settings_(settings),
+      status_(std::move(status)), tail_(0, memory_), unavailable_(unavailable), online_(online),
+      checkAddress_(checkAddress), acceptTransfers_(acceptTransfers), compressionThreshold_(compressionThreshold),
+      publicKey_(publicKey), authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(routes),
+      resolve_(std::move(resolve)), backends_(backends), uiFrame_(0, memory_), clientSettings_(0, memory_),
+      idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
+      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}), access_(std::move(access)) {
     buffers.reset();
     if (access_.policy) {
         limiter_ = wire::protocol::PacketLimiter{access_.settings->packetLimits};
@@ -258,10 +256,11 @@ bool ClientSession::packet() {
             view.writeBytes(frame_.readable());
             const std::string command = protocol::readString(view, 256);
             const auto root = command.substr(0, command.find(' '));
-            const bool theBackends = root.find(':') == std::string::npos &&
-                                     std::ranges::find(backendCommands_, wire::common::placeholder::lowercaseAscii(
-                                                                             root.starts_with('/') ? root.substr(1) : root)) !=
-                                         backendCommands_.end();
+            const bool theBackends =
+                root.find(':') == std::string::npos &&
+                std::ranges::find(backendCommands_, wire::common::placeholder::lowercaseAscii(
+                                                        root.starts_with('/') ? root.substr(1) : root)) !=
+                    backendCommands_.end();
             if (!view.failed() && !theBackends && playerCommand_(profile_->name, command))
                 return true;
         }
@@ -573,9 +572,8 @@ bool ClientSession::kickClient(std::string_view text) {
 
 std::optional<bool> ClientSession::limited(std::int32_t id) {
     using Verdict = wire::protocol::PacketLimiter::Verdict;
-    const auto phase =
-        state_ == State::kPlay ? wire::protocol::packetNames::Phase::kPlay
-                               : wire::protocol::packetNames::Phase::kConfiguration;
+    const auto phase = state_ == State::kPlay ? wire::protocol::packetNames::Phase::kPlay
+                                              : wire::protocol::packetNames::Phase::kConfiguration;
     switch (limiter_.receive(phase, legacyRaw_ ? -1 : id, Clock::now())) {
     case Verdict::kAllow:
         break;

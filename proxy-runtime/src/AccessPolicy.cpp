@@ -25,8 +25,8 @@ std::shared_ptr<const AccessSettings> AccessSettings::make(const config::ProxyCo
     auto limits = std::make_shared<wire::protocol::PacketLimits>();
     limits->rateLimit = config.limits.packetRateLimit;
     for (const auto& rule : config.limits.packetRules)
-        limits->rules.push_back({rule.address.phase, rule.address.id, rule.maxPerSecond,
-                                 rule.action == config::PacketRule::Action::kKick});
+        limits->rules.push_back(
+            {rule.address.phase, rule.address.id, rule.maxPerSecond, rule.action == config::PacketRule::Action::kKick});
     settings->packetLimits = std::move(limits);
     return settings;
 }

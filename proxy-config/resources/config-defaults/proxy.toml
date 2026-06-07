@@ -113,6 +113,18 @@ color = "auto"
 # with chunks, position and chat translated; everything else is not translated yet. Off by default.
 enabled = false
 port = 19132
+# How Bedrock clients reach the proxy. NetherNet is the only transport Bedrock 26.60 and newer use; RakNet stays for
+# older clients.
+#   "both"       NetherNet and RakNet (recommended)
+#   "nethernet"  NetherNet only
+#   "raknet"     RakNet only (clients on 26.60 and newer cannot join)
+# NetherNet needs TCP on `port` (signaling) and a UDP port of its own, `nethernet-port`.
+transport = "both"
+# UDP port of NetherNet game traffic. 0 picks `port` when RakNet is off and `port` + 1 when it is on.
+nethernet-port = 0
+# Address NetherNet tells clients to send game traffic to. Empty means the one the client reached; set the public one
+# behind NAT.
+advertise-address = ""
 # With online-mode on, a Bedrock player must be signed in to Xbox Live; a player without a signed chain is turned away.
 # Path to a Minecraft server jar or to an en_us.json language file, used to put into words the translatable messages a
 # backend sends (join and leave lines, death messages). Empty keeps the raw keys. Nothing is downloaded.

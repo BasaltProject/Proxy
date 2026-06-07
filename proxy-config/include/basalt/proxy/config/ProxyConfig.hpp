@@ -1,6 +1,5 @@
 #pragma once
 
-#include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
 #include <basalt/wire/config/AnimationsConfig.hpp>
@@ -10,6 +9,7 @@
 #include <basalt/wire/config/Permissions.hpp>
 #include <basalt/wire/config/ServerListConfig.hpp>
 #include <basalt/wire/config/UiConfigs.hpp>
+#include <basalt/wire/protocol/PacketNames.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -141,9 +141,14 @@ struct PluginsConfig {
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };
 
+enum class BedrockTransport : std::uint8_t { Both, NetherNet, RakNet };
+
 struct BedrockConfig {
     bool enabled = false;
     std::uint16_t port = 19132;
+    BedrockTransport transport = BedrockTransport::Both;
+    std::uint16_t nethernetPort = 0;
+    std::string advertiseAddress;
     std::string language;
     bool delegate = false;
 
@@ -219,6 +224,7 @@ struct ProxyConfig {
 class MessageSet {
 public:
     MessageSet() = default;
+
     MessageSet(wire::config::MessageCatalog custom, wire::config::MessageCatalog defaults)
         : custom_(std::move(custom)), defaults_(std::move(defaults)) {}
 

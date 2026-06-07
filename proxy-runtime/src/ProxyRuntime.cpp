@@ -340,8 +340,11 @@ struct ProxyRuntime::Impl {
                 }
                 const auto now = Clock::now();
                 const auto settings = runtime.access.settings();
-                detail::ClientAccess origin{&runtime.access, settings, {},
-                                            settings->trustsUpstream(connection->remoteAddress()), runtime.services.isOperator};
+                detail::ClientAccess origin{&runtime.access,
+                                            settings,
+                                            {},
+                                            settings->trustsUpstream(connection->remoteAddress()),
+                                            runtime.services.isOperator};
                 if (!origin.awaitHeader) {
                     if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted) {
                         runtime.rejected.fetch_add(1, std::memory_order_relaxed);

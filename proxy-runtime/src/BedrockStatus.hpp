@@ -5,6 +5,7 @@
 #include <basalt/proxy/runtime/Admission.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
 #include <basalt/wire/bedrock/BedrockKeys.hpp>
+#include <basalt/wire/bedrock/NetherNetServer.hpp>
 #include <basalt/wire/bedrock/RakServer.hpp>
 
 #include <atomic>
@@ -27,11 +28,12 @@ public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
     using Lookup = std::function<std::optional<config::BackendConfig>(std::string_view name)>;
 
-    BedrockStatus(std::uint16_t port, std::function<std::string()> motd, std::function<std::size_t()> online,
-                  std::size_t max, Route route = {}, BedrockSession::Events events = {},
-                  std::shared_ptr<const wire::text::LangTable> language = nullptr, Lookup lookup = {},
-                  std::shared_ptr<const NativeForwarding> forwarding = nullptr, bool requireAuthenticated = false,
-                  const config::AdmissionConfig& admission = {}, BedrockSession::Commands commands = {});
+    BedrockStatus(const config::BedrockConfig& options, std::function<std::string()> motd,
+                  std::function<std::size_t()> online, std::size_t max, Route route = {},
+                  BedrockSession::Events events = {}, std::shared_ptr<const wire::text::LangTable> language = nullptr,
+                  Lookup lookup = {}, std::shared_ptr<const NativeForwarding> forwarding = nullptr,
+                  bool requireAuthenticated = false, const config::AdmissionConfig& admission = {},
+                  BedrockSession::Commands commands = {});
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
@@ -46,11 +48,24 @@ public:
 
     [[nodiscard]] std::uint16_t port() const noexcept { return server_ ? server_->port() : port_; }
 
+    [[nodiscard]] bool rakNetOn() const noexcept { return server_ != nullptr; }
+
+    [[nodiscard]] bool netherNetOn() const noexcept { return nether_ != nullptr; }
+
+    [[nodiscard]] std::uint16_t netherNetIcePort() const noexcept { return nether_ ? nether_->icePort() : 0; }
+
 private:
     [[nodiscard]] std::string advertisement() const;
+    [[nodiscard]] bool startNetherNet();
+    void adopt(wire::bedrock::BedrockTransport& transport, const wire::io::UdpEndpoint& peer,
+               std::shared_ptr<wire::bedrock::NetherNetLink> link = nullptr);
+    void release(const wire::io::UdpEndpoint& peer);
+    void refreshNetherNetStatus();
 
+    config::BedrockConfig options_;
     std::uint16_t port_;
     std::function<std::string()> motd_;
+    std::string subMotd_ = "Basalt Proxy";
     std::function<std::size_t()> online_;
     std::size_t max_;
     Route route_;
@@ -58,10 +73,15 @@ private:
     std::shared_ptr<const wire::text::LangTable> language_;
     std::shared_ptr<const wire::bedrock::EcKeyPair> keys_;
     std::unique_ptr<wire::bedrock::RakServer> server_;
+    std::unique_ptr<wire::bedrock::NetherNetServer> nether_;
+    std::mutex netherStatusLock_;
+    wire::bedrock::NetherNetStatus netherStatus_;
+    std::atomic<std::size_t> playingSnapshot_{0};
 
     struct Client {
         std::unique_ptr<wire::bedrock::BedrockConnection> connection;
         std::unique_ptr<BedrockSession> session;
+        std::shared_ptr<wire::bedrock::NetherNetLink> link;
     };
 
     std::unordered_map<wire::io::UdpEndpoint, Client> clients_;

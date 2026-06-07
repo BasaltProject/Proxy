@@ -51,7 +51,8 @@ private:
     std::shared_ptr<const AccessSettings> settings_;
 };
 
-/// What a session is handed when it is created: the policy, its settings, and the connection slot if the address is known.
+/// What a session is handed when it is created: the policy, its settings, and the connection slot if the address is
+/// known.
 struct ClientAccess {
     const AccessPolicy* policy = nullptr;
     std::shared_ptr<const AccessSettings> settings;

@@ -149,9 +149,23 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("logging.color", "must be auto, always or never");
 
     const auto* bedrock = reader.child(proxy, "bedrock");
-    reader.keys(bedrock, {"enabled", "port", "language", "delegate"}, "bedrock.");
+    reader.keys(bedrock,
+                {"enabled", "port", "transport", "nethernet-port", "advertise-address", "language", "delegate"},
+                "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrock.enabled, "bedrock.");
     reader.integer(bedrock, "port", result.bedrock.port, 1, 65535, "bedrock.");
+    std::string transport = "both";
+    reader.scalar(bedrock, "transport", transport, "bedrock.");
+    if (transport == "both")
+        result.bedrock.transport = BedrockTransport::Both;
+    else if (transport == "nethernet")
+        result.bedrock.transport = BedrockTransport::NetherNet;
+    else if (transport == "raknet")
+        result.bedrock.transport = BedrockTransport::RakNet;
+    else
+        reader.fail("bedrock.transport", "must be both, nethernet or raknet");
+    reader.integer(bedrock, "nethernet-port", result.bedrock.nethernetPort, 0, 65535, "bedrock.");
+    reader.scalar(bedrock, "advertise-address", result.bedrock.advertiseAddress, "bedrock.");
     reader.scalar(bedrock, "language", result.bedrock.language, "bedrock.");
     reader.scalar(bedrock, "delegate", result.bedrock.delegate, "bedrock.");
 
@@ -236,7 +250,8 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         limits.stringList(spam, "excluded-commands", result.limits.spamExcludedCommands, "spam.");
         for (auto& name : result.limits.spamExcludedCommands) {
             std::erase(name, '/');
-            std::ranges::transform(name, name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::ranges::transform(name, name.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         }
         if (limits.error)
             return std::unexpected(*limits.error);

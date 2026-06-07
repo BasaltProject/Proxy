@@ -1,6 +1,6 @@
+#include "AccessControl.hpp"
 #include "BackendRoutes.hpp"
 #include "BedrockStatus.hpp"
-#include "AccessControl.hpp"
 #include "BuiltinCommands.hpp"
 #include "CommandService.hpp"
 #include "Console.hpp"
@@ -18,10 +18,10 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/config/RemoteConfig.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
-#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/remote/RemoteApi.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
+#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/proxy/runtime/UpdateChecker.hpp>
 #include <basalt/wire/common/logging/LogOutput.hpp>
@@ -139,8 +139,9 @@ int run(const cliCommand::Run& command) {
     auto groups = proxy::config::loadGroups(command.configDirectory);
     auto commandsConfig = proxy::config::loadCommands(command.configDirectory);
     auto messageSet = proxy::config::loadMessages(command.configDirectory);
-    for (const std::string* problem : {groups ? nullptr : &groups.error(), commandsConfig ? nullptr : &commandsConfig.error(),
-                                       messageSet ? nullptr : &messageSet.error()}) {
+    for (const std::string* problem :
+         {groups ? nullptr : &groups.error(), commandsConfig ? nullptr : &commandsConfig.error(),
+          messageSet ? nullptr : &messageSet.error()}) {
         if (problem != nullptr) {
             logger.error([problem] { return *problem; });
             return 1;
@@ -194,8 +195,9 @@ int run(const cliCommand::Run& command) {
                                           consoleLogger.info([&] { return detail::Messages::plain(miniMessage); });
                                       }};
     const auto playerSource = [&tellPlayer](std::string_view name) {
-        return CommandSource{std::string{name}, false,
-                             [&tellPlayer, player = std::string{name}](std::string_view text) { tellPlayer(player, text); }};
+        return CommandSource{
+            std::string{name}, false,
+            [&tellPlayer, player = std::string{name}](std::string_view text) { tellPlayer(player, text); }};
     };
     std::stop_source stopping;
     RuntimeServices services;
@@ -210,9 +212,9 @@ int run(const cliCommand::Run& command) {
     };
     services.playerCommandSpecs = playerCommandSpecs;
     services.playerCommand = playerCommand;
-    services.commandSuggestions = [&dispatcher, playerSource](std::string_view player,
-                                                              std::string_view line)
-        -> std::optional<std::vector<std::string>> {
+    services.commandSuggestions = [&dispatcher,
+                                   playerSource](std::string_view player,
+                                                 std::string_view line) -> std::optional<std::vector<std::string>> {
         const CommandSource source = playerSource(player);
         if (!dispatcher.available(source, line))
             return std::nullopt;
@@ -236,8 +238,8 @@ int run(const cliCommand::Run& command) {
                                std::string_view address) -> std::optional<std::string> {
         (*players)->post([&players, &permissions, &serverList, player = std::string{player}, uuid = std::string{uuid},
                           address = std::string{address}] {
-            (*players)->recordLogin(uuid, player, (*serverList)->rememberIp() ? std::optional<std::string_view>{address}
-                                                                              : std::nullopt);
+            (*players)->recordLogin(
+                uuid, player, (*serverList)->rememberIp() ? std::optional<std::string_view>{address} : std::nullopt);
             permissions.onLogin(uuid, player);
         });
         if (auto turnedAway = access.check(player, uuid, address))
@@ -521,7 +523,7 @@ int run(const cliCommand::Run& command) {
             return 1;
         }
         bedrock = std::make_unique<detail::BedrockStatus>(
-            configuration->bedrock.port, [&serverList] { return (*serverList)->bedrockMotd(); },
+            configuration->bedrock, [&serverList] { return (*serverList)->bedrockMotd(); },
             [&runtime] { return runtime->sessionCount(); }, configuration->runtime.maxSessions,
             [&configuration]() -> std::optional<proxy::config::BackendConfig> {
                 const auto routes = detail::BackendRoutes::create(*configuration);
@@ -546,7 +548,10 @@ int run(const cliCommand::Run& command) {
                 return *found;
             },
             nativeForwarding, configuration->network.onlineMode, configuration->admission,
-            detail::BedrockSession::Commands{playerCommand, playerCommandSpecs, {}, [&configuration] {
+            detail::BedrockSession::Commands{playerCommand,
+                                             playerCommandSpecs,
+                                             {},
+                                             [&configuration] {
                                                  std::vector<std::string> names;
                                                  for (const auto& backend : configuration->backends)
                                                      names.push_back(backend.name);
@@ -555,12 +560,22 @@ int run(const cliCommand::Run& command) {
                                              loginGate});
         if (!bedrock->start()) {
             logger.error([&configuration] {
-                return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";
+                return "Could not start Bedrock on port " + std::to_string(configuration->bedrock.port) +
+                       "; see the messages above.";
             });
             return 1;
         }
         bedrockPlayers.store(bedrock.get(), std::memory_order_release);
-        logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
+        logger.info([&bedrock] {
+            std::string line = "Bedrock over";
+            if (bedrock->rakNetOn())
+                line += " RakNet on UDP port " + std::to_string(bedrock->port());
+            if (bedrock->netherNetOn())
+                line += std::string{bedrock->rakNetOn() ? " and" : ""} + " NetherNet on TCP port " +
+                        std::to_string(bedrock->port()) + " and UDP port " +
+                        std::to_string(bedrock->netherNetIcePort());
+            return line + ".";
+        });
     }
     {
         const std::lock_guard lock{queryMutex};

@@ -29,7 +29,8 @@ std::vector<Token> tokenize(std::string_view line) {
         if (begin == std::string_view::npos)
             break;
         const auto end = line.find(' ', begin);
-        tokens.push_back({line.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin), begin});
+        tokens.push_back(
+            {line.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin), begin});
         if (end == std::string_view::npos)
             break;
         at = end;
@@ -174,9 +175,9 @@ std::expected<void, std::string> CommandDispatcher::add(CommandRegistration regi
         std::unique_lock lock{mutex_};
         for (const auto& entry : entries_) {
             const auto& other = entry->registration;
-            const bool clashes = lowercaseAscii(other.root.name()) == name || std::ranges::any_of(other.aliases, [&](auto& alias) {
-                                     return lowercaseAscii(alias) == name;
-                                 });
+            const bool clashes =
+                lowercaseAscii(other.root.name()) == name ||
+                std::ranges::any_of(other.aliases, [&](auto& alias) { return lowercaseAscii(alias) == name; });
             if (clashes && !(plugin && other.owner.starts_with("plugin:")))
                 return std::unexpected("'" + name + "' is already a command of " + other.owner);
         }
@@ -252,7 +253,10 @@ void CommandDispatcher::rebuild() {
             auto& slot = next->byName[name];
             const bool plugin = registration.owner.starts_with("plugin:");
             if (!slot.empty() && !(plugin && slot.front().registration->owner.starts_with("plugin:"))) {
-                logger.warn([&] { return "The name '" + name + "' is taken by another command; '" + rootName + "' does not answer to it."; });
+                logger.warn([&] {
+                    return "The name '" + name + "' is taken by another command; '" + rootName +
+                           "' does not answer to it.";
+                });
                 continue;
             }
             slot.push_back({entry, &registration, override.permission.value_or(registration.permission), rootName});
@@ -380,7 +384,7 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
         for (const std::string& word : walk.deepestPath)
             prefix += (prefix.empty() ? "" : " ") + word;
         std::function<void(const CommandNode&, const std::string&)> collect = [&](const CommandNode& node,
-                                                                                    const std::string& at) {
+                                                                                  const std::string& at) {
             if (node.executor_)
                 usage.push_back(at);
             for (const CommandNode& child : node.children_)
@@ -440,7 +444,8 @@ std::vector<std::string> CommandDispatcher::suggest(const CommandSource& source,
                         if (child.isLiteral_ && sameWord(child.name_, tokens[at].text))
                             next = &child;
                     for (const CommandNode& child : node->children_)
-                        if (next == nullptr && !child.isLiteral_ && valid(child, child.kind_, child.min_, child.max_, tokens[at].text))
+                        if (next == nullptr && !child.isLiteral_ &&
+                            valid(child, child.kind_, child.min_, child.max_, tokens[at].text))
                             next = &child;
                     lost = next == nullptr || next->kind_ == ArgumentKind::Text;
                     if (!lost)
@@ -484,7 +489,7 @@ std::vector<PlayerCommandSpec> CommandDispatcher::specs(const CommandSource& sou
             if (!resolved.permission.empty() && !permitted_(source, resolved.permission))
                 continue;
             std::function<void(const CommandNode&, PlayerCommandSpec)> walk = [&](const CommandNode& node,
-                                                                                   PlayerCommandSpec spec) {
+                                                                                  PlayerCommandSpec spec) {
                 if (node.executor_ || (node.children_.empty() && &node != &resolved.registration->root))
                     result.push_back(spec);
                 for (const CommandNode& child : node.children_) {

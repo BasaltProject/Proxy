@@ -3,8 +3,8 @@
 #include "Kicks.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
-#include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -55,7 +55,8 @@ constexpr std::size_t kMaxAddedNodes = 512;
 } // namespace
 
 bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
-    auto specs = playerCommandSpecs_ && profile_ ? playerCommandSpecs_(profile_->name) : std::vector<PlayerCommandSpec>{};
+    auto specs =
+        playerCommandSpecs_ && profile_ ? playerCommandSpecs_(profile_->name) : std::vector<PlayerCommandSpec>{};
     if (specs.empty())
         return queuePacket(original);
     wire::io::ByteBuffer view;
@@ -131,7 +132,8 @@ bool ClientSession::answerSuggestions(const play::CommandSuggestionRequestPacket
         return false;
     const auto word = request.command.rfind(' ');
     const auto start = static_cast<std::int32_t>(word == std::string::npos ? 0 : word + 1);
-    play::CommandSuggestionsPacket answer{request.id, start, static_cast<std::int32_t>(request.command.size()) - start, {}};
+    play::CommandSuggestionsPacket answer{
+        request.id, start, static_cast<std::int32_t>(request.command.size()) - start, {}};
     for (const std::string& option : *options)
         answer.suggestions.push_back({option, std::nullopt});
     frame_.clear();
