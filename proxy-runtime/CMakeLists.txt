@@ -57,6 +57,7 @@ basalt_module(proxy-runtime-core
         src/PlayerDirectory.cpp
         src/ServerListService.cpp
         src/UiService.cpp
+        src/Inspection.cpp
         src/ProxyRuntime.cpp
         src/UpdateChecker.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
@@ -94,7 +95,7 @@ if(ANDROID)
     target_link_options(basalt-proxy PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
 endif()
 # wire-io comes through the core already; naming it twice makes the linker say so.
-target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins)
+target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins basalt::proxy-remote)
 set_target_properties(basalt-proxy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     OUTPUT_NAME "BasaltProxy-${BASALT_VERSION}-${_platform}-${_arch}"

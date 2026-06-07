@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/proxy/config/RemoteConfig.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
 
 #include <doctest.h>

@@ -8,6 +8,7 @@
 #include <basalt/wire/io/TcpSocket.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -94,6 +95,25 @@ struct RuntimeServices {
         status = {};
 };
 
+/// One session as its owner sees it; name and uuid stay empty until the player is authenticated.
+struct SessionInfo {
+    std::string name;
+    std::string uuid;
+    std::string backend;
+    std::int32_t protocol = 0;
+    /// handshake, login, configuration or play.
+    std::string phase;
+};
+
+struct BackendInfo {
+    std::string name;
+    std::string host;
+    std::uint16_t port = 0;
+    std::int32_t protocol = 0;
+    bool automatic = false;
+    std::string forwarding;
+};
+
 class ProxyRuntime {
 public:
     [[nodiscard]] static std::expected<ProxyRuntime, std::string> create(config::ProxyConfig config,
@@ -114,6 +134,10 @@ public:
     [[nodiscard]] std::vector<std::string> backendNames() const;
     /// Thread-safe. The players who have finished joining, in the order they did.
     [[nodiscard]] std::vector<std::string> playerNames() const;
+    [[nodiscard]] std::vector<BackendInfo> backends() const;
+    /// Thread-safe. Asks every session owner for its sessions and waits up to `timeout` for all of them.
+    [[nodiscard]] std::expected<std::vector<SessionInfo>, std::string>
+    sessions(std::chrono::milliseconds timeout) const;
     /// Thread-safe. Queues a chat line for a player; true once handed to the session owners.
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.

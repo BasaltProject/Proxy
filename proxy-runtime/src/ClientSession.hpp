@@ -114,6 +114,7 @@ public:
     [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
     [[nodiscard]] std::string playerUuid() const;
+    [[nodiscard]] std::int32_t clientProtocol() const noexcept { return clientProtocol_; }
     [[nodiscard]] bool candidatePrepared() const;
     [[nodiscard]] bool beginPreparedChange();
     [[nodiscard]] bool commitLegacyChange();

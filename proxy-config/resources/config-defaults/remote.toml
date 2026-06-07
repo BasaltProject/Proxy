@@ -1,0 +1,31 @@
+# Remote administration: a small HTTP API for reading the proxy's state and running a few actions. It is the
+# native way to manage the proxy from a panel or a script; the query protocol is only kept for compatibility.
+# The access token is not written here: it is generated on first start in .basalt/api.token (owner-only). Send it as
+# `Authorization: Bearer <token>`. Changes to this file need a restart.
+
+[api]
+# Off by default. Turn it on only when something will actually call it.
+enabled = false
+# Literal IPv4 or IPv6 address. Keep it on loopback: the API speaks plain HTTP, so anything wider belongs behind a
+# reverse proxy that adds TLS or on a private network.
+bind = "127.0.0.1"
+port = 25590
+# Connections kept open at once, overall and from one address.
+max-connections = 32
+max-connections-per-address = 8
+# Largest request body in bytes, and seconds a silent connection is kept before it is closed.
+max-body-bytes = 65536
+idle-seconds = 60
+# Wrong tokens tolerated from one address before it is locked out, and the first lockout in seconds. Each further
+# lockout doubles, up to a day.
+max-failures = 5
+lockout-seconds = 30
+# Requests one address may make in a minute.
+requests-per-minute = 120
+
+[actions]
+# What the API may change. Reading state is always allowed once the API is on; turn these off for a read-only panel.
+# Move a player to another backend, disconnect a player, and reload the configuration files.
+send = true
+kick = true
+reload = true

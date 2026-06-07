@@ -16,8 +16,10 @@
 #include "bedrock/BedrockLanguage.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/proxy/config/RemoteConfig.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
+#include <basalt/proxy/remote/RemoteApi.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
@@ -34,6 +36,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -87,6 +90,11 @@ int run(const cliCommand::Run& command) {
     const auto configuration = proxy::config::load(command.configDirectory);
     if (!configuration) {
         logger.error([&configuration] { return configuration.error(); });
+        return 1;
+    }
+    const auto remoteConfiguration = proxy::config::loadRemote(command.configDirectory);
+    if (!remoteConfiguration) {
+        logger.error([&remoteConfiguration] { return remoteConfiguration.error(); });
         return 1;
     }
     wire::common::Logger::setDefaultMinLevel(configuration->logging.level);
@@ -291,33 +299,36 @@ int run(const cliCommand::Run& command) {
             logger);
         return query != nullptr;
     };
-    const std::function<std::string()> reloadConfiguration = [&]() -> std::string {
+    std::mutex reloadMutex;
+    const std::function<std::expected<std::string, std::string>()> reloadOutcome =
+        [&]() -> std::expected<std::string, std::string> {
+        const std::lock_guard reloadLock{reloadMutex};
         auto fresh = proxy::config::load(command.configDirectory);
         if (!fresh)
-            return "Reload rejected, nothing changed: " + fresh.error();
+            return std::unexpected("Reload rejected, nothing changed: " + fresh.error());
         if (auto checked = proxy::config::loadServerList(command.configDirectory); !checked)
-            return "Reload rejected, nothing changed: " + checked.error();
+            return std::unexpected("Reload rejected, nothing changed: " + checked.error());
         if (auto checked = proxy::config::loadUi(command.configDirectory); !checked)
-            return "Reload rejected, nothing changed: " + checked.error();
+            return std::unexpected("Reload rejected, nothing changed: " + checked.error());
         auto freshGroups = proxy::config::loadGroups(command.configDirectory);
         if (!freshGroups)
-            return "Reload rejected, nothing changed: " + freshGroups.error();
+            return std::unexpected("Reload rejected, nothing changed: " + freshGroups.error());
         auto freshCommands = proxy::config::loadCommands(command.configDirectory);
         if (!freshCommands)
-            return "Reload rejected, nothing changed: " + freshCommands.error();
+            return std::unexpected("Reload rejected, nothing changed: " + freshCommands.error());
         auto freshMessages = proxy::config::loadMessages(command.configDirectory);
         if (!freshMessages)
-            return "Reload rejected, nothing changed: " + freshMessages.error();
+            return std::unexpected("Reload rejected, nothing changed: " + freshMessages.error());
         if (auto listed = (*serverList)->reload(); !listed)
-            return "Reload rejected, nothing changed: " + listed.error();
+            return std::unexpected("Reload rejected, nothing changed: " + listed.error());
         if (auto drawn = (*ui)->reload(); !drawn)
-            return "Reload rejected, nothing changed: " + drawn.error();
+            return std::unexpected("Reload rejected, nothing changed: " + drawn.error());
         const auto freshAccess = fresh->access;
         const auto freshQuery = fresh->query;
         const bool startupChanged = fresh->general.startupCommands != configuration->general.startupCommands;
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
-            return "Reload rejected, nothing changed: " + applied.error();
+            return std::unexpected("Reload rejected, nothing changed: " + applied.error());
         permissions.reload(std::move(*freshGroups));
         dispatcher.configure(std::make_shared<const wire::config::CommandsConfig>(std::move(*freshCommands)));
         messages.reload(std::move(*freshMessages));
@@ -341,6 +352,10 @@ int run(const cliCommand::Run& command) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             message += " Reloaded " + std::to_string(host->reload()) + " plugin(s).";
         return message;
+    };
+    const std::function<std::string()> reloadConfiguration = [&]() -> std::string {
+        auto outcome = reloadOutcome();
+        return outcome ? std::move(*outcome) : std::move(outcome.error());
     };
     detail::CommandEnvironment environment;
     environment.players = players->get();
@@ -554,6 +569,41 @@ int run(const cliCommand::Run& command) {
             return 1;
         }
     }
+    std::unique_ptr<proxy::remote::RemoteApi> remoteApi;
+    if (remoteConfiguration->api.enabled) {
+        proxy::remote::RemoteHooks hooks;
+        hooks.runtime = &*runtime;
+        hooks.reload = reloadOutcome;
+        if (configuration->bedrock.enabled) {
+            hooks.bedrockPlaying = [&bedrockPlayers]() -> std::size_t {
+                auto* side = bedrockPlayers.load(std::memory_order_acquire);
+                return side != nullptr ? side->playingCount() : 0;
+            };
+            hooks.bedrockSend = [&bedrockPlayers](std::string_view player, std::string_view backend) {
+                auto* side = bedrockPlayers.load(std::memory_order_acquire);
+                return side != nullptr && side->connect(player, backend);
+            };
+            hooks.bedrockKick = [&bedrockPlayers](std::string_view player, std::string_view reason) {
+                if (auto* side = bedrockPlayers.load(std::memory_order_acquire))
+                    side->kick(player, reason);
+            };
+        }
+        hooks.loadedPlugins = [&plugins]() -> std::size_t { return plugins ? plugins->loaded() : 0; };
+        auto started = proxy::remote::RemoteApi::start(*remoteConfiguration, std::move(hooks), ".basalt/api.token");
+        if (!started) {
+            logger.error([&started] { return started.error(); });
+            return 1;
+        }
+        remoteApi = std::move(*started);
+        logger.info([&] {
+            return "Remote API on " + remoteConfiguration->api.bind + ":" + std::to_string(remoteApi->port()) + ".";
+        });
+        if (remoteConfiguration->api.bind != "127.0.0.1" && remoteConfiguration->api.bind != "::1")
+            logger.warn([] {
+                return std::string{
+                    "The remote API speaks plain HTTP on a non-loopback address; put TLS in front of it."};
+            });
+    }
     std::jthread updateChecker;
     if (configuration->runtime.updateChecker && updateChecker::parseVersion(buildInfo::kVersion).has_value()) {
         updateChecker = std::jthread{
@@ -570,6 +620,7 @@ int run(const cliCommand::Run& command) {
     }};
     (*serverList)->setLoading(false);
     const auto result = runtime->run(stopping.get_token());
+    remoteApi.reset();
     if (updateChecker.joinable()) {
         updateChecker.request_stop();
         updateChecker.join();

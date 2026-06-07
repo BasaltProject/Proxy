@@ -11,6 +11,7 @@
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
+#include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TaskQueue.hpp>
@@ -23,8 +24,11 @@
 #include <basalt/wire/text/Component.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <condition_variable>
 #include <exception>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -787,6 +791,50 @@ std::vector<std::string> ProxyRuntime::backendNames() const {
     for (const auto& backend : impl_->topology.load()->backends)
         names.push_back(backend.name);
     return names;
+}
+
+std::vector<BackendInfo> ProxyRuntime::backends() const {
+    std::vector<BackendInfo> result;
+    for (const auto& backend : impl_->topology.load()->backends)
+        result.push_back({backend.name, backend.host, backend.port, backend.protocol, backend.automatic,
+                          std::string{wire::auth::forwarding::forwardingModeName(backend.forwarding)}});
+    return result;
+}
+
+std::expected<std::vector<SessionInfo>, std::string> ProxyRuntime::sessions(std::chrono::milliseconds timeout) const {
+    if (!impl_->started.load() || impl_->stopped.load())
+        return std::unexpected("the proxy is not running");
+
+    struct Collected {
+        std::mutex mutex;
+        std::condition_variable done;
+        std::vector<SessionInfo> sessions;
+        std::size_t remaining = 0;
+    };
+
+    static constexpr std::array<std::string_view, 4> kPhases{"handshake", "login", "configuration", "play"};
+    const auto collected = std::make_shared<Collected>();
+    collected->remaining = impl_->owners.size();
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, collected] {
+                std::vector<SessionInfo> mine;
+                for (const auto& [id, session] : destination->sessions)
+                    mine.push_back({std::string{session->playerName()}, session->playerUuid(),
+                                    std::string{session->activeBackendName()}, session->clientProtocol(),
+                                    std::string{kPhases[session->phase()]}});
+                const std::lock_guard lock{collected->mutex};
+                std::ranges::move(mine, std::back_inserter(collected->sessions));
+                --collected->remaining;
+                collected->done.notify_all();
+            }))
+            return std::unexpected("the control queue is full");
+        (void)destination->loop.wake();
+    }
+    std::unique_lock lock{collected->mutex};
+    if (!collected->done.wait_for(lock, timeout, [&collected] { return collected->remaining == 0; }))
+        return std::unexpected("the session owners did not answer in time");
+    return std::move(collected->sessions);
 }
 
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }
