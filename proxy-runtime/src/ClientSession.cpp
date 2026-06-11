@@ -88,14 +88,6 @@ ClientSession::ClientSession(
         input_.tryReserve(kBufferCapacity) && frame_.tryReserve(kBufferCapacity) && output_.tryReserve(kBufferCapacity);
 }
 
-ClientSession::~ClientSession() {
-    closeBackends();
-    if (identityClaimed_)
-        identities_.release(profile_->id);
-    if (authentication_)
-        authentication_->request_stop();
-}
-
 bool ClientSession::inPlay() const {
     return state_ == State::kPlay && activeBackend_ && !recovering_ && !closing_ && profile_;
 }
@@ -214,10 +206,18 @@ bool ClientSession::rememberSettings(std::span<const std::uint8_t> packet) {
 
 bool ClientSession::packet() {
     namespace protocol = wire::protocol;
-    const auto raw = frame_.readable();
+    auto raw = frame_.readable();
     const auto id = protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    switch (tap(frame_, true, id, raw)) {
+    case Tapped::kDrop:
+        return true;
+    case Tapped::kFailed:
+        return false;
+    default:
+        break;
+    }
     if (state_ == State::kCookieResponse)
         return id == protocol::cookie::ResponsePacket::kLoginId && cookieResponse();
     if (state_ == State::kLoginAck) {

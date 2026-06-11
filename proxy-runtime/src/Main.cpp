@@ -30,6 +30,8 @@
 #include <basalt/wire/config/BasicPlaceholders.hpp>
 #include <basalt/wire/io/LogFile.hpp>
 #include <basalt/wire/io/Platform.hpp>
+#include <basalt/wire/plugins/PacketNaming.hpp>
+#include <basalt/wire/plugins/PacketRegistry.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -201,6 +203,17 @@ int run(const cliCommand::Run& command) {
     };
     std::stop_source stopping;
     RuntimeServices services;
+    std::shared_ptr<wire::plugins::PacketRegistry> packetRegistry;
+    if (configuration->plugins.enabled) {
+        packetRegistry = std::make_shared<wire::plugins::PacketRegistry>(
+            [&pluginHost](const void* owner, const wire::lua::LuaRef& function, wire::plugins::PluginPacket& packet) {
+                auto* host = pluginHost.load(std::memory_order_acquire);
+                return host == nullptr || host->deliverPacket(owner, function, packet);
+            },
+            [](const wire::plugins::PacketAddress& address) { return wire::plugins::packetNaming::of(address); });
+        services.packets = packetRegistry;
+        services.packetMaxBytes = configuration->plugins.packetMaxKib * 1024;
+    }
     services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
         return (*serverList)->statusFor(protocol, host, address);
     };
@@ -415,7 +428,14 @@ int run(const cliCommand::Run& command) {
         settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
         settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
         settings.queueSize = configuration->plugins.queueSize;
+        settings.packets = packetRegistry;
+        settings.packetTimeout = std::chrono::milliseconds{configuration->plugins.packetTimeoutMs};
+        settings.packetMaxBytes = configuration->plugins.packetMaxKib * 1024;
         proxy::plugins::PluginHooks hooks;
+        hooks.packet = [&runtime](std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
+                                  std::span<const std::uint8_t> body) {
+            return runtime->sendPacket(player, serverbound, phase, id, body);
+        };
         hooks.servers = [&runtime] { return runtime->backendNames(); };
         hooks.send = [&runtime, &bedrockPlayers](std::string_view player, std::string_view backend) {
             auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire);

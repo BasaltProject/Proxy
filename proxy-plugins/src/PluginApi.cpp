@@ -1,5 +1,7 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/wire/plugins/PacketNaming.hpp>
+#include <basalt/wire/plugins/PacketView.hpp>
 #include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
 
@@ -331,7 +333,11 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
 
     const auto schedule = [server, self](PluginHost::Timer timer) {
         timer.plugin = self;
-        server->timers_.push_back(std::make_unique<PluginHost::Timer>(std::move(timer)));
+        {
+            std::lock_guard lock{server->mutex_};
+            server->timers_.push_back(std::make_unique<PluginHost::Timer>(std::move(timer)));
+        }
+        server->wake_.notify_one();
     };
     wire::lua::installWaitingFunction(*plugin.sandbox, "wait",
                                       [schedule, self](LuaArgs& args, wire::lua::LuaCall::Resume resume) {
@@ -476,6 +482,89 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 0;
     });
     lua.setGlobal("cmd");
+
+    if (manifest.capabilities.packets && server->settings_.packets) {
+        lua.pushTable();
+        for (const bool observer : {false, true}) {
+            wire::lua::pushHostFunction(
+                lua, observer ? "packet.watch" : "packet.on", [server, self, observer](LuaArgs& args) {
+                    const std::string name = args.checkString(1);
+                    const bool hasOptions = args.count() >= 3;
+                    const std::int32_t at = hasOptions ? 3 : 2;
+                    if (!args.isFunction(at))
+                        return args.fail("packet.on(name, fn) needs a function");
+                    const auto scope = wire::plugins::packetNaming::scopeOf(name);
+                    if (!scope)
+                        return args.fail("this proxy has no packet called '" + name +
+                                         "'. Names look like clientbound.set_title_text, serverbound.play.* or "
+                                         "clientbound.configuration.0x07");
+                    wire::plugins::EventPriority priority = wire::plugins::EventPriority::Normal;
+                    bool failClosed = false;
+                    if (hasOptions && args.isTable(2)) {
+                        args.pushField(2, "fail");
+                        if (args.isString(-1)) {
+                            const std::string written = args.toText(-1);
+                            args.pop(1);
+                            if (written != "open" && written != "closed")
+                                return args.fail("fail is \"open\" or \"closed\", not '" + written + "'");
+                            failClosed = written == "closed";
+                        } else {
+                            args.pop(1);
+                        }
+                        args.pushField(2, "priority");
+                        if (args.isString(-1)) {
+                            const std::string written = args.toText(-1);
+                            args.pop(1);
+                            const auto spelled = wire::plugins::priorityOf(written);
+                            if (!spelled)
+                                return args.fail("'" + written + "' is not a priority");
+                            priority = *spelled;
+                        } else {
+                            args.pop(1);
+                        }
+                    }
+                    self->packetHandles.push_back(
+                        server->settings_.packets->add(self, *scope, LuaRef::of(args.state(), at),
+                                                       static_cast<std::int32_t>(priority), observer, failClosed));
+                    return 0;
+                });
+            lua.setField(observer ? "watch" : "on");
+        }
+        for (const bool inbound : {false, true}) {
+            wire::lua::pushHostFunction(
+                lua, inbound ? "packet.receive" : "packet.send", [server, inbound](LuaArgs& args) {
+                    const std::string verb = inbound ? "packet.receive" : "packet.send";
+                    std::optional<std::string> player =
+                        args.isTable(1) ? args.fieldAsText(1, "name") : args.stringOrNull(1);
+                    if (!player)
+                        return args.fail(verb + "(player, name, bytes) needs a player");
+                    const std::string name = args.checkString(2);
+                    const auto address = wire::plugins::packetNaming::resolve(name);
+                    if (!address || address->serverbound != inbound)
+                        return args.fail("'" + name + "' is not a " + (inbound ? "serverbound" : "clientbound") +
+                                         " packet");
+                    if (!args.isTable(3))
+                        return args.fail(verb + " needs the body as a list of bytes");
+                    const std::int64_t length = args.length(3);
+                    if (length < 0 || static_cast<std::size_t>(length) > server->settings_.packetMaxBytes)
+                        return args.fail("a packet body is limited to " +
+                                         std::to_string(server->settings_.packetMaxBytes) + " bytes here");
+                    std::vector<std::uint8_t> bytes;
+                    bytes.reserve(static_cast<std::size_t>(length));
+                    for (std::int64_t position = 1; position <= length; position++) {
+                        args.pushIndex(3, position);
+                        bytes.push_back(static_cast<std::uint8_t>(args.toInteger(-1) & 0xFF));
+                        args.pop(1);
+                    }
+                    args.pushBoolean(server->hooks_.packet &&
+                                     server->hooks_.packet(*player, inbound, static_cast<std::int32_t>(address->phase),
+                                                           address->id, bytes));
+                    return 1;
+                });
+            lua.setField(inbound ? "receive" : "send");
+        }
+        lua.setGlobal("packet");
+    }
 
     const bool storage = manifest.capabilities.storage;
     lua.pushTable();

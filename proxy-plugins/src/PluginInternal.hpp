@@ -36,6 +36,7 @@ struct PluginHost::Plugin {
     std::unique_ptr<wire::plugins::PluginText> text;
     bool storage = false;
     bool playersData = false;
+    std::vector<wire::plugins::PluginHandle> packetHandles;
     int strikes = 0;
     bool broken = false;
 };

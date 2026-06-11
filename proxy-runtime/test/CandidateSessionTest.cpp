@@ -4,6 +4,7 @@
 #include "RuntimeFixture.hpp"
 
 #include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
+#include <basalt/wire/plugins/PacketRegistry.hpp>
 
 #include <algorithm>
 
@@ -539,3 +540,4 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         CHECK(session.accounted());
     }
 }
+

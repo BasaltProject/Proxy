@@ -135,6 +135,10 @@ struct PluginsConfig {
     std::int64_t instructionsPerTurn = 250000;
     std::size_t memoryMib = 32;
     std::size_t queueSize = 256;
+    /// Packets larger than this go past plugin packet listeners untouched.
+    std::size_t packetMaxKib = 256;
+    /// How long a relayed packet waits for the plugin interpreter before it goes on untouched.
+    std::int64_t packetTimeoutMs = 25;
     /// Plugin id to the permissions the operator grants it; a manifest asking for more is not loaded.
     std::map<std::string, std::vector<std::string>> allow;
 

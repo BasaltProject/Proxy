@@ -12,6 +12,8 @@ struct RelayCounters {
     std::atomic<std::uint64_t> towardBackends{0};
     std::atomic<std::uint64_t> logins{0};
     std::atomic<std::uint64_t> backendChanges{0};
+    /// Packets a plugin listener was spared because they exceed the size limit for plugins.
+    std::atomic<std::uint64_t> packetsOversize{0};
     /// Sessions that ended while in the handshake or status, login, configuration or play.
     std::array<std::atomic<std::uint64_t>, 4> endedIn{};
 };

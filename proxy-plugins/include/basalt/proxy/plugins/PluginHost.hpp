@@ -5,6 +5,7 @@
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
 #include <basalt/wire/lua/LuaSandbox.hpp>
+#include <basalt/wire/plugins/PacketRegistry.hpp>
 #include <basalt/wire/plugins/PluginPackage.hpp>
 #include <basalt/wire/sql/Sqlite.hpp>
 
@@ -21,6 +22,7 @@
 #include <optional>
 #include <set>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -36,6 +38,12 @@ struct PluginSettings {
     std::size_t queueSize = 256;
     /// Plugin id to permission names (commands, network, packets) the operator grants.
     std::map<std::string, std::vector<std::string>> allow;
+    /// Where packet listeners register; the runtime delivers relayed packets to it. Unset disables the packets API.
+    std::shared_ptr<wire::plugins::PacketRegistry> packets;
+    /// How long a relayed packet waits for the plugin interpreter before it goes on untouched.
+    std::chrono::milliseconds packetTimeout{25};
+    /// The most bytes a listener may set as a body or send.
+    std::size_t packetMaxBytes = 256 * 1024;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.
@@ -53,6 +61,11 @@ struct PluginHooks {
     runtime::CommandDispatcher* commands = nullptr;
     /// Whether a player's group grants a permission node.
     std::function<bool(std::string_view player, std::string_view node)> hasPermission;
+    /// Sends a packet toward a player's client, or toward its backend as if the client had sent it; true once handed
+    /// over.
+    std::function<bool(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
+                       std::span<const std::uint8_t> body)>
+        packet;
 };
 
 /// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
@@ -83,6 +96,15 @@ public:
 
     [[nodiscard]] std::size_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
+    /// Runs one Lua packet listener on the calling thread, a session owner; false when it timed out waiting to run.
+    [[nodiscard]] bool deliverPacket(const void* owner, const wire::lua::LuaRef& function,
+                                     wire::plugins::PluginPacket& packet);
+
+    /// Relayed packets that went on untouched because the plugin interpreter was busy for longer than the timeout.
+    [[nodiscard]] std::size_t packetTimeouts() const noexcept {
+        return packetTimeouts_.load(std::memory_order_relaxed);
+    }
+
     [[nodiscard]] std::size_t delivered() const noexcept { return delivered_.load(std::memory_order_relaxed); }
 
 private:
@@ -98,6 +120,7 @@ private:
               const wire::plugins::PluginManifest& manifest);
     void run(std::stop_token stop);
     void shutdown();
+    void dropPacketListeners();
 
     struct ConsoleCall {
         std::vector<std::string> words;
@@ -141,6 +164,9 @@ private:
     std::deque<Task> queue_;
     mutable std::shared_mutex commandsMutex_;
     std::mutex reloadMutex_;
+    /// Held while any Lua of any plugin runs, on the plugin thread or on a session owner delivering a packet.
+    std::recursive_timed_mutex luaMutex_;
+    std::atomic<std::size_t> packetTimeouts_{0};
     std::map<std::string, std::vector<std::unique_ptr<Entry>>, std::less<>> commands_;
     std::vector<std::unique_ptr<Timer>> timers_;
     std::map<std::string, Player, std::less<>> roster_;

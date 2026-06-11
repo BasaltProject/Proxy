@@ -6,6 +6,7 @@
 #include <basalt/wire/config/UiConfigs.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
+#include <basalt/wire/plugins/PluginPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -93,6 +95,11 @@ struct RuntimeServices {
     std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
                                                               std::string_view address)>
         status = {};
+    /// Plugin listeners for the packets sessions relay; unset costs nothing. Runs on owner threads and may block
+    /// briefly.
+    std::shared_ptr<wire::plugins::PluginPacketBus> packets = {};
+    /// Packets larger than this go past plugin listeners untouched.
+    std::size_t packetMaxBytes = 256 * 1024;
 };
 
 /// One session as its owner sees it; name and uuid stay empty until the player is authenticated.
@@ -142,6 +149,10 @@ public:
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.
     [[nodiscard]] bool kickPlayer(std::string_view player, std::string_view reason);
+    /// Thread-safe. Hands a packet (phase, id and body) to the session owners to send toward the client, or toward the
+    /// backend as if the client had sent it; true once handed over.
+    [[nodiscard]] bool sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
+                                  std::span<const std::uint8_t> body);
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

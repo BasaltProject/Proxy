@@ -195,7 +195,8 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     if (pluginsTable) {
         detail::Reader plugins{std::string{directory} + "/plugins.toml", {}};
         plugins.keys(pluginsTable,
-                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size", "allow"},
+                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size",
+                      "packet-max-kib", "packet-timeout-ms", "allow"},
                      "");
         plugins.scalar(pluginsTable, "enabled", result.plugins.enabled, "");
         plugins.scalar(pluginsTable, "directory", result.plugins.directory, "");
@@ -204,6 +205,8 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                         "");
         plugins.integer(pluginsTable, "memory-mib", result.plugins.memoryMib, 1, 1024, "");
         plugins.integer(pluginsTable, "queue-size", result.plugins.queueSize, 1, 65536, "");
+        plugins.integer(pluginsTable, "packet-max-kib", result.plugins.packetMaxKib, 1, 2048, "");
+        plugins.integer(pluginsTable, "packet-timeout-ms", result.plugins.packetTimeoutMs, 1, 1000, "");
         if (const auto* allow = plugins.child(*pluginsTable, "allow")) {
             for (const auto& id : allow->keys()) {
                 auto names = plugins.strings(allow->find(id), "allow." + id);

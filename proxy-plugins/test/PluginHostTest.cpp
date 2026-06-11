@@ -1,6 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
 #include <basalt/proxy/plugins/PluginHost.hpp>
+#include <basalt/wire/plugins/PacketNaming.hpp>
+#include <basalt/wire/plugins/PacketRegistry.hpp>
 
 #include <doctest.h>
 
@@ -200,4 +202,72 @@ TEST_CASE("plugin data persists across restarts and stays private to each plugin
     std::lock_guard lock{mutex};
     CHECK(std::ranges::count(lines, "counter: visits 1") == 1);
     CHECK(std::ranges::count(lines, "counter: visits 2") == 1);
+}
+
+TEST_CASE("packet listeners written in Lua read, edit, cancel and send, and a broken one is contained") {
+    using namespace basalt::wire::plugins;
+    const std::filesystem::path root = std::filesystem::path{BASALT_TEST_SCRATCH_DIR} / "packet-plugins";
+    std::filesystem::remove_all(root);
+    manifest(root / "tap", "tap", "[capabilities]\npackets = true\n");
+    write(root / "tap" / "src" / "main.lua",
+          "packet.on('clientbound.play.*', function(p)\n"
+          "  if p.id == 5 then p.bytes = {p.bytes[1] + 1, 9} elseif p.id == 6 then p:cancel() end\n"
+          "  if p.id == 7 then p:send('clientbound.play.0x08', {1, 2}) end\n"
+          "end)\n"
+          "packet.watch('*', function(p) p.cancelled = true end)\n");
+    manifest(root / "loop", "loop", "[capabilities]\npackets = true\n");
+    write(root / "loop" / "src" / "main.lua", "packet.on('serverbound.*', function() while true do end end)\n");
+    plugins::PluginSettings settings;
+    settings.directory = root.string();
+    settings.limits.instructionsPerTurn = 20000;
+    settings.allow = {{"tap", {"packets"}}, {"loop", {"packets"}}};
+    std::atomic<plugins::PluginHost*> hostPointer{nullptr};
+    auto replaced = std::make_shared<PacketRegistry>(
+        [&hostPointer](const void* owner, const basalt::wire::lua::LuaRef& fn, PluginPacket& packet) {
+            return hostPointer.load()->deliverPacket(owner, fn, packet);
+        },
+        [](const PacketAddress& address) { return packetNaming::of(address); });
+    settings.packets = replaced;
+    auto host = plugins::PluginHost::start(settings, {});
+    REQUIRE(host);
+    hostPointer.store(host->get());
+    CHECK((*host)->loaded() == 2);
+
+    struct Endpoint final : PacketEndpoint {
+        std::vector<std::int32_t> sent;
+
+        bool sendClientbound(std::int32_t id, std::span<const std::uint8_t>, bool) override {
+            sent.push_back(id);
+            return true;
+        }
+
+        bool receiveServerbound(std::int32_t, std::span<const std::uint8_t>, bool) override { return true; }
+
+        void close() override {}
+
+        std::uint64_t connectionId() const override { return 1; }
+
+        std::string address() const override { return {}; }
+
+        std::uint16_t port() const override { return 0; }
+    };
+
+    const auto endpoint = std::make_shared<Endpoint>();
+    PluginPacket packet;
+    packet.endpoint = endpoint;
+    packet.address = {PacketPhase::Play, false, 5};
+    packet.bytes = {4};
+    CHECK(replaced->fire(packet));
+    CHECK(packet.replacement == std::optional{std::vector<std::uint8_t>{5, 9}});
+    packet.address.id = 6;
+    CHECK_FALSE(replaced->fire(packet));
+    packet.address.id = 7;
+    CHECK(replaced->fire(packet));
+    CHECK(endpoint->sent == std::vector<std::int32_t>{8});
+    packet.address = {PacketPhase::Play, true, 1};
+    for (int i = 0; i < 8; ++i)
+        CHECK(replaced->fire(packet));
+    packet.address = {PacketPhase::Play, false, 5};
+    CHECK(replaced->fire(packet));
+    CHECK(packet.replacement.has_value());
 }

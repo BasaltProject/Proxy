@@ -2,6 +2,7 @@
 
 #include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
+#include <basalt/wire/plugins/PacketView.hpp>
 #include <basalt/wire/plugins/PluginFolder.hpp>
 #include <basalt/wire/plugins/PluginOrder.hpp>
 #include <basalt/wire/sql/Migrations.hpp>
@@ -45,13 +46,28 @@ constexpr int kStrikeLimit = 5;
 PluginHost::PluginHost(PluginSettings settings, PluginHooks hooks)
     : settings_(std::move(settings)), hooks_(std::move(hooks)) {}
 
-PluginHost::~PluginHost() { shutdown(); }
+PluginHost::~PluginHost() {
+    shutdown();
+    const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
+    dropPacketListeners();
+}
+
+void PluginHost::dropPacketListeners() {
+    for (auto& plugin : plugins_) {
+        for (auto& handle : plugin->packetHandles)
+            handle.remove();
+        plugin->packetHandles.clear();
+    }
+    if (settings_.packets)
+        settings_.packets->drain();
+}
 
 void PluginHost::shutdown() {
     thread_.request_stop();
     wake_.notify_all();
     if (thread_.joinable())
         thread_.join();
+    const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
     for (auto& plugin : plugins_)
         if (!plugin->broken)
             for (const wire::lua::LuaRef& handler : plugin->onDisable)
@@ -77,7 +93,10 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
         if (const auto migrated = wire::sql::migrate(*host->database_, kMigrations); !migrated)
             return std::unexpected("plugin database " + host->settings_.database + ": " + migrated.error());
     }
-    host->loadPackages();
+    {
+        const std::lock_guard<std::recursive_timed_mutex> turn{host->luaMutex_};
+        host->loadPackages();
+    }
     host->loading_ = false;
     host->thread_ = std::jthread{[raw = host.get()](std::stop_token stop) { raw->run(stop); }};
     return host;
@@ -248,16 +267,20 @@ std::size_t PluginHost::reload() {
     if (hooks_.commands)
         hooks_.commands->removeOwners("plugin:");
     {
-        std::unique_lock lock{commandsMutex_};
-        commands_.clear();
+        const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
+        dropPacketListeners();
+        {
+            std::unique_lock lock{commandsMutex_};
+            commands_.clear();
+        }
+        plugins_.clear();
+        installed_.clear();
+        roster_.clear();
+        loaded_.store(0, std::memory_order_relaxed);
+        loading_ = true;
+        loadPackages();
+        loading_ = false;
     }
-    plugins_.clear();
-    installed_.clear();
-    roster_.clear();
-    loaded_.store(0, std::memory_order_relaxed);
-    loading_ = true;
-    loadPackages();
-    loading_ = false;
     thread_ = std::jthread{[this](std::stop_token stop) { run(stop); }};
     return loaded();
 }
@@ -328,8 +351,10 @@ void PluginHost::run(std::stop_token stop) {
     for (auto& plugin : plugins_) {
         if (plugin->broken)
             continue;
-        for (const wire::lua::LuaRef& handler : plugin->onEnable)
+        for (const wire::lua::LuaRef& handler : plugin->onEnable) {
+            const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
             call(*plugin, handler, {}, "plugin.enable");
+        }
     }
     while (!stop.stop_requested()) {
         Task task;
@@ -353,6 +378,7 @@ void PluginHost::run(std::stop_token stop) {
                 have = true;
             }
         }
+        const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
         runTimers(std::chrono::steady_clock::now());
         if (!have)
             continue;
@@ -372,14 +398,17 @@ void PluginHost::run(std::stop_token stop) {
 void PluginHost::runTimers(std::chrono::steady_clock::time_point now) {
     // A timer may register another, so due ones are taken out before any of them runs.
     std::vector<std::unique_ptr<Timer>> due;
-    for (auto it = timers_.begin(); it != timers_.end();) {
-        if ((*it)->cancelled && (*it)->cancelled->load()) {
-            it = timers_.erase(it);
-        } else if ((*it)->due <= now) {
-            due.push_back(std::move(*it));
-            it = timers_.erase(it);
-        } else {
-            ++it;
+    {
+        std::lock_guard lock{mutex_};
+        for (auto it = timers_.begin(); it != timers_.end();) {
+            if ((*it)->cancelled && (*it)->cancelled->load()) {
+                it = timers_.erase(it);
+            } else if ((*it)->due <= now) {
+                due.push_back(std::move(*it));
+                it = timers_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
     for (auto& timer : due) {
@@ -393,6 +422,7 @@ void PluginHost::runTimers(std::chrono::steady_clock::time_point now) {
         call(*timer->plugin, *timer->function, {}, "timer");
         if (timer->period.count() > 0 && !(timer->cancelled && timer->cancelled->load())) {
             timer->due = now + timer->period;
+            std::lock_guard lock{mutex_};
             timers_.push_back(std::move(timer));
         }
     }
@@ -414,6 +444,50 @@ void PluginHost::call(Plugin& plugin, const wire::lua::LuaRef& function,
                                                     }
                                                     report(*target, *failure, reason);
                                                 }));
+}
+
+bool PluginHost::deliverPacket(const void* owner, const wire::lua::LuaRef& function,
+                               wire::plugins::PluginPacket& packet) {
+    std::unique_lock<std::recursive_timed_mutex> turn{luaMutex_, std::defer_lock};
+    if (!turn.try_lock_for(settings_.packetTimeout)) {
+        const std::size_t waited = packetTimeouts_.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (hooks_.log && (waited == 1 || waited % 1000 == 0))
+            hooks_.log("plugins", "packet listeners waited over " + std::to_string(settings_.packetTimeout.count()) +
+                                      " ms for the plugin interpreter: " + std::to_string(waited) +
+                                      " packet(s) so far went on untouched or were cancelled by fail = \"closed\" "
+                                      "listeners");
+        return false;
+    }
+    auto& plugin = *static_cast<Plugin*>(const_cast<void*>(owner));
+    if (plugin.broken)
+        return true;
+    wire::plugins::PacketViewHost view;
+    view.maxBodyBytes = settings_.packetMaxBytes;
+    view.pushPlayer = [&plugin, this](wire::lua::LuaArgs& lua, const wire::plugins::PluginPacket& source) {
+        if (source.playerName.empty()) {
+            lua.pushNil();
+            return;
+        }
+        const Player* known = findPlayer(source.playerName);
+        PluginApi::pushPlayer(lua, plugin,
+                              known ? *known : Player{source.playerName, source.playerUuid, source.backend});
+    };
+    plugin.sandbox->refill();
+    std::shared_ptr<wire::plugins::PacketViewLease> lease;
+    const auto answered = wire::lua::callSync(
+        *plugin.sandbox, function,
+        [&](wire::lua::LuaArgs& lua) {
+            lease = wire::plugins::pushPacketView(lua, packet, view);
+            return 1;
+        },
+        0);
+    if (lease)
+        lease->close();
+    if (answered)
+        plugin.strikes = 0;
+    else
+        report(plugin, answered.error(), "packet " + packet.name);
+    return true;
 }
 
 void PluginHost::report(Plugin& plugin, const wire::lua::LuaFailure& failure, std::string_view why) {

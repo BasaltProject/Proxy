@@ -22,6 +22,7 @@
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 #include <basalt/wire/multiversion/java/JavaTranslators.hpp>
+#include <basalt/wire/plugins/PluginPackets.hpp>
 #include <basalt/wire/protocol/ProtocolState.hpp>
 #include <basalt/wire/protocol/play/HudPackets.hpp>
 
@@ -109,6 +110,13 @@ public:
     /// Disconnects the player with a MiniMessage reason; ignored unless the client is in play.
     void kick(std::string_view reason);
     [[nodiscard]] std::string_view activeBackendName() const;
+    /// Owner only. Lets plugin listeners see, edit and cancel the packets this session relays.
+    void attachPackets(std::shared_ptr<wire::plugins::PluginPacketBus> bus, std::uint64_t connection,
+                       std::size_t maxBytes);
+    /// Owner only. Sends a plugin's packet toward the client or the backend; false when the session is in another
+    /// phase.
+    [[nodiscard]] bool pluginPacket(bool serverbound, std::int32_t phase, std::int32_t id,
+                                    std::span<const std::uint8_t> body);
     bool announced = false;
     std::string announcedBackend;
     [[nodiscard]] bool requestBackendChange(std::size_t target);
@@ -216,6 +224,22 @@ private:
     [[nodiscard]] bool synthesizeClientPacket(std::int32_t id);
     bool synthesizing_ = false;
     enum class ConnectionStage { kIdle, kResolving, kConnecting };
+
+    class SessionEndpoint;
+    enum class Tapped { kPass, kDrop, kChanged, kFailed };
+    /// Runs the plugin listeners on the packet in `source`, positioned after its id; `whole` is the edited packet.
+    [[nodiscard]] Tapped tap(wire::io::ByteBuffer& source, bool serverbound, std::int32_t id,
+                             std::span<const std::uint8_t>& whole);
+    [[nodiscard]] bool injectPacket(bool serverbound, std::int32_t id, std::span<const std::uint8_t> body,
+                                    bool intercept);
+    [[nodiscard]] std::optional<wire::plugins::PacketPhase> tapPhase() const;
+    [[nodiscard]] bool tapEditable(bool serverbound, std::int32_t id) const;
+    std::shared_ptr<wire::plugins::PluginPacketBus> packets_;
+    std::uint64_t connectionId_ = 0;
+    std::size_t tapMaxBytes_ = 0;
+    int tapDepth_ = 0;
+    wire::plugins::PluginPacket tapped_;
+    std::shared_ptr<SessionEndpoint> endpoint_;
 
     enum class PluginMessageResult { kRelay, kConsumed, kInvalid };
     [[nodiscard]] PluginMessageResult pluginMessage(bool fromBackend);

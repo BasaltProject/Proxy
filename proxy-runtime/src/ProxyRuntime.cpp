@@ -177,6 +177,8 @@ struct ProxyRuntime::Impl {
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())
                 return;
+            if (runtime.services.packets)
+                session->attachPackets(runtime.services.packets, id, runtime.services.packetMaxBytes);
             auto timer = timers.schedule(session->deadline(), id);
             if (!timer)
                 return;
@@ -749,6 +751,33 @@ bool ProxyRuntime::tellPlayer(std::string_view player, std::string_view text) {
                     session->tell(*line);
                     if (!destination->refresh(id, *session))
                         destination->close(id);
+                    break;
+                }
+            }))
+            handed = false;
+        else
+            (void)destination->loop.wake();
+    }
+    return handed;
+}
+
+bool ProxyRuntime::sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
+                              std::span<const std::uint8_t> body) {
+    if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player) || id < 0 ||
+        body.size() > impl_->services.packetMaxBytes)
+        return false;
+    const auto name = std::make_shared<const std::string>(player);
+    const auto bytes = std::make_shared<const std::vector<std::uint8_t>>(body.begin(), body.end());
+    bool handed = true;
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, name, bytes, serverbound, phase, id] {
+                for (auto& [session_id, session] : destination->sessions) {
+                    if (session->playerName() != *name)
+                        continue;
+                    static_cast<void>(session->pluginPacket(serverbound, phase, id, *bytes));
+                    if (!destination->refresh(session_id, *session))
+                        destination->close(session_id);
                     break;
                 }
             }))

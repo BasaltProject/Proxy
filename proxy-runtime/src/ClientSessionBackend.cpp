@@ -179,6 +179,15 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    switch (tap(frame_, false, id, bytes)) {
+    case Tapped::kDrop:
+        backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+        return true;
+    case Tapped::kFailed:
+        return false;
+    default:
+        break;
+    }
     if (legacyClient() && state_ == State::kPlay) {
         if (id == wire::protocol::play::BossEventPacket::kId)
             trackBossBar(frame_.readable());

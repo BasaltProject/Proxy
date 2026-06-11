@@ -8,6 +8,10 @@ instructions-per-turn = 250000
 memory-mib = 32
 # Events waiting for the plugin thread. A full queue drops the newest event and counts it.
 queue-size = 256
+# Packet listeners (the packets permission) run while a packet is relayed. A packet larger than packet-max-kib goes past
+# them untouched, and one that waits longer than packet-timeout-ms for the plugin interpreter goes on untouched too.
+packet-max-kib = 256
+packet-timeout-ms = 25
 
 # Who may run a plugin command that is declared with a permission is decided by groups.toml, like any other command.
 
