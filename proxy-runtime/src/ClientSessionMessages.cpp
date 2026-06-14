@@ -4,6 +4,7 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/play/SimplePackets.hpp>
 
 #include <algorithm>
 
@@ -32,12 +33,19 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
     const auto channel = frame_.readSpan(static_cast<std::size_t>(channelBytes));
     if (frame_.failed())
         return PluginMessageResult::kInvalid;
-    if (!std::ranges::equal(channel, kBungeeChannel) && !std::ranges::equal(channel, std::string_view{"BungeeCord"}))
+    const std::string_view channelName{reinterpret_cast<const char*>(channel.data()), channel.size()};
+    const bool bungee = channelName == kBungeeChannel || channelName == "BungeeCord";
+    if (!bungee) {
+        if (state_ == State::kPlay && profile_ && pluginMessage_ &&
+            pluginMessage_(profile_->name, channelName, frame_.readable(), fromBackend))
+            return PluginMessageResult::kConsumed;
         return PluginMessageResult::kRelay;
+    }
     if (!fromBackend || state_ != State::kPlay || !backend() || !backends_[backend()->attempt().target].bungeeMessages)
         return PluginMessageResult::kConsumed;
     if (frame_.readableBytes() > kControlPayloadLimit)
         return PluginMessageResult::kInvalid;
+    const auto payload = frame_.readable();
     const auto commandBytes = static_cast<std::uint16_t>(frame_.readShort());
     if (frame_.failed() || commandBytes > kCommandLimit)
         return PluginMessageResult::kInvalid;
@@ -63,8 +71,11 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
     for (const auto known : {std::string_view{"GetServer"}, std::string_view{"GetServers"}, std::string_view{"UUID"}})
         if (std::ranges::equal(command, known))
             name = known;
-    if (name.empty())
+    if (name.empty()) {
+        if (pluginMessage_ && profile_)
+            static_cast<void>(pluginMessage_(profile_->name, channelName, payload, true));
         return PluginMessageResult::kConsumed;
+    }
     if (frame_.readableBytes() != 0 || !profile_)
         return PluginMessageResult::kInvalid;
     std::size_t valueBytes = 0;
@@ -111,6 +122,40 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
     backpressure();
     return PluginMessageResult::kConsumed;
+}
+
+void ClientSession::registerBungeeChannels() {
+    namespace protocol = wire::protocol;
+    if (backend() == nullptr || !backends_[backend()->attempt().target].bungeeMessages)
+        return;
+    constexpr std::string_view kChannels{"BungeeCord\0bungeecord:main", 26};
+    wire::io::ByteBuffer registration;
+    protocol::varInt::write(registration, protocol::play::CustomPayloadPacket::kServerboundId);
+    protocol::writeString(registration, "minecraft:register");
+    registration.writeBytes(
+        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(kChannels.data()), kChannels.size()});
+    if (toBackend(*backend(), registration.readable()))
+        backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+}
+
+void ClientSession::sendPluginMessage(std::string_view channel, std::span<const std::uint8_t> data,
+                                      bool towardBackend) {
+    namespace protocol = wire::protocol;
+    if (!inPlay() || !validName(channel) || data.size() > kControlPayloadLimit)
+        return;
+    frame_.clear();
+    protocol::varInt::write(frame_, towardBackend ? protocol::play::CustomPayloadPacket::kServerboundId
+                                                  : protocol::play::CustomPayloadPacket::kClientboundId);
+    protocol::writeString(frame_, channel);
+    frame_.writeBytes(data);
+    if (!towardBackend) {
+        static_cast<void>(queuePacket(frame_.readable()));
+        return;
+    }
+    if (backend() == nullptr || !toBackend(*backend(), frame_.readable()))
+        return;
+    backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    backpressure();
 }
 
 } // namespace basalt::proxy::runtime::detail

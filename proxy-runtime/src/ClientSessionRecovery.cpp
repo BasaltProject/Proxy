@@ -9,7 +9,9 @@
 
 namespace basalt::proxy::runtime::detail {
 
-bool ClientSession::recoverBackend() {
+bool ClientSession::recoverBackend() { return beginRecovery() && route(); }
+
+bool ClientSession::beginRecovery() {
     if (closing_ || recovering_ || state_ != State::kPlay || !activeBackend_ || startingConfiguration_)
         return false;
     discardCandidate();
@@ -24,7 +26,7 @@ bool ClientSession::recoverBackend() {
     loginDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.loginTimeoutMs};
     readDeadline_ = loginDeadline_;
     changeWhenPrepared_ = true;
-    return route();
+    return true;
 }
 
 bool ClientSession::recoveryFailed() {

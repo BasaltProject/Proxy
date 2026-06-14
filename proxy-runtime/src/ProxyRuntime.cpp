@@ -172,7 +172,8 @@ struct ProxyRuntime::Impl {
                 runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
                 runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
                 runtime.services.playerLogin, runtime.services.kickText, runtime.services.commandSuggestions,
-                runtime.services.loadingMessage, std::move(incoming->access));
+                runtime.services.loadingMessage, std::move(incoming->access), runtime.services.pluginMessage, runtime.services.decide,
+                runtime.services.latency);
             if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())
@@ -248,7 +249,9 @@ struct ProxyRuntime::Impl {
                                                    std::string{session.playerName()},
                                                    session.announcedBackend,
                                                    session.playerUuid(),
-                                                   {}});
+                                                   {},
+                                                   session.clientAddress(),
+                                                   session.clientPort()});
             } else if (backend != session.announcedBackend) {
                 const std::string from = session.announcedBackend;
                 session.announcedBackend = backend;
@@ -761,23 +764,22 @@ bool ProxyRuntime::tellPlayer(std::string_view player, std::string_view text) {
     return handed;
 }
 
-bool ProxyRuntime::sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
-                              std::span<const std::uint8_t> body) {
-    if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player) || id < 0 ||
-        body.size() > impl_->services.packetMaxBytes)
+namespace {
+template <typename Apply>
+bool deliverToPlayer(auto& impl, std::string_view player, Apply apply) {
+    if (!impl.started.load() || impl.stopped.load() || !wire::auth::validLoginName(player))
         return false;
     const auto name = std::make_shared<const std::string>(player);
-    const auto bytes = std::make_shared<const std::vector<std::uint8_t>>(body.begin(), body.end());
     bool handed = true;
-    for (const auto& owner : impl_->owners) {
+    for (const auto& owner : impl.owners) {
         auto* destination = owner.get();
-        if (!destination->mailbox.push([destination, name, bytes, serverbound, phase, id] {
-                for (auto& [session_id, session] : destination->sessions) {
+        if (!destination->mailbox.push([destination, name, apply] {
+                for (auto& [id, session] : destination->sessions) {
                     if (session->playerName() != *name)
                         continue;
-                    static_cast<void>(session->pluginPacket(serverbound, phase, id, *bytes));
-                    if (!destination->refresh(session_id, *session))
-                        destination->close(session_id);
+                    apply(*session);
+                    if (!destination->refresh(id, *session))
+                        destination->close(id);
                     break;
                 }
             }))
@@ -786,6 +788,27 @@ bool ProxyRuntime::sendPacket(std::string_view player, bool serverbound, std::in
             (void)destination->loop.wake();
     }
     return handed;
+}
+} // namespace
+
+bool ProxyRuntime::tellComponent(std::string_view player, wire::text::Component component) {
+    const auto shared = std::make_shared<const wire::text::Component>(std::move(component));
+    return deliverToPlayer(*impl_, player, [shared](auto& session) { session.tell(*shared); });
+}
+
+bool ProxyRuntime::kickComponent(std::string_view player, wire::text::Component component) {
+    const auto shared = std::make_shared<const wire::text::Component>(std::move(component));
+    return deliverToPlayer(*impl_, player, [shared](auto& session) { session.kick(*shared); });
+}
+
+bool ProxyRuntime::sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
+                              std::span<const std::uint8_t> body) {
+    if (id < 0 || body.size() > impl_->services.packetMaxBytes)
+        return false;
+    const auto bytes = std::make_shared<const std::vector<std::uint8_t>>(body.begin(), body.end());
+    return deliverToPlayer(*impl_, player, [bytes, serverbound, phase, id](auto& session) {
+        static_cast<void>(session.pluginPacket(serverbound, phase, id, *bytes));
+    });
 }
 
 bool ProxyRuntime::kickPlayer(std::string_view player, std::string_view reason) {
@@ -816,6 +839,54 @@ bool ProxyRuntime::kickPlayer(std::string_view player, std::string_view reason) 
 std::vector<std::string> ProxyRuntime::playerNames() const {
     std::lock_guard lock{impl_->namesMutex};
     return impl_->names;
+}
+
+void ProxyRuntime::resolveDecision(std::string_view player, std::uint64_t token, DecisionResult result) {
+    static_cast<void>(player);
+    if (!impl_->started.load() || impl_->stopped.load())
+        return;
+    const auto answer = std::make_shared<const DecisionResult>(std::move(result));
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (destination->mailbox.push([destination, token, answer] {
+                for (auto& [id, session] : destination->sessions) {
+                    if (!session->awaiting(token))
+                        continue;
+                    if (!session->decided(token, *answer) || !destination->refresh(id, *session))
+                        destination->close(id);
+                    break;
+                }
+            }))
+            (void)destination->loop.wake();
+    }
+}
+
+bool ProxyRuntime::sendPluginMessage(std::string_view player, std::string_view channel,
+                                     std::span<const std::uint8_t> data, bool towardBackend) {
+    if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player) || channel.empty() ||
+        data.size() > 32768)
+        return false;
+    const auto name = std::make_shared<const std::string>(player);
+    const auto where = std::make_shared<const std::string>(channel);
+    const auto bytes = std::make_shared<const std::vector<std::uint8_t>>(data.begin(), data.end());
+    bool handed = true;
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, name, where, bytes, towardBackend] {
+                for (auto& [id, session] : destination->sessions) {
+                    if (session->playerName() != *name)
+                        continue;
+                    session->sendPluginMessage(*where, *bytes, towardBackend);
+                    if (!destination->refresh(id, *session))
+                        destination->close(id);
+                    break;
+                }
+            }))
+            handed = false;
+        else
+            (void)destination->loop.wake();
+    }
+    return handed;
 }
 
 std::vector<std::string> ProxyRuntime::backendNames() const {
@@ -867,6 +938,13 @@ std::expected<std::vector<SessionInfo>, std::string> ProxyRuntime::sessions(std:
     if (!collected->done.wait_for(lock, timeout, [&collected] { return collected->remaining == 0; }))
         return std::unexpected("the session owners did not answer in time");
     return std::move(collected->sessions);
+}
+
+std::optional<std::pair<std::string, std::uint16_t>> ProxyRuntime::backendEndpoint(std::string_view name) const {
+    for (const auto& backend : impl_->topology.load()->backends)
+        if (backend.name == name)
+            return std::pair{backend.host, backend.port};
+    return std::nullopt;
 }
 
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }

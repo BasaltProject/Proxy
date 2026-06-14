@@ -2,13 +2,24 @@
 
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
+#include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
+#include <basalt/wire/text/ComponentJson.hpp>
 
 #include <algorithm>
+#include <span>
 #include <utility>
 
 namespace basalt::proxy::plugins {
+
+std::optional<wire::text::Component> componentOfJson(std::string_view json) {
+    const auto parsed = wire::common::parseJson(json);
+    if (!parsed)
+        return std::nullopt;
+    return wire::text::componentJson::deserialize(*parsed);
+}
+
 namespace {
 
 using wire::lua::LuaArgs;
@@ -68,6 +79,12 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
     lua.setField("uuid");
     lua.pushString(player.server);
     lua.setField("server");
+    lua.pushString(player.address);
+    lua.setField("address");
+    lua.pushInteger(player.port);
+    lua.setField("port");
+    lua.pushInteger(player.ping);
+    lua.setField("ping");
     lua.pushBoolean(false);
     lua.setField("is_console");
     wire::lua::pushHostFunction(lua, "player.has_permission", [host = plugin.host, name = player.name](LuaArgs& args) {
@@ -210,6 +227,42 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 0;
     });
     lua.setField("kick");
+    wire::lua::pushHostFunction(lua, "send_json", [server](LuaArgs& args) {
+        const auto name = args.fieldAsText(1, "name");
+        if (!name)
+            return args.fail("send_json needs a player: use player:send_json(json)");
+        const auto component = componentOfJson(args.checkString(2));
+        if (!component)
+            return args.fail("send_json needs a text component written as JSON");
+        if (server->hooks_.tellComponent)
+            server->hooks_.tellComponent(*name, *component);
+        return 0;
+    });
+    lua.setField("send_json");
+    wire::lua::pushHostFunction(lua, "kick_json", [server](LuaArgs& args) {
+        const auto name = args.fieldAsText(1, "name");
+        if (!name)
+            return args.fail("kick_json needs a player: use player:kick_json(json)");
+        const auto component = componentOfJson(args.checkString(2));
+        if (!component)
+            return args.fail("kick_json needs a text component written as JSON");
+        if (server->hooks_.kickComponent)
+            server->hooks_.kickComponent(*name, *component);
+        return 0;
+    });
+    lua.setField("kick_json");
+    wire::lua::pushHostFunction(lua, "message", [server](LuaArgs& args) {
+        const auto name = args.fieldAsText(1, "name");
+        if (!name)
+            return args.fail("message needs a player: use player:message(channel, data)");
+        const std::string channel = args.checkString(2);
+        const std::string data = args.checkString(3);
+        const bool toClient = args.stringOrNull(4).value_or("backend") == "client";
+        const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t*>(data.data()), data.size()};
+        args.pushBoolean(server->hooks_.sendMessage && server->hooks_.sendMessage(*name, channel, bytes, !toClient));
+        return 1;
+    });
+    lua.setField("message");
     lua.setField("__index");
     plugin.playerMeta = LuaRef::take(lua.state());
 
@@ -257,7 +310,8 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     });
     lua.setField("by_uuid");
     wire::lua::pushHostFunction(lua, "players.count", [server](LuaArgs& args) {
-        args.pushInteger(static_cast<std::int64_t>(server->roster_.size()));
+        const auto where = args.stringOrNull(1);
+        args.pushInteger(static_cast<std::int64_t>(where ? server->playersOn(*where).size() : server->roster_.size()));
         return 1;
     });
     lua.setField("count");
@@ -286,6 +340,26 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 1;
     });
     lua.setField("exists");
+    wire::lua::pushHostFunction(lua, "servers.address", [server](LuaArgs& args) {
+        const auto found =
+            server->hooks_.serverAddress ? server->hooks_.serverAddress(args.checkString(1)) : std::nullopt;
+        if (!found)
+            return 0;
+        args.pushString(found->first);
+        args.pushInteger(found->second);
+        return 2;
+    });
+    lua.setField("address");
+    wire::lua::pushHostFunction(lua, "servers.players", [server, pushOne](LuaArgs& args) {
+        args.pushTable();
+        std::int64_t position = 1;
+        for (const std::string& name : server->playersOn(args.checkString(1))) {
+            pushOne(args, server->findPlayer(name));
+            args.setIndex(position++);
+        }
+        return 1;
+    });
+    lua.setField("players");
     lua.setGlobal("servers");
 
     wire::lua::pushHostFunction(lua, "t", [self](LuaArgs& args) {
@@ -397,14 +471,19 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                 return 0;
             }
             if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
-                name != kKickEvent && name != kPingEvent && name != kLoginEvent)
-                return args.fail("there is no event called '" + name +
-                                 "'; this proxy has plugin.enable, plugin.disable, " + std::string{kJoinEvent} + ", " +
-                                 std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} + ", " +
-                                 std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " +
-                                 std::string{kPingEvent} + ", " + std::string{kLoginEvent});
+                name != kKickEvent && name != kPingEvent && name != kLoginEvent && name != kMessageEvent &&
+                name != kPreConnectEvent && name != kCommandEvent)
+                return args.fail(
+                    "there is no event called '" + name + "'; this proxy has plugin.enable, plugin.disable, " +
+                    std::string{kJoinEvent} + ", " + std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} +
+                    ", " + std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " + std::string{kPingEvent} +
+                    ", " + std::string{kLoginEvent} + ", " + std::string{kMessageEvent} + ", " +
+                    std::string{kPreConnectEvent} + ", " + std::string{kCommandEvent});
             PluginHost::Plugin::Handler handler;
+            handler.observer = observer;
             handler.function = LuaRef::of(args.state(), at);
+            if (!observer)
+                self->host->deciders_.fetch_or(decisionBit(name));
             if (options != 0 && args.isTable(options)) {
                 args.pushField(options, "priority");
                 if (args.isString(-1)) {
@@ -417,7 +496,8 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                 } else {
                     args.pop(1);
                 }
-                for (const std::string_view field : {"player_name", "player_uuid", "server", "from_server"}) {
+                for (const std::string_view field :
+                     {"player_name", "player_uuid", "server", "from_server", "channel"}) {
                     args.pushField(options, field);
                     if (args.isString(-1))
                         handler.filters.emplace(std::string{field}, args.toText(-1));

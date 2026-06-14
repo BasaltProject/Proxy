@@ -8,6 +8,7 @@
 #include <basalt/wire/io/TcpSocket.hpp>
 #include <basalt/wire/plugins/PluginPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
+#include <basalt/wire/text/Component.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -19,7 +20,9 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace basalt::proxy::config {
@@ -28,7 +31,7 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
-enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin };
+enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin, kLatency };
 
 struct PlayerEvent {
     PlayerEventKind kind;
@@ -38,6 +41,10 @@ struct PlayerEvent {
     std::string uuid;
     /// The backend a switch came from; for a chat, the message.
     std::string from;
+    /// The client's address and port, set on a join.
+    std::string address{};
+    std::uint16_t port = 0;
+    std::int64_t value = 0;
 };
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
@@ -56,6 +63,38 @@ struct PlayerCommandSpec {
 
     std::vector<std::string> literals;
     std::vector<Argument> arguments;
+};
+
+enum class DecisionKind : std::uint8_t { kLogin, kPreConnect, kKick, kChat, kCommand, kPing };
+
+/// A question the proxy asks plugins and waits for without blocking an I/O owner; the answer is late after deadlineMs.
+struct DecisionRequest {
+    std::uint64_t token = 0;
+    DecisionKind kind = DecisionKind::kLogin;
+    std::string player;
+    std::string uuid;
+    std::string address;
+    std::uint16_t port = 0;
+    std::string host;
+    /// The backend about to be connected; empty for a login.
+    std::string backend;
+    /// The backend the player is on now; empty on the first connection.
+    std::string from;
+    /// The kick reason as plain text, the chat message, the command without its slash, or the ping's protocol.
+    std::string text;
+    std::uint32_t deadlineMs = 0;
+};
+
+struct DecisionResult {
+    bool deny = false;
+    /// MiniMessage shown to the player when denied.
+    std::string reason;
+    /// A backend to use instead of the requested one; empty keeps it.
+    std::string redirect;
+    /// A replacement for the kick reason (MiniMessage) or the command, or the ping's description (MiniMessage).
+    std::string text;
+    std::optional<std::int32_t> maxPlayers;
+    std::optional<std::int32_t> online;
 };
 
 struct RuntimeServices {
@@ -86,12 +125,12 @@ struct RuntimeServices {
     /// Completions for the last word of a command line a player is typing, when it starts with a proxy command.
     std::function<std::optional<std::vector<std::string>>(std::string_view player, std::string_view line)>
         commandSuggestions = {};
-    /// The server list answer for one ping; the proxy's own one-line answer when unset. Runs on owner threads.
     /// MiniMessage text a login is turned away with while the proxy is still starting; empty once it is ready.
     std::function<std::optional<std::string>()> loadingMessage = {};
     /// The tab list, boss bar and scoreboard the proxy draws; unset draws nothing. Runs on owner threads.
     std::function<std::shared_ptr<const wire::config::UiConfigs>()> uiConfigs = {};
     const wire::common::placeholder::PlaceholderRegistry* placeholders = nullptr;
+    /// The server list answer for one ping; the proxy's own one-line answer when unset. Runs on owner threads.
     std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
                                                               std::string_view address)>
         status = {};
@@ -100,6 +139,14 @@ struct RuntimeServices {
     std::shared_ptr<wire::plugins::PluginPacketBus> packets = {};
     /// Packets larger than this go past plugin listeners untouched.
     std::size_t packetMaxBytes = 256 * 1024;
+    /// Offered every plugin message in play; true consumes it. Owner threads, must not block.
+    std::function<bool(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
+                       bool fromBackend)>
+        pluginMessage = {};
+    /// Asks plugins to decide; false means nobody listens and the proxy goes on at once. Owner threads, no blocking.
+    std::function<bool(DecisionRequest)> decide = {};
+    /// Told a player's round trip to their client in milliseconds, measured on each keepalive. Owner threads.
+    std::function<void(std::string_view player, std::int32_t milliseconds)> latency = {};
 };
 
 /// One session as its owner sees it; name and uuid stay empty until the player is authenticated.
@@ -145,6 +192,8 @@ public:
     /// Thread-safe. Asks every session owner for its sessions and waits up to `timeout` for all of them.
     [[nodiscard]] std::expected<std::vector<SessionInfo>, std::string>
     sessions(std::chrono::milliseconds timeout) const;
+    /// Thread-safe. The host and port a backend is configured with.
+    [[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> backendEndpoint(std::string_view name) const;
     /// Thread-safe. Queues a chat line for a player; true once handed to the session owners.
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.
@@ -153,6 +202,14 @@ public:
     /// backend as if the client had sent it; true once handed over.
     [[nodiscard]] bool sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                                   std::span<const std::uint8_t> body);
+    /// Thread-safe. The same as tellPlayer and kickPlayer with a finished component, no MiniMessage in between.
+    [[nodiscard]] bool tellComponent(std::string_view player, wire::text::Component component);
+    [[nodiscard]] bool kickComponent(std::string_view player, wire::text::Component component);
+    /// Thread-safe. Queues a plugin message toward the player's client or backend; true once handed to the owners.
+    [[nodiscard]] bool sendPluginMessage(std::string_view player, std::string_view channel,
+                                         std::span<const std::uint8_t> data, bool towardBackend);
+    /// Thread-safe. Answers a DecisionRequest; a stale token is ignored.
+    void resolveDecision(std::string_view player, std::uint64_t token, DecisionResult result);
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

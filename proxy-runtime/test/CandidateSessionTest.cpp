@@ -5,6 +5,10 @@
 
 #include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
 #include <basalt/wire/plugins/PacketRegistry.hpp>
+#include <basalt/wire/protocol/PacketFraming.hpp>
+#include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
+#include <basalt/wire/text/Component.hpp>
 
 #include <algorithm>
 
@@ -39,7 +43,12 @@ struct CandidateFixture {
     std::array<std::int64_t, 3> watched{-1, -1, -1};
     std::unique_ptr<ClientSession> session;
 
-    explicit CandidateFixture(bool modern = true) {
+    std::function<bool(runtime::DecisionRequest)> decide;
+    std::function<void(std::string_view, std::string_view)> chat;
+
+    explicit CandidateFixture(bool modern = true, std::function<bool(runtime::DecisionRequest)> deciding = {},
+                              std::function<void(std::string_view, std::string_view)> chatting = {})
+        : decide(std::move(deciding)), chat(std::move(chatting)) {
         config.network.onlineMode = false;
         config.runtime.loginTimeoutMs = 2000;
         config.runtime.connectTimeoutMs = 500;
@@ -87,7 +96,16 @@ struct CandidateFixture {
                 cancellation = std::stop_source{};
                 return std::optional{cancellation};
             },
-            config.backends, buffers, -1, false, identities);
+            config.backends, buffers, -1, false, identities, nullptr, nullptr,
+            std::function<bool(std::string_view, std::string_view)>{},
+            std::function<std::vector<runtime::PlayerCommandSpec>(std::string_view)>{}, config::TranslationMode::Auto,
+            chat, std::function<void(std::string_view, std::string_view)>{},
+            std::function<void(std::string_view, std::int32_t)>{},
+            std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)>{},
+            std::function<std::string(std::string_view)>{},
+            std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)>{},
+            std::function<std::optional<std::string>()>{}, ClientAccess{},
+            std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)>{}, decide);
         REQUIRE(session->accounted());
     }
 
@@ -540,4 +558,29 @@ TEST_CASE("public configuration acknowledgements commit repeated A B A backend o
         CHECK(session.accounted());
     }
 }
+
+namespace {
+std::vector<std::uint8_t> framed(std::int32_t id, const auto& packet) {
+    namespace protocol = basalt::wire::protocol;
+    basalt::wire::io::ByteBuffer body, frame;
+    protocol::varInt::write(body, id);
+    packet.write(body);
+    REQUIRE(protocol::packetFraming::writeUncompressed(frame, body.readable()));
+    return frame.toVector();
+}
+
+struct Asked {
+    bool hold = false;
+    std::vector<runtime::DecisionRequest> requests;
+
+    std::function<bool(runtime::DecisionRequest)> hook() {
+        return [this](runtime::DecisionRequest request) {
+            if (!hold)
+                return false;
+            requests.push_back(std::move(request));
+            return true;
+        };
+    }
+};
+} // namespace
 

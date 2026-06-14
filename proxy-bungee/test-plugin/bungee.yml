@@ -1,0 +1,4 @@
+name: BasaltBungeeTest
+main: org.basaltmc.bungeetest.TestPlugin
+version: 1.0
+author: Basalt

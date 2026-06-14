@@ -1,6 +1,7 @@
 #pragma once
 
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
+#include <basalt/proxy/plugins/ForeignAdapter.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
@@ -31,6 +32,25 @@
 
 namespace basalt::proxy::plugins {
 
+struct ProxyInfo {
+    std::string bind;
+    std::uint16_t port = 0;
+    bool onlineMode = false;
+    bool preventClientProxyConnections = false;
+    std::int32_t compressionThreshold = 0;
+    std::uint32_t connectTimeoutMs = 0;
+    std::uint32_t readTimeoutMs = 0;
+    std::size_t maxSessions = 0;
+    std::vector<std::string> defaultRoute;
+    /// Host name to the backends it routes to.
+    std::vector<std::pair<std::string, std::vector<std::string>>> forcedHosts;
+};
+
+struct PluginHooks;
+
+/// Builds a foreign adapter from the hooks; null when the operator has nothing for it to load.
+using AdapterFactory = std::function<std::unique_ptr<ForeignAdapter>(const PluginHooks&)>;
+
 struct PluginSettings {
     std::string directory = "plugins";
     std::string database;
@@ -44,11 +64,14 @@ struct PluginSettings {
     std::chrono::milliseconds packetTimeout{25};
     /// The most bytes a listener may set as a body or send.
     std::size_t packetMaxBytes = 256 * 1024;
+    std::vector<AdapterFactory> adapters;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.
 struct PluginHooks {
     std::function<std::vector<std::string>()> servers;
+    /// The operator settings of the proxy as read from its configuration files.
+    std::function<ProxyInfo()> info;
     std::function<bool(std::string_view player, std::string_view backend)> send;
     std::function<void(std::string_view plugin, std::string_view line)> log;
     /// Sends a chat line, written in MiniMessage, to a player's client.
@@ -66,6 +89,16 @@ struct PluginHooks {
     std::function<bool(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                        std::span<const std::uint8_t> body)>
         packet;
+    /// Sends a plugin message toward the player's backend or, when false, the player's client.
+    std::function<bool(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
+                       bool towardBackend)>
+        sendMessage;
+    std::function<std::optional<std::pair<std::string, std::uint16_t>>(std::string_view server)> serverAddress;
+    /// The same as tell and kick with a finished component.
+    std::function<void(std::string_view player, wire::text::Component)> tellComponent;
+    std::function<void(std::string_view player, wire::text::Component)> kickComponent;
+    /// Answers a decision once the handlers ran; may be called after the deadline, when the runtime ignores it.
+    std::function<void(std::string_view player, std::uint64_t token, runtime::DecisionResult)> resolveDecision;
 };
 
 /// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
@@ -88,6 +121,13 @@ public:
 
     /// Names of the loaded plugins.
     [[nodiscard]] std::vector<std::string> names();
+
+    /// Starts a decision on the plugin thread; false when no plugin decides it, so the caller goes on at once.
+    [[nodiscard]] bool decide(runtime::DecisionRequest request);
+
+    /// Offered a plugin message in play; true when a plugin registered the channel or it is the BungeeCord one.
+    [[nodiscard]] bool message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
+                               bool fromBackend);
 
     /// Drops every plugin, reads the packages again and resumes; queued events and per-plugin data are kept.
     [[nodiscard]] std::size_t reload();
@@ -121,6 +161,7 @@ private:
     void run(std::stop_token stop);
     void shutdown();
     void dropPacketListeners();
+    void listPlugins();
 
     struct ConsoleCall {
         std::vector<std::string> words;
@@ -131,13 +172,36 @@ private:
         std::vector<std::string> words;
     };
 
-    using Task = std::variant<runtime::PlayerEvent, ConsoleCall, PlayerCommandCall>;
+    struct MessageCall {
+        std::string player;
+        std::string channel;
+        std::vector<std::uint8_t> data;
+        bool fromBackend = false;
+    };
+
+    struct DecisionCall {
+        runtime::DecisionRequest request;
+        std::chrono::steady_clock::time_point received;
+    };
+
+    struct DecisionRun;
+
+    using Task = std::variant<runtime::PlayerEvent, ConsoleCall, PlayerCommandCall, MessageCall, DecisionCall>;
+
+    void deliverDecision(const DecisionCall& call);
+    void stepDecision(const std::shared_ptr<DecisionRun>& run, std::size_t index);
 
     struct Player {
         std::string name;
         std::string uuid;
         std::string server;
+        std::string address{};
+        std::uint16_t port = 0;
+        std::int64_t ping = -1;
     };
+
+    void deliverMessage(const MessageCall& call);
+    [[nodiscard]] std::vector<std::string> playersOn(std::string_view server) const;
 
     void deliver(const runtime::PlayerEvent& event);
     void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
@@ -145,7 +209,8 @@ private:
     void callPing(Plugin& plugin, const std::string& host, const std::string& protocol);
     void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
     void call(Plugin& plugin, const wire::lua::LuaRef& function,
-              const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why);
+              const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why,
+              std::function<void(bool)> after = {});
     void report(Plugin& plugin, const wire::lua::LuaFailure& failure, std::string_view why);
     void runTimers(std::chrono::steady_clock::time_point now);
     [[nodiscard]] bool enqueue(Task task);
@@ -158,6 +223,8 @@ private:
         installed_;
     std::optional<wire::sql::Database> database_;
     std::vector<std::unique_ptr<Plugin>> plugins_;
+    std::vector<std::unique_ptr<ForeignAdapter>> adapters_;
+    std::set<std::string, std::less<>> foreignCommands_;
     std::atomic<std::size_t> loaded_{0};
     std::mutex mutex_;
     std::condition_variable_any wake_;
@@ -167,10 +234,13 @@ private:
     /// Held while any Lua of any plugin runs, on the plugin thread or on a session owner delivering a packet.
     std::recursive_timed_mutex luaMutex_;
     std::atomic<std::size_t> packetTimeouts_{0};
+    mutable std::shared_mutex channelsMutex_;
+    std::set<std::string, std::less<>> channels_;
     std::map<std::string, std::vector<std::unique_ptr<Entry>>, std::less<>> commands_;
     std::vector<std::unique_ptr<Timer>> timers_;
     std::map<std::string, Player, std::less<>> roster_;
     bool loading_ = true;
+    std::atomic<unsigned> deciders_{0};
     std::atomic<std::size_t> dropped_{0};
     std::atomic<std::size_t> delivered_{0};
     std::jthread thread_;

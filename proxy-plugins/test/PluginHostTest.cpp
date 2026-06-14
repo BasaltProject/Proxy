@@ -1,8 +1,12 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
+#include <basalt/proxy/plugins/JarDetector.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketRegistry.hpp>
+#if defined(BASALT_HAS_SHIM)
+#include <basalt/proxy/plugins/JavaAdapter.hpp>
+#endif
 
 #include <doctest.h>
 
@@ -271,3 +275,62 @@ TEST_CASE("packet listeners written in Lua read, edit, cancel and send, and a br
     CHECK(replaced->fire(packet));
     CHECK(packet.replacement.has_value());
 }
+
+TEST_CASE("decision events let handlers deny or redirect, and nothing listening means no wait") {
+    const std::filesystem::path root = std::filesystem::path{BASALT_TEST_SCRATCH_DIR} / "plugins-decisions";
+    std::filesystem::remove_all(root);
+    manifest(root / "gate", "gate");
+    write(
+        root / "gate" / "src" / "main.lua",
+        "on('player.login', function(e) if e.player_name == 'Bad' then e.cancelled = true e.reason = 'nope' end end)\n"
+        "on('player.server_pre_connect', {priority = 'first'}, function(e) wait(1) if e.server == 'a' then "
+        "e.server = 'b' end end)\n"
+        "on('player.kick', function(e) e.server = 'lobby' end)\n"
+        "on('player.command', function(e) if e.command == 'bad' then e.cancelled = true else e.command = "
+        "e.command .. '!' end end)\n"
+        "on('server.ping', function(e) e.motd = 'hi ' .. e.protocol e.online = 3 end)\n");
+
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::pair<std::uint64_t, runtime::DecisionResult>> answers;
+    plugins::PluginHooks hooks;
+    hooks.resolveDecision = [&](std::string_view, std::uint64_t token, runtime::DecisionResult result) {
+        std::lock_guard lock{mutex};
+        answers.emplace_back(token, std::move(result));
+        ready.notify_all();
+    };
+    plugins::PluginSettings settings;
+    settings.directory = root.string();
+    auto host = plugins::PluginHost::start(settings, hooks);
+    REQUIRE(host);
+    const auto ask = [&](std::uint64_t token, runtime::DecisionKind kind, std::string player, std::string backend) {
+        runtime::DecisionRequest request;
+        request.token = token;
+        request.kind = kind;
+        request.player = std::move(player);
+        request.backend = backend;
+        request.text = std::move(backend);
+        request.deadlineMs = 3000;
+        return (*host)->decide(std::move(request));
+    };
+    CHECK(ask(1, runtime::DecisionKind::kLogin, "Bad", {}));
+    CHECK(ask(2, runtime::DecisionKind::kPreConnect, "Ann", "a"));
+    CHECK(ask(3, runtime::DecisionKind::kKick, "Ann", {}));
+    CHECK(ask(4, runtime::DecisionKind::kCommand, "Ann", "bad"));
+    CHECK(ask(5, runtime::DecisionKind::kCommand, "Ann", "home"));
+    CHECK(ask(6, runtime::DecisionKind::kPing, {}, {}));
+    std::unique_lock lock{mutex};
+    REQUIRE(ready.wait_for(lock, 5s, [&] { return answers.size() == 6; }));
+    std::ranges::sort(answers, {}, &decltype(answers)::value_type::first);
+    CHECK(answers[0].second.deny);
+    CHECK(answers[0].second.reason == "nope");
+    CHECK_FALSE(answers[1].second.deny);
+    CHECK(answers[1].second.redirect == "b");
+    CHECK(answers[2].second.redirect == "lobby");
+    CHECK(answers[3].second.deny);
+    CHECK(answers[4].second.text == "home!");
+    CHECK(answers[5].second.online == 3);
+}
+
+#if defined(BASALT_HAS_SHIM)
+#endif

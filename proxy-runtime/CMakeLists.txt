@@ -46,6 +46,7 @@ basalt_module(proxy-runtime-core
         src/ResourcePacks.cpp
         src/ClientSessionCookies.cpp
         src/ClientSessionCandidate.cpp
+        src/ClientSessionDecision.cpp
         src/ClientSessionRecovery.cpp
         src/ClientSessionKeepAlives.cpp
         src/ClientSessionPackets.cpp
@@ -98,6 +99,10 @@ if(ANDROID)
 endif()
 # wire-io comes through the core already; naming it twice makes the linker say so.
 target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins basalt::proxy-remote)
+if(TARGET basalt::wire-shim)
+    target_link_libraries(basalt-proxy PRIVATE basalt::proxy-bungee basalt::proxy-velocity)
+    target_compile_definitions(basalt-proxy PRIVATE BASALT_HAS_SHIM=1)
+endif()
 set_target_properties(basalt-proxy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     OUTPUT_NAME "BasaltProxy-${BASALT_VERSION}-${_platform}-${_arch}"

@@ -30,6 +30,12 @@ bool ClientSession::prepareBackend(std::size_t target) {
 }
 
 bool ClientSession::requestBackendChange(std::size_t target) {
+    if (state_ == State::kPlay && !switchDecision_ && !deciding_ && target < backends_.size() &&
+        ask(DecisionKind::kPreConnect, backends_[target].name, activeBackendName())) {
+        decisionTarget_ = target;
+        switchDecision_ = true;
+        return true;
+    }
     if (!prepareBackend(target))
         return false;
     changeWhenPrepared_ = true;

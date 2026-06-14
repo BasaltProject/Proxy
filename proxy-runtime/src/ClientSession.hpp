@@ -85,7 +85,11 @@ public:
                   std::function<std::string(std::string_view)> kickText = {},
                   std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)>
                       commandSuggestions = {},
-                  std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {});
+                  std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {},
+                  std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)>
+                      pluginMessage = {},
+                  std::function<bool(DecisionRequest)> decide = {},
+                  std::function<void(std::string_view, std::int32_t)> latency = {});
 
     struct UiSource {
         std::function<std::shared_ptr<const wire::config::UiConfigs>()> configs;
@@ -107,8 +111,16 @@ public:
     [[nodiscard]] bool relayCommandTree(std::span<const std::uint8_t> original);
     /// Queues a system chat line; ignored unless the client is in play.
     void tell(std::string_view text);
+    void tell(const wire::text::Component& component);
     /// Disconnects the player with a MiniMessage reason; ignored unless the client is in play.
     void kick(std::string_view reason);
+    void kick(const wire::text::Component& component);
+    /// Owner only. Applies a plugin decision; a stale token is ignored.
+    [[nodiscard]] bool decided(std::uint64_t token, const DecisionResult& result, bool expired = false);
+    [[nodiscard]] bool awaiting(std::uint64_t token) const { return decisionPending() && token == decisionToken_; }
+    /// Sends a plugin message to the client, or to the player's backend; ignored unless the client is in play.
+    void sendPluginMessage(std::string_view channel, std::span<const std::uint8_t> data, bool towardBackend);
+    void registerBungeeChannels();
     [[nodiscard]] std::string_view activeBackendName() const;
     /// Owner only. Lets plugin listeners see, edit and cancel the packets this session relays.
     void attachPackets(std::shared_ptr<wire::plugins::PluginPacketBus> bus, std::uint64_t connection,
@@ -123,6 +135,8 @@ public:
     [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
     [[nodiscard]] std::string playerUuid() const;
+    [[nodiscard]] const std::string& clientAddress() const;
+    [[nodiscard]] std::uint16_t clientPort() const;
 
     [[nodiscard]] std::int32_t clientProtocol() const noexcept { return clientProtocol_; }
 
@@ -203,8 +217,6 @@ private:
     /// A verdict when the packet is not to travel on, which is what `packet()` then returns; empty to relay it.
     [[nodiscard]] std::optional<bool> limited(std::int32_t id);
     [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
-    [[nodiscard]] const std::string& clientAddress() const;
-    [[nodiscard]] std::uint16_t clientPort() const;
     config::TranslationMode translationMode_;
     [[nodiscard]] std::int32_t speaksTo(const config::BackendConfig& backend, std::int32_t client) const;
     [[nodiscard]] bool routeAllowed(std::int32_t client, const config::BackendConfig& backend) const;
@@ -270,6 +282,14 @@ private:
     void discardCandidate();
     [[nodiscard]] bool acknowledgePreparedChange();
     [[nodiscard]] bool dial();
+    [[nodiscard]] bool afterLogin();
+    [[nodiscard]] bool beginRecovery();
+    [[nodiscard]] bool decisionPending() const { return deciding_ || switchDecision_ || kickDeciding_; }
+    [[nodiscard]] bool queueStatus(const DecisionResult* changes);
+    [[nodiscard]] bool relayHeld();
+    [[nodiscard]] bool routeInitial();
+    [[nodiscard]] bool ask(DecisionKind kind, std::string_view backend, std::string_view from,
+                           std::string_view text = {});
     [[nodiscard]] BackendLogin* backend() const;
     [[nodiscard]] BackendLogin* backendFor(BackendAttempt attempt) const;
     [[nodiscard]] Clock::time_point backendDeadline() const;
@@ -279,6 +299,20 @@ private:
     [[nodiscard]] bool bufferedPacket() const;
     std::shared_ptr<const void> topology_;
     std::function<bool(std::string_view, std::string_view)> playerCommand_;
+    std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)> pluginMessage_;
+    std::function<bool(DecisionRequest)> decide_;
+    std::function<void(std::string_view, std::int32_t)> latency_;
+    std::int64_t keepAliveToken_ = -1;
+    Clock::time_point keepAliveSent_;
+    std::vector<std::uint8_t> held_;
+    bool kickDeciding_ = false;
+    std::uint64_t decisionToken_ = 0;
+    Clock::time_point decisionDeadline_ = Clock::time_point::max();
+    DecisionKind decisionKind_ = DecisionKind::kLogin;
+    bool deciding_ = false;
+    bool switchDecision_ = false;
+    bool preConnectAsked_ = false;
+    std::size_t decisionTarget_ = 0;
     std::function<void(std::string_view, std::string_view)> playerChat_;
     std::function<void(std::string_view, std::string_view)> playerKick_;
     std::function<void(std::string_view, std::int32_t)> statusPing_;
@@ -321,6 +355,7 @@ private:
     std::int32_t statusProtocol_ = 0;
     std::uint16_t virtualPort_ = 0;
     std::span<const std::size_t> targets_;
+    std::array<std::size_t, 1> redirected_{};
     std::array<std::size_t, 1> requestedTarget_{};
     ResolutionStart resolve_;
     std::size_t nextTarget_ = 0;

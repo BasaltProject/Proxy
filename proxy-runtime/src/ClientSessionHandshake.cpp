@@ -132,7 +132,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                 if (const auto turnedAway =
                         playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
                     return refuseMiniMessage(*turnedAway);
-            return beginJoin();
+            return afterLogin();
         }
         if (settings_.sessionBufferBytes < kBufferBytes + kAuthenticationBytes || publicKey_.empty() ||
             !wire::auth::randomBytes(challenge_))
@@ -178,11 +178,15 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
     } else if (state_ == State::StatusRequest) {
         if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !status_)
             return false;
+        if (statusPing_)
+            statusPing_(virtualHost_, statusProtocol_);
+        if (ask(DecisionKind::kPing, {}, {}, std::to_string(statusProtocol_))) {
+            deciding_ = true;
+            return true;
+        }
         const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress());
         if (answer.empty() || !queueOrdered(answer))
             return false;
-        if (statusPing_)
-            statusPing_(virtualHost_, statusProtocol_);
         state_ = State::Ping;
     } else {
         if (id != protocol::status::PingPacket::kId)

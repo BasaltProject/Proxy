@@ -17,6 +17,10 @@ bool ClientSession::backendChallenge(bool ping) {
     const auto published = (ping ? pendingPings_ : pendingKeepAlives_).publish(token, backend()->attempt());
     if (!published)
         return false;
+    if (!ping) {
+        keepAliveToken_ = *published;
+        keepAliveSent_ = Clock::now();
+    }
     frame_.clear();
     wire::protocol::varInt::write(frame_, ping ? (state_ == State::kConfiguration ? 0x05 : 0x3e)
                                           : state_ == State::kConfiguration
@@ -41,6 +45,13 @@ bool ClientSession::challengeResponse(bool pong) {
                                            : frame_.readLong();
     if (frame_.failed() || frame_.readableBytes() != 0)
         return false;
+    if (!pong && token == keepAliveToken_) {
+        keepAliveToken_ = -1;
+        if (latency_ && profile_)
+            latency_(profile_->name,
+                     static_cast<std::int32_t>(
+                         std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - keepAliveSent_).count()));
+    }
     const auto origin = (pong ? pendingPings_ : pendingKeepAlives_).consume(token);
     if (!origin || recovering_ || origin->backend != backend()->attempt())
         return true;

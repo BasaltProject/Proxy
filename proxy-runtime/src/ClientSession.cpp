@@ -61,8 +61,11 @@ ClientSession::ClientSession(
     std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
     std::function<std::string(std::string_view)> kickText,
     std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
-    std::function<std::optional<std::string>()> loadingMessage, ClientAccess access)
+    std::function<std::optional<std::string>()> loadingMessage, ClientAccess access,
+    std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)> pluginMessage,
+    std::function<bool(DecisionRequest)> decide, std::function<void(std::string_view, std::int32_t)> latency)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
+      pluginMessage_(std::move(pluginMessage)), decide_(std::move(decide)), latency_(std::move(latency)),
       playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
       playerLogin_(std::move(playerLogin)), kickText_(std::move(kickText)), loadingMessage_(std::move(loadingMessage)),
       playerCommandSpecs_(std::move(playerCommandSpecs)), commandSuggestions_(std::move(commandSuggestions)),
@@ -125,11 +128,14 @@ ClientSession::Clock::time_point ClientSession::baseDeadline() const {
         result = std::min(result, connectDeadline_);
     if (!closing_ && recovering_)
         result = std::min(result, loginDeadline_);
+    if (!closing_ && decisionPending())
+        result = std::min(result, decisionDeadline_);
     return closing_ ? result : std::min({result, backendDeadline(), joinRetryAt_});
 }
 
 wire::io::IoInterest ClientSession::interest() const {
-    return {!closing_ && !frontendPaused_ && state_ != State::Authenticating && state_ != State::kBackendLogin,
+    return {!closing_ && !frontendPaused_ && !deciding_ && state_ != State::Authenticating &&
+                state_ != State::kBackendLogin,
             output_.readableBytes() != 0 || (!frontendPaused_ && bufferedPacket())};
 }
 
@@ -263,6 +269,11 @@ bool ClientSession::packet() {
                     backendCommands_.end();
             if (!view.failed() && !theBackends && playerCommand_(profile_->name, command))
                 return true;
+            if (!view.failed() && !deciding_ && ask(DecisionKind::kCommand, {}, activeBackendName(), command)) {
+                held_.assign(raw.begin(), raw.end());
+                deciding_ = true;
+                return true;
+            }
         }
         if (shaped && state_ == State::kPlay && commandSuggestions_ && profile_ &&
             id == protocol::play::CommandSuggestionRequestPacket::kId) {
@@ -277,8 +288,14 @@ bool ClientSession::packet() {
             wire::io::ByteBuffer view;
             view.writeBytes(frame_.readable());
             const std::string message = protocol::readString(view, protocol::play::ChatMessagePacket::kMaxLength);
-            if (!view.failed())
+            if (!view.failed()) {
                 playerChat_(profile_->name, message);
+                if (ask(DecisionKind::kChat, {}, activeBackendName(), message)) {
+                    held_.assign(raw.begin(), raw.end());
+                    deciding_ = true;
+                    return true;
+                }
+            }
         }
         if (id == (state_ == State::kConfiguration ? protocol::configuration::KeepAlivePacket::kId
                                                    : protocol::play::PlayKeepAlivePacket::kServerboundId))
@@ -338,6 +355,7 @@ bool ClientSession::packet() {
             }
             state_ = State::kPlay;
             awaitingJoin_ = legacyRaw_;
+            registerBungeeChannels();
         }
         backpressure();
         backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
@@ -348,7 +366,7 @@ bool ClientSession::packet() {
 }
 
 bool ClientSession::decode() {
-    while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && state_ != State::Authenticating &&
+    while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && !deciding_ && state_ != State::Authenticating &&
            state_ != State::kBackendLogin) {
         if (state_ == State::kProxyHeader) {
             const auto header = proxyProtocol::parse(input_.readable());
@@ -406,7 +424,7 @@ bool ClientSession::decode() {
 bool ClientSession::ready(const wire::io::IoReady& event) {
     if (Clock::now() >= deadline())
         return false;
-    const bool waiting = state_ == State::Authenticating || state_ == State::kBackendLogin;
+    const bool waiting = deciding_ || state_ == State::Authenticating || state_ == State::kBackendLogin;
     if (waiting && event.closed)
         return false;
     if (frontendPaused_ && event.closed)
@@ -484,7 +502,7 @@ bool ClientSession::authenticated(
             if (const auto turnedAway =
                     playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
                 return refuseMiniMessage(*turnedAway);
-        return beginJoin();
+        return afterLogin();
     }
     closing_ = true;
     return refuseWith("login-failed", "Login could not be completed.");
@@ -499,6 +517,8 @@ bool ClientSession::timedOut(Clock::time_point now) {
     }
     if (!closing_ && joinRetryAt_ != Clock::time_point::max() && now >= joinRetryAt_)
         return beginJoin();
+    if (!closing_ && decisionPending() && now >= decisionDeadline_)
+        return decided(decisionToken_, {}, true);
     if (!closing_ &&
         (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting) &&
         now >= connectDeadline_ && now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ &&

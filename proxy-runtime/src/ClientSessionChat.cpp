@@ -145,9 +145,14 @@ bool ClientSession::answerSuggestions(const play::CommandSuggestionRequestPacket
 void ClientSession::tell(std::string_view text) {
     if (!inPlay() || text.empty())
         return;
+    tell(wire::text::miniMessage::parse(text.substr(0, 4096)));
+}
+
+void ClientSession::tell(const wire::text::Component& component) {
+    if (!inPlay())
+        return;
     frame_.clear();
     wire::protocol::varInt::write(frame_, play::SystemChatPacket::kId);
-    const auto component = wire::text::miniMessage::parse(text.substr(0, 4096));
     if (legacyRaw_) {
         if (clientProtocol_ < wire::multiversion::protocolVersions::kV1_19)
             return;
@@ -163,14 +168,16 @@ void ClientSession::tell(std::string_view text) {
 }
 
 void ClientSession::kick(std::string_view reason) {
+    kick(wire::text::miniMessage::parse(reason.empty() ? std::string_view{"Disconnected"} : reason.substr(0, 1024)));
+}
+
+void ClientSession::kick(const wire::text::Component& component) {
     if (!inPlay())
         return;
     closing_ = true;
     closeBackends();
     frame_.clear();
     wire::protocol::varInt::write(frame_, play::PlayDisconnectPacket::kId);
-    const auto component =
-        wire::text::miniMessage::parse(reason.empty() ? std::string_view{"Disconnected"} : reason.substr(0, 1024));
     if (legacyRaw_)
         wire::protocol::writeString(frame_, wire::common::writeJson(wire::text::componentJson::serialize(component)));
     else

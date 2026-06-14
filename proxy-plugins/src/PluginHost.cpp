@@ -1,5 +1,6 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/proxy/plugins/BungeeMessaging.hpp>
 #include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
@@ -96,6 +97,21 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
     {
         const std::lock_guard<std::recursive_timed_mutex> turn{host->luaMutex_};
         host->loadPackages();
+    }
+    for (const AdapterFactory& factory : host->settings_.adapters) {
+        if (!factory)
+            continue;
+        auto adapter = factory(host->hooks_);
+        if (!adapter)
+            continue;
+        for (std::string& root : adapter->commands())
+            host->foreignCommands_.insert(std::move(root));
+        for (const runtime::DecisionKind kind :
+             {runtime::DecisionKind::kLogin, runtime::DecisionKind::kPreConnect, runtime::DecisionKind::kKick,
+              runtime::DecisionKind::kChat, runtime::DecisionKind::kCommand, runtime::DecisionKind::kPing})
+            if (adapter->decides(kind))
+                host->deciders_.fetch_or(decisionBit(kind));
+        host->adapters_.push_back(std::move(adapter));
     }
     host->loading_ = false;
     host->thread_ = std::jthread{[raw = host.get()](std::stop_token stop) { raw->run(stop); }};
@@ -239,6 +255,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
         return;
     }
     PluginApi::install(*this, *plugin, manifest, config);
+    PluginApi::installMessaging(*this, *plugin);
     auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);
     if (!chunk) {
         report("compile failed: " + chunk.error().message);
@@ -274,6 +291,11 @@ std::size_t PluginHost::reload() {
             commands_.clear();
         }
         plugins_.clear();
+        deciders_.store(0);
+        {
+            std::unique_lock lock{channelsMutex_};
+            channels_.clear();
+        }
         installed_.clear();
         roster_.clear();
         loaded_.store(0, std::memory_order_relaxed);
@@ -304,7 +326,8 @@ bool PluginHost::command(std::string_view line) {
     auto words = wordsOf(line, 32);
     {
         std::shared_lock lock{commandsMutex_};
-        if (words.empty() || !commands_.contains(words.front()))
+        if (words.empty() || (!commands_.contains(words.front()) && !foreignCommands_.contains(words.front()) &&
+                              words.front() != "plugins"))
             return false;
     }
     static_cast<void>(enqueue(ConsoleCall{std::move(words)}));
@@ -328,6 +351,105 @@ std::vector<std::string> PluginHost::names() {
     for (const auto& [id, installed] : installed_)
         result.push_back(installed.second.name.empty() ? id : installed.second.name);
     return result;
+}
+
+std::vector<std::string> PluginHost::playersOn(std::string_view server) const {
+    std::vector<std::string> names;
+    for (const auto& [name, player] : roster_)
+        if (server.empty() || player.server == server)
+            names.push_back(player.name);
+    return names;
+}
+
+bool PluginHost::message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
+                         bool fromBackend) {
+    if (!isBungeeChannel(channel)) {
+        std::shared_lock lock{channelsMutex_};
+        const bool foreign =
+            std::ranges::any_of(adapters_, [&](const auto& adapter) { return adapter->listens(channel); });
+        if (!foreign && !channels_.contains(channel))
+            return false;
+    }
+    static_cast<void>(enqueue(MessageCall{std::string{player}, std::string{channel},
+                                          std::vector<std::uint8_t>(data.begin(), data.end()), fromBackend}));
+    return true;
+}
+
+void PluginHost::deliverMessage(const MessageCall& call) {
+    for (auto& adapter : adapters_)
+        if (adapter->message(call.player, call.channel, call.data, call.fromBackend))
+            return;
+    if (isBungeeChannel(call.channel) && call.fromBackend) {
+        BungeeContext context;
+        context.player = [this](std::string_view name) -> std::optional<BungeePlayer> {
+            const Player* found = findPlayer(name);
+            if (found == nullptr)
+                return std::nullopt;
+            return BungeePlayer{found->name, found->uuid, found->server, found->address, found->port};
+        };
+        context.playersOn = [this](std::string_view server) { return playersOn(server); };
+        context.serverExists = [this](std::string_view server) {
+            return hooks_.servers && std::ranges::contains(hooks_.servers(), server);
+        };
+        context.serverAddress = [this](std::string_view server) {
+            return hooks_.serverAddress ? hooks_.serverAddress(server) : std::nullopt;
+        };
+        context.connect = [this](std::string_view player, std::string_view server) {
+            return hooks_.send && hooks_.send(player, server);
+        };
+        context.kick = [this](std::string_view player, std::string_view reason) {
+            if (hooks_.kick)
+                hooks_.kick(player, reason);
+        };
+        context.tell = [this](std::string_view player, std::string_view text) {
+            if (hooks_.tell)
+                hooks_.tell(player, text);
+        };
+        context.tellRaw = [this](std::string_view player, std::string_view json) {
+            if (const auto component = componentOfJson(json); component && hooks_.tellComponent)
+                hooks_.tellComponent(player, *component);
+        };
+        context.kickRaw = [this](std::string_view player, std::string_view json) {
+            if (const auto component = componentOfJson(json); component && hooks_.kickComponent)
+                hooks_.kickComponent(player, *component);
+        };
+        context.toBackend = [this](std::string_view player, std::string_view channel,
+                                   std::span<const std::uint8_t> data) {
+            if (hooks_.sendMessage)
+                static_cast<void>(hooks_.sendMessage(player, channel, data, true));
+        };
+        if (!handleBungeeMessage(context, call.player, call.data) && hooks_.log)
+            hooks_.log("bungeecord", "ignored a message from " + call.player + " that names no known subchannel");
+    }
+    const Player* known = findPlayer(call.player);
+    const Player subject = known ? *known : Player{call.player, {}, {}};
+    for (auto& plugin : plugins_) {
+        if (plugin->broken)
+            continue;
+        const auto found = plugin->handlers.find(std::string{kMessageEvent});
+        if (found == plugin->handlers.end())
+            continue;
+        for (const Plugin::Handler& handler : found->second) {
+            const auto wanted = handler.filters.find("channel");
+            if (wanted != handler.filters.end() && wanted->second != call.channel)
+                continue;
+            this->call(
+                *plugin, handler.function,
+                [&](wire::lua::LuaArgs& lua) {
+                    lua.pushTable();
+                    PluginApi::pushPlayer(lua, *plugin, subject);
+                    lua.setField("player");
+                    lua.pushString(call.channel);
+                    lua.setField("channel");
+                    lua.pushString(std::string{reinterpret_cast<const char*>(call.data.data()), call.data.size()});
+                    lua.setField("data");
+                    lua.pushString(call.fromBackend ? "backend" : "client");
+                    lua.setField("source");
+                    return 1;
+                },
+                std::string{kMessageEvent});
+        }
+    }
 }
 
 const PluginHost::Player* PluginHost::findPlayer(std::string_view name) const {
@@ -386,6 +508,10 @@ void PluginHost::run(std::stop_token stop) {
             deliver(*event);
         else if (const auto* console = std::get_if<ConsoleCall>(&task))
             invoke(console->words, std::nullopt);
+        else if (const auto* sent = std::get_if<MessageCall>(&task))
+            deliverMessage(*sent);
+        else if (const auto* asked = std::get_if<DecisionCall>(&task))
+            deliverDecision(*asked);
         else {
             const auto& typed = std::get<PlayerCommandCall>(task);
             const Player* known = findPlayer(typed.player);
@@ -429,21 +555,24 @@ void PluginHost::runTimers(std::chrono::steady_clock::time_point now) {
 }
 
 void PluginHost::call(Plugin& plugin, const wire::lua::LuaRef& function,
-                      const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why) {
+                      const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why,
+                      std::function<void(bool)> after) {
     plugin.sandbox->refill();
     wire::lua::LuaArgs lua{plugin.sandbox->state()};
     function.push(lua);
     const std::int32_t argumentCount = pushArguments ? pushArguments(lua) : 0;
     const std::string reason{why};
     Plugin* target = &plugin;
-    static_cast<void>(wire::lua::LuaCall::start(*plugin.sandbox, argumentCount,
-                                                [this, target, reason](std::optional<wire::lua::LuaFailure> failure) {
-                                                    if (!failure) {
-                                                        target->strikes = 0;
-                                                        return;
-                                                    }
-                                                    report(*target, *failure, reason);
-                                                }));
+    static_cast<void>(wire::lua::LuaCall::start(
+        *plugin.sandbox, argumentCount,
+        [this, target, reason, after = std::move(after)](std::optional<wire::lua::LuaFailure> failure) {
+            if (!failure)
+                target->strikes = 0;
+            else
+                report(*target, *failure, reason);
+            if (after)
+                after(!failure);
+        }));
 }
 
 bool PluginHost::deliverPacket(const void* owner, const wire::lua::LuaRef& function,
@@ -508,6 +637,8 @@ void PluginHost::callEvent(Plugin& plugin, const std::string& name, const Player
     for (const Plugin::Handler& handler : found->second) {
         if (plugin.broken)
             return;
+        if (!handler.observer && (name == kChatEvent || name == kKickEvent))
+            continue;
         if (subject != nullptr) {
             const auto matches = [&](std::string_view key, const std::string& value) {
                 const auto wanted = handler.filters.find(key);
@@ -549,6 +680,8 @@ void PluginHost::callPing(Plugin& plugin, const std::string& host, const std::st
     for (const Plugin::Handler& handler : found->second) {
         if (plugin.broken)
             return;
+        if (!handler.observer)
+            continue;
         call(
             plugin, handler.function,
             [&](wire::lua::LuaArgs& lua) {
@@ -570,6 +703,8 @@ void PluginHost::callLogin(Plugin& plugin, const std::string& player, const std:
     for (const Plugin::Handler& handler : found->second) {
         if (plugin.broken)
             return;
+        if (!handler.observer)
+            continue;
         call(
             plugin, handler.function,
             [&](wire::lua::LuaArgs& lua) {
@@ -586,7 +721,19 @@ void PluginHost::callLogin(Plugin& plugin, const std::string& player, const std:
 
 void PluginHost::deliver(const runtime::PlayerEvent& event) {
     using Kind = runtime::PlayerEventKind;
-    Player subject{event.player, event.uuid, event.backend};
+    for (auto& adapter : adapters_)
+        adapter->notify(event);
+    if (event.kind == Kind::kLatency) {
+        if (const auto known = roster_.find(event.player); known != roster_.end())
+            known->second.ping = event.value;
+        return;
+    }
+    Player subject{event.player, event.uuid, event.backend, event.address, event.port};
+    if (const auto known = roster_.find(event.player); known != roster_.end() && event.address.empty()) {
+        subject.address = known->second.address;
+        subject.port = known->second.port;
+        subject.ping = known->second.ping;
+    }
     std::string name;
     if (event.kind == Kind::kJoin) {
         name = std::string{kJoinEvent};
@@ -618,10 +765,36 @@ void PluginHost::deliver(const runtime::PlayerEvent& event) {
         roster_.erase(event.player);
 }
 
+void PluginHost::listPlugins() {
+    std::string line;
+    const auto add = [&line](std::string_view label, std::string_view name, std::string_view version) {
+        line += (line.empty() ? "" : ", ") + std::string{"["} + std::string{label} + "] " + std::string{name} + " " +
+                std::string{version};
+    };
+    for (const auto& plugin : plugins_)
+        add("Lua", plugin->name, plugin->version);
+    for (const auto& adapter : adapters_)
+        for (const ForeignPlugin& plugin : adapter->plugins())
+            add(adapter->label(), plugin.name, plugin.version);
+    if (hooks_.log)
+        hooks_.log("plugins", line.empty() ? "No plugins loaded." : "Plugins: " + line);
+}
+
 void PluginHost::invoke(const std::vector<std::string>& words, const std::optional<Player>& source) {
     const auto roots = commands_.find(words.front());
-    if (roots == commands_.end())
+    if (roots == commands_.end()) {
+        if (!source && words.front() == "plugins")
+            return listPlugins();
+        if (!source && foreignCommands_.contains(words.front())) {
+            std::string line;
+            for (const std::string& word : words)
+                line += (line.empty() ? "" : " ") + word;
+            for (auto& adapter : adapters_)
+                if (adapter->console(line))
+                    return;
+        }
         return;
+    }
     const Entry* best = nullptr;
     for (const auto& entry : roots->second) {
         const auto& literals = entry->spec.literals;

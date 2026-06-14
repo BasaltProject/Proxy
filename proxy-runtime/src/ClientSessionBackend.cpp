@@ -217,6 +217,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
             return backendChallenge();
         if (awaitingJoin_ && state_ == State::kPlay) {
             awaitingJoin_ = false;
+            registerBungeeChannels();
             backpressure();
         }
         const bool shaped = !legacyRaw_;
@@ -243,8 +244,19 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
                 const auto kicked = wire::protocol::play::PlayDisconnectPacket::read(frame_);
                 if (!kicked || frame_.readableBytes() != 0)
                     return false;
+                const std::string plain = wire::text::toPlainText(kicked->reason);
                 if (playerKick_ && profile_)
-                    playerKick_(profile_->name, wire::text::toPlainText(kicked->reason));
+                    playerKick_(profile_->name, plain);
+                if (!closing_ && !recovering_ && !startingConfiguration_ && activeBackend_ &&
+                    ask(DecisionKind::kKick, {}, activeBackendName(), plain)) {
+                    held_.assign(bytes.begin(), bytes.end());
+                    kickDeciding_ = true;
+                    if (!beginRecovery()) {
+                        kickDeciding_ = false;
+                        return false;
+                    }
+                    return true;
+                }
             } else if (shaped &&
                        (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0))
                 return false;

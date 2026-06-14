@@ -8,6 +8,7 @@
 #include <basalt/wire/plugins/CommandSpec.hpp>
 #include <basalt/wire/plugins/EventPriority.hpp>
 #include <basalt/wire/plugins/PluginText.hpp>
+#include <basalt/wire/text/Component.hpp>
 
 namespace basalt::proxy::plugins {
 
@@ -20,6 +21,7 @@ struct PluginHost::Plugin {
     struct Handler {
         wire::lua::LuaRef function;
         Priority priority = Priority::Normal;
+        bool observer = false;
         std::map<std::string, std::string, std::less<>> filters;
     };
 
@@ -34,6 +36,7 @@ struct PluginHost::Plugin {
     wire::lua::LuaRef playerMeta;
     wire::lua::LuaRef consoleMeta;
     std::unique_ptr<wire::plugins::PluginText> text;
+    std::vector<std::string> channels;
     bool storage = false;
     bool playersData = false;
     std::vector<wire::plugins::PluginHandle> packetHandles;
@@ -56,10 +59,18 @@ struct PluginHost::Timer {
     std::shared_ptr<std::atomic<bool>> cancelled;
 };
 
+/// A component read from JSON text, or nothing when the text is not valid component JSON.
+[[nodiscard]] std::optional<wire::text::Component> componentOfJson(std::string_view json);
+
+/// The bit a decision event sets in PluginHost::deciders_, or 0 when the event is not a decision.
+[[nodiscard]] unsigned decisionBit(std::string_view event);
+[[nodiscard]] unsigned decisionBit(runtime::DecisionKind kind);
+
 /// Everything a plugin can call, installed as globals in its sandbox.
 struct PluginApi {
     static void install(PluginHost& host, PluginHost::Plugin& plugin, const wire::plugins::PluginManifest& manifest,
                         const wire::common::toml::TomlTable& config);
+    static void installMessaging(PluginHost& host, PluginHost::Plugin& plugin);
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
 
@@ -71,6 +82,9 @@ inline constexpr std::string_view kChatEvent = "player.chat";
 inline constexpr std::string_view kKickEvent = "player.kick";
 inline constexpr std::string_view kPingEvent = "server.ping";
 inline constexpr std::string_view kLoginEvent = "player.login";
+inline constexpr std::string_view kCommandEvent = "player.command";
+inline constexpr std::string_view kPreConnectEvent = "player.server_pre_connect";
+inline constexpr std::string_view kMessageEvent = "player.message";
 inline constexpr std::string_view kServerChangeEvent = "player.server_change";
 
 } // namespace basalt::proxy::plugins

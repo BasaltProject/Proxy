@@ -19,6 +19,12 @@
 #include <basalt/proxy/config/RemoteConfig.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/proxy/remote/RemoteApi.hpp>
+
+#include <cstdlib>
+#if defined(BASALT_HAS_SHIM)
+#include <basalt/proxy/bungee/BungeeAdapter.hpp>
+#include <basalt/proxy/velocity/VelocityAdapter.hpp>
+#endif
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
@@ -278,6 +284,19 @@ int run(const cliCommand::Run& command) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post(std::move(event));
     };
+    services.pluginMessage = [&pluginHost](std::string_view player, std::string_view channel,
+                                           std::span<const std::uint8_t> data, bool fromBackend) {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr && host->message(player, channel, data, fromBackend);
+    };
+    services.latency = [&pluginHost](std::string_view player, std::int32_t milliseconds) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kLatency, std::string{player}, {}, {}, {}, {}, 0, milliseconds});
+    };
+    services.decide = [&pluginHost](DecisionRequest request) {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr && host->decide(std::move(request));
+    };
     auto runtime = ProxyRuntime::create(*configuration, std::move(services));
     if (!runtime) {
         logger.error([&runtime] { return runtime.error(); });
@@ -431,12 +450,39 @@ int run(const cliCommand::Run& command) {
         settings.packets = packetRegistry;
         settings.packetTimeout = std::chrono::milliseconds{configuration->plugins.packetTimeoutMs};
         settings.packetMaxBytes = configuration->plugins.packetMaxKib * 1024;
+#if defined(BASALT_HAS_SHIM)
+        proxy::plugins::JavaRuntimeOptions javaOptions;
+        javaOptions.pluginsDirectory = settings.directory;
+        if (const char* runtime = std::getenv("BASALT_SHIM_DIR"))
+            javaOptions.runtimeDirectory = runtime;
+        settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {
+            return proxy::bungee::createBungeeAdapter(javaOptions, hooks);
+        });
+        settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {
+            return proxy::velocity::createVelocityAdapter(javaOptions, hooks);
+        });
+#endif
         proxy::plugins::PluginHooks hooks;
         hooks.packet = [&runtime](std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                                   std::span<const std::uint8_t> body) {
             return runtime->sendPacket(player, serverbound, phase, id, body);
         };
         hooks.servers = [&runtime] { return runtime->backendNames(); };
+        hooks.info = [&configuration] {
+            proxy::plugins::ProxyInfo info;
+            info.bind = configuration->network.bind;
+            info.port = configuration->network.port;
+            info.onlineMode = configuration->network.onlineMode;
+            info.preventClientProxyConnections = configuration->network.preventClientProxyConnections;
+            info.compressionThreshold = configuration->network.compressionThreshold;
+            info.connectTimeoutMs = configuration->runtime.connectTimeoutMs;
+            info.readTimeoutMs = configuration->runtime.readTimeoutMs;
+            info.maxSessions = configuration->runtime.maxSessions;
+            info.defaultRoute = configuration->defaultRoute;
+            for (const auto& route : configuration->forcedHosts)
+                info.forcedHosts.emplace_back(route.host, route.backends);
+            return info;
+        };
         hooks.send = [&runtime, &bedrockPlayers](std::string_view player, std::string_view backend) {
             auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire);
             if (bedrockSide != nullptr && bedrockSide->connect(player, backend))
@@ -451,6 +497,20 @@ int run(const cliCommand::Run& command) {
         hooks.commands = &dispatcher;
         hooks.hasPermission = [&permissions](std::string_view player, std::string_view node) {
             return permissions.hasPlayer(player, node);
+        };
+        hooks.sendMessage = [&runtime](std::string_view player, std::string_view channel,
+                                       std::span<const std::uint8_t> data, bool towardBackend) {
+            return runtime->sendPluginMessage(player, channel, data, towardBackend);
+        };
+        hooks.serverAddress = [&runtime](std::string_view server) { return runtime->backendEndpoint(server); };
+        hooks.tellComponent = [&runtime](std::string_view player, wire::text::Component component) {
+            static_cast<void>(runtime->tellComponent(player, std::move(component)));
+        };
+        hooks.kickComponent = [&runtime](std::string_view player, wire::text::Component component) {
+            static_cast<void>(runtime->kickComponent(player, std::move(component)));
+        };
+        hooks.resolveDecision = [&runtime](std::string_view player, std::uint64_t token, DecisionResult result) {
+            runtime->resolveDecision(player, token, std::move(result));
         };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
