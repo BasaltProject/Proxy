@@ -668,19 +668,20 @@ int run(const cliCommand::Run& command) {
     if (remoteConfiguration->api.enabled) {
         proxy::remote::RemoteHooks hooks;
         hooks.runtime = &*runtime;
-        hooks.reload = reloadOutcome;
+        hooks.command = [&dispatcher](std::string_view line) {
+            proxy::remote::CommandReply reply;
+            CommandSource source{"API", true, [&reply](std::string_view miniMessage) {
+                                     reply.lines.push_back(detail::Messages::plain(miniMessage));
+                                 }};
+            const CommandResult result = dispatcher.execute(source, line);
+            reply.outcome = result.outcome;
+            return reply;
+        };
+        hooks.playerOnline = [&roster](std::string_view player) { return roster.find(player).has_value(); };
         if (configuration->bedrock.enabled) {
             hooks.bedrockPlaying = [&bedrockPlayers]() -> std::size_t {
                 auto* side = bedrockPlayers.load(std::memory_order_acquire);
                 return side != nullptr ? side->playingCount() : 0;
-            };
-            hooks.bedrockSend = [&bedrockPlayers](std::string_view player, std::string_view backend) {
-                auto* side = bedrockPlayers.load(std::memory_order_acquire);
-                return side != nullptr && side->connect(player, backend);
-            };
-            hooks.bedrockKick = [&bedrockPlayers](std::string_view player, std::string_view reason) {
-                if (auto* side = bedrockPlayers.load(std::memory_order_acquire))
-                    side->kick(player, reason);
             };
         }
         hooks.loadedPlugins = [&plugins]() -> std::size_t { return plugins ? plugins->loaded() : 0; };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <basalt/proxy/config/RemoteConfig.hpp>
+#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/wire/remote/HttpServer.hpp>
 
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace basalt::proxy::runtime {
 class ProxyRuntime;
@@ -17,15 +19,20 @@ class ProxyRuntime;
 
 namespace basalt::proxy::remote {
 
+/// What a command run as the API produced: how the dispatcher took it and the plain text it replied with.
+struct CommandReply {
+    runtime::CommandOutcome outcome = runtime::CommandOutcome::Unknown;
+    std::vector<std::string> lines;
+};
+
 /// Everything the API reaches, handed in by the process that owns it. Every callback must be thread-safe.
 struct RemoteHooks {
     runtime::ProxyRuntime* runtime = nullptr;
-    /// Reloads the configuration files; the message says what changed or why nothing did.
-    std::function<std::expected<std::string, std::string>()> reload;
+    /// Runs a command line through the proxy's command dispatcher as a console-like source.
+    std::function<CommandReply(std::string_view line)> command;
+    /// True when a Java or Bedrock player of that name is online.
+    std::function<bool(std::string_view player)> playerOnline;
     std::function<std::size_t()> bedrockPlaying;
-    /// True when the player is a Bedrock player and the change was requested.
-    std::function<bool(std::string_view player, std::string_view backend)> bedrockSend;
-    std::function<void(std::string_view player, std::string_view reason)> bedrockKick;
     std::function<std::size_t()> loadedPlugins;
 };
 

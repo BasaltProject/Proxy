@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <thread>
 
 namespace basalt::proxy::remote {
@@ -21,10 +22,7 @@ using wire::remote::http::errorBody;
 using wire::remote::http::Request;
 
 constexpr std::chrono::milliseconds kSessionsTimeout{500};
-constexpr std::chrono::milliseconds kSendTimeout{1500};
-constexpr std::chrono::milliseconds kSendPoll{10};
 constexpr std::string_view kApiPrefix = "/v1/";
-constexpr std::string_view kDefaultKickReason = "Disconnected by an administrator.";
 
 [[nodiscard]] HttpReply ok(JsonObject body, int status = 200) { return {status, text(std::move(body))}; }
 
@@ -189,6 +187,37 @@ struct RemoteApi::Impl {
         return ok(std::move(object));
     }
 
+    [[nodiscard]] HttpReply run(std::string_view peer, const std::string& line) const {
+        if (!hooks.command)
+            return failure(503, "commands are not available");
+        const CommandReply reply = hooks.command(line);
+        logger.info([&] { return "API " + std::string{peer} + " ran: " + line; });
+        switch (reply.outcome) {
+        case runtime::CommandOutcome::Unknown:
+            return failure(503, "the command is not available");
+        case runtime::CommandOutcome::Denied:
+            return failure(403, "the API source is not allowed to run that command");
+        case runtime::CommandOutcome::Usage:
+            return failure(400, "the command was refused as malformed");
+        case runtime::CommandOutcome::Executed:
+            break;
+        }
+        std::string joined;
+        for (const std::string& text : reply.lines)
+            joined += (joined.empty() ? "" : "\n") + text;
+        if (joined.starts_with("Reload rejected"))
+            return failure(422, joined);
+        JsonObject object;
+        object.set("status", str("executed"));
+        object.set("message", str(joined));
+        return ok(std::move(object));
+    }
+
+    [[nodiscard]] static bool plainName(std::string_view name) {
+        return !name.empty() && name.size() <= 16 &&
+               std::ranges::all_of(name, [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '.'; });
+    }
+
     [[nodiscard]] HttpReply send(std::string_view name, const Request& request, std::string_view peer) const {
         if (!settings.actions.send)
             return failure(403, "sending players is turned off in remote.toml");
@@ -196,52 +225,14 @@ struct RemoteApi::Impl {
         const std::string backend = stringField(request.body, "backend", wellFormed);
         if (!wellFormed || backend.empty())
             return failure(400, "the body must be a JSON object with a \"backend\" string");
-        if (hooks.bedrockSend && hooks.bedrockSend(name, backend)) {
-            logger.info([&] {
-                return "API " + std::string{peer} + " moved Bedrock player " + std::string{name} + " to " + backend +
-                       ".";
-            });
-            JsonObject object;
-            object.set("status", str("requested"));
-            return ok(std::move(object), 202);
-        }
-        auto ticket = hooks.runtime->sendPlayer(name, backend);
-        if (!ticket) {
-            switch (ticket.error()) {
-            case runtime::BackendChangeError::kNotRunning:
-                return failure(503, "the proxy is not running");
-            case runtime::BackendChangeError::kInvalidPlayer:
-                return failure(400, "invalid player name");
-            case runtime::BackendChangeError::kUnknownBackend:
-                return failure(404, "no such backend");
-            case runtime::BackendChangeError::kBusy:
-                return failure(503, "the control queue or buffer budget is full");
-            }
-        }
-        const auto deadline = std::chrono::steady_clock::now() + kSendTimeout;
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (const auto result = ticket->result()) {
-                JsonObject object;
-                switch (*result) {
-                case runtime::BackendChangeResult::kAccepted:
-                    logger.info([&] {
-                        return "API " + std::string{peer} + " moved " + std::string{name} + " to " + backend + ".";
-                    });
-                    object.set("status", str("accepted"));
-                    return ok(std::move(object));
-                case runtime::BackendChangeResult::kPlayerNotFound:
-                    return failure(404, "no such player (names are case-sensitive)");
-                case runtime::BackendChangeResult::kUnavailable:
-                    return failure(409, "the player is not in play, is already there, or has a change in progress");
-                case runtime::BackendChangeResult::kStopped:
-                    return failure(503, "the proxy stopped before the request completed");
-                }
-            }
-            std::this_thread::sleep_for(kSendPoll);
-        }
-        JsonObject object;
-        object.set("status", str("pending"));
-        return ok(std::move(object), 202);
+        if (!plainName(name))
+            return failure(400, "invalid player name");
+        const auto known = hooks.runtime->backends();
+        if (std::ranges::none_of(known, [&](const auto& entry) { return entry.name == backend; }))
+            return failure(404, "no such backend");
+        if (!hooks.playerOnline || !hooks.playerOnline(name))
+            return failure(404, "no such player (names are case-sensitive)");
+        return run(peer, "send " + std::string{name} + " " + backend);
     }
 
     [[nodiscard]] HttpReply kick(std::string_view name, const Request& request, std::string_view peer) const {
@@ -251,47 +242,18 @@ struct RemoteApi::Impl {
         std::string reason = stringField(request.body, "reason", wellFormed);
         if (!wellFormed)
             return failure(400, "the body must be empty or a JSON object with a \"reason\" string");
-        if (reason.empty())
-            reason = kDefaultKickReason;
-        auto sessions = snapshot();
-        if (!sessions)
-            return sessions.error();
-        const auto found =
-            std::ranges::find_if(*sessions, [name](const auto& session) { return session.name == name; });
-        JsonObject object;
-        if (found == sessions->end()) {
-            if (!hooks.bedrockKick)
-                return failure(404, "no such player");
-            hooks.bedrockKick(name, reason);
-            logger.info([&] {
-                return "API " + std::string{peer} + " asked to kick Bedrock player " + std::string{name} + ".";
-            });
-            object.set("status", str("requested"));
-            return ok(std::move(object), 202);
-        }
-        if (found->phase != "play")
-            return failure(409, "the player is not in play yet");
-        if (!hooks.runtime->kickPlayer(name, reason))
-            return failure(503, "the control queue is full");
-        logger.info([&] { return "API " + std::string{peer} + " kicked " + std::string{name} + "."; });
-        object.set("status", str("queued"));
-        return ok(std::move(object));
+        if (!plainName(name))
+            return failure(400, "invalid player name");
+        if (!hooks.playerOnline || !hooks.playerOnline(name))
+            return failure(404, "no such player");
+        std::erase_if(reason, [](char c) { return c == '\n' || c == '\r'; });
+        return run(peer, "kick " + std::string{name} + (reason.empty() ? std::string{} : " " + reason));
     }
 
     [[nodiscard]] HttpReply reload(std::string_view peer) const {
         if (!settings.actions.reload)
             return failure(403, "reloading is turned off in remote.toml");
-        if (!hooks.reload)
-            return failure(503, "reload is not available");
-        auto result = hooks.reload();
-        logger.info([&] {
-            return "API " + std::string{peer} + " reloaded the configuration: " + (result ? *result : result.error());
-        });
-        if (!result)
-            return failure(422, result.error());
-        JsonObject object;
-        object.set("message", str(*result));
-        return ok(std::move(object));
+        return run(peer, "reload");
     }
 
     [[nodiscard]] HttpReply route(const Request& request, std::string_view peer) const {
