@@ -1,8 +1,8 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
-#include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>

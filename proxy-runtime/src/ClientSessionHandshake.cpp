@@ -1,6 +1,5 @@
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
-#include "Kicks.hpp"
 #include "LoginShapes.hpp"
 #include "RouteVersions.hpp"
 
@@ -111,10 +110,10 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             return false;
         if (access_.policy) {
             if (!access_.settings->allowsName(*loginName))
-                return refuse(kicks::kInvalidName);
+                return refuseWith("invalid-name", "Invalid characters in username");
             if (access_.policy->gate.throttleLogin(clientAddress(), access_.settings->network.connectionThrottleMs,
                                                    Clock::now()))
-                return refuse(kicks::kConnectionThrottled);
+                return refuseWith("connection-throttled", "Connection throttled! Please wait before reconnecting.");
         }
         name_ = std::move(*loginName);
         if (loadingMessage_) {

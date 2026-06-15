@@ -172,8 +172,8 @@ struct ProxyRuntime::Impl {
                 runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
                 runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
                 runtime.services.playerLogin, runtime.services.kickText, runtime.services.commandSuggestions,
-                runtime.services.loadingMessage, std::move(incoming->access), runtime.services.pluginMessage, runtime.services.decide,
-                runtime.services.latency);
+                runtime.services.loadingMessage, std::move(incoming->access), runtime.services.pluginMessage,
+                runtime.services.decide, runtime.services.latency);
             if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())

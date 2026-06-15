@@ -3,7 +3,6 @@
 #include "BackendDial.hpp"
 #include "BackendLogin.hpp"
 #include "BackendRoutes.hpp"
-#include "Kicks.hpp"
 #include "LoginShapes.hpp"
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
@@ -366,8 +365,8 @@ bool ClientSession::packet() {
 }
 
 bool ClientSession::decode() {
-    while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && !deciding_ && state_ != State::Authenticating &&
-           state_ != State::kBackendLogin) {
+    while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && !deciding_ &&
+           state_ != State::Authenticating && state_ != State::kBackendLogin) {
         if (state_ == State::kProxyHeader) {
             const auto header = proxyProtocol::parse(input_.readable());
             if (header.status == proxyProtocol::Status::kNeedMore)
@@ -583,10 +582,11 @@ bool ClientSession::beginJoin() {
     return true;
 }
 
-bool ClientSession::kickClient(std::string_view text) {
+bool ClientSession::kickClient(std::string_view key, std::string_view fallback) {
     if (!inPlay())
         return false;
-    kick(text);
+    const std::string text = kickText_ ? kickText_(key) : std::string{};
+    kick(text.empty() ? fallback : std::string_view{text});
     return true;
 }
 
@@ -600,7 +600,7 @@ std::optional<bool> ClientSession::limited(std::int32_t id) {
     case Verdict::kDrop:
         return true;
     case Verdict::kKick:
-        return kickClient(kicks::kPacketRate);
+        return kickClient("packet-rate", "Kicked for exceeding packet rate limit");
     }
     return std::nullopt;
 }

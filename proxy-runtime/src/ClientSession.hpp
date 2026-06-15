@@ -65,31 +65,30 @@ public:
                                                                  std::string_view address)>;
     using AuthenticationStart = std::function<std::optional<std::stop_source>(wire::auth::OnlineLoginRequest)>;
     using ResolutionStart = std::function<std::optional<std::stop_source>(BackendAttempt, Clock::time_point)>;
-    ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
-                  wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
-                  StatusSource status, std::span<const std::uint8_t> unavailable, Clock::time_point acceptedAt,
-                  bool online, bool checkAddress, std::span<const std::uint8_t> publicKey,
-                  std::span<const std::uint8_t> authFailure, AuthenticationStart authenticate,
-                  const BackendRoutes& routes, ResolutionStart resolve,
-                  const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                  std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
-                  const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
-                  std::function<bool(std::string_view, std::string_view)> playerCommand = {},
-                  std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs = {},
-                  config::TranslationMode translation = config::TranslationMode::Auto,
-                  std::function<void(std::string_view, std::string_view)> playerChat = {},
-                  std::function<void(std::string_view, std::string_view)> playerKick = {},
-                  std::function<void(std::string_view, std::int32_t)> statusPing = {},
-                  std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)>
-                      playerLogin = {},
-                  std::function<std::string(std::string_view)> kickText = {},
-                  std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)>
-                      commandSuggestions = {},
-                  std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {},
-                  std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)>
-                      pluginMessage = {},
-                  std::function<bool(DecisionRequest)> decide = {},
-                  std::function<void(std::string_view, std::int32_t)> latency = {});
+    ClientSession(
+        wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
+        wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings, StatusSource status,
+        std::span<const std::uint8_t> unavailable, Clock::time_point acceptedAt, bool online, bool checkAddress,
+        std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
+        AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
+        const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
+        std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
+        const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
+        std::function<bool(std::string_view, std::string_view)> playerCommand = {},
+        std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs = {},
+        config::TranslationMode translation = config::TranslationMode::Auto,
+        std::function<void(std::string_view, std::string_view)> playerChat = {},
+        std::function<void(std::string_view, std::string_view)> playerKick = {},
+        std::function<void(std::string_view, std::int32_t)> statusPing = {},
+        std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin =
+            {},
+        std::function<std::string(std::string_view)> kickText = {},
+        std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions =
+            {},
+        std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {},
+        std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)> pluginMessage = {},
+        std::function<bool(DecisionRequest)> decide = {},
+        std::function<void(std::string_view, std::int32_t)> latency = {});
 
     struct UiSource {
         std::function<std::shared_ptr<const wire::config::UiConfigs>()> configs;
@@ -117,7 +116,9 @@ public:
     void kick(const wire::text::Component& component);
     /// Owner only. Applies a plugin decision; a stale token is ignored.
     [[nodiscard]] bool decided(std::uint64_t token, const DecisionResult& result, bool expired = false);
+
     [[nodiscard]] bool awaiting(std::uint64_t token) const { return decisionPending() && token == decisionToken_; }
+
     /// Sends a plugin message to the client, or to the player's backend; ignored unless the client is in play.
     void sendPluginMessage(std::string_view channel, std::span<const std::uint8_t> data, bool towardBackend);
     void registerBungeeChannels();
@@ -213,7 +214,7 @@ private:
     bool legacyRaw_ = false;
     [[nodiscard]] bool acceptOrigin(std::string_view address, std::uint16_t port);
     [[nodiscard]] bool beginJoin();
-    [[nodiscard]] bool kickClient(std::string_view text);
+    [[nodiscard]] bool kickClient(std::string_view key, std::string_view fallback);
     /// A verdict when the packet is not to travel on, which is what `packet()` then returns; empty to relay it.
     [[nodiscard]] std::optional<bool> limited(std::int32_t id);
     [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
@@ -284,7 +285,9 @@ private:
     [[nodiscard]] bool dial();
     [[nodiscard]] bool afterLogin();
     [[nodiscard]] bool beginRecovery();
+
     [[nodiscard]] bool decisionPending() const { return deciding_ || switchDecision_ || kickDeciding_; }
+
     [[nodiscard]] bool queueStatus(const DecisionResult* changes);
     [[nodiscard]] bool relayHeld();
     [[nodiscard]] bool routeInitial();

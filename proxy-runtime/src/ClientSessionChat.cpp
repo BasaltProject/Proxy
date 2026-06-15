@@ -1,6 +1,5 @@
 #include "BackendLogin.hpp"
 #include "ClientSession.hpp"
-#include "Kicks.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/common/json/Json.hpp>
@@ -203,13 +202,13 @@ std::optional<bool> ClientSession::screenChat(std::int32_t id) {
     }
     if (counted && !(chat ? chatSpam_ : commandSpam_).increment(Clock::now()) &&
         !(access_.isOperator && access_.isOperator(profile_->name)))
-        return kickClient(kicks::kSpam);
+        return kickClient("spam", "Kicked for spamming");
     if (chat && policy.general.enforceSecureProfile && online_ && clientProtocol_ == 0) {
         view.clear();
         view.writeBytes(frame_.readable());
         const auto packet = play::ChatMessagePacket::read(view);
         if (packet && !packet->signature)
-            return kickClient(kicks::kUnsignedChat);
+            return kickClient("unsigned-chat", "Received a chat packet with a missing or invalid signature.");
     }
     return std::nullopt;
 }

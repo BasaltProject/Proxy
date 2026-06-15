@@ -1,7 +1,7 @@
 #pragma once
 
-#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/plugins/ForeignAdapter.hpp>
+#include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
