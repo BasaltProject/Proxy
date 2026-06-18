@@ -30,7 +30,7 @@ struct CommandEnvironment {
     /// Waits, briefly, for the proxy to say whether the move was accepted.
     std::function<SendResult(std::string_view player, std::string_view server)> send;
     std::function<void(std::string_view player, std::string_view miniMessage)> kick;
-    std::function<std::string()> reload;
+    std::function<std::expected<std::string, std::string>()> reload;
     std::function<std::string()> status;
     std::function<void()> stop;
     std::function<std::vector<std::string>()> plugins;

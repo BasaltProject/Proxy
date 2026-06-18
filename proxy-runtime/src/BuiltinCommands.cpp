@@ -180,7 +180,13 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
 
     add(env, "reload", "Reloads the configuration and the plugins.",
         Node::literal("reload").executes([env](const CommandContext& context) {
-            context.reply(Messages::escape(env.reload ? env.reload() : std::string{"Reload is not available."}));
+            const auto result =
+                env.reload
+                    ? env.reload()
+                    : std::expected<std::string, std::string>{std::unexpected(std::string{"Reload is not available."})};
+            context.reply(Messages::escape(result ? *result : result.error()));
+            if (!result)
+                context.fail();
         }));
 
     add(env, "plugins", "Lists the loaded plugins.",

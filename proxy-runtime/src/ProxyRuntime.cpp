@@ -22,6 +22,7 @@
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
+#include <basalt/wire/text/MiniMessage.hpp>
 
 #include <algorithm>
 #include <array>
@@ -565,7 +566,8 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         namespace protocol = wire::protocol;
         wire::io::ByteBuffer packet{1024}, frame{1024};
         impl->statusSource = [state = impl.get()](std::int32_t clientProtocol, std::string_view host,
-                                                  std::string_view address) -> std::vector<std::uint8_t> {
+                                                  std::string_view address,
+                                                  const DecisionResult* changes) -> std::vector<std::uint8_t> {
             protocol::status::ServerStatusPayload payload =
                 state->services.status
                     ? state->services.status(clientProtocol, host, address)
@@ -579,6 +581,14 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                           .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
                                                                                     buildInfo::kProtocolVersion},
                           .favicon = std::nullopt};
+            if (changes != nullptr) {
+                if (!changes->text.empty())
+                    payload.description = wire::text::miniMessage::parse(changes->text);
+                if (changes->maxPlayers && payload.players)
+                    payload.players->max = *changes->maxPlayers;
+                if (changes->online && payload.players)
+                    payload.players->online = *changes->online;
+            }
             payload.enforcesSecureChat = state->config.general.enforceSecureProfile && state->config.network.onlineMode;
             wire::io::ByteBuffer body{1024}, framed{1024};
             protocol::varInt::write(body, protocol::status::StatusResponsePacket::kId);

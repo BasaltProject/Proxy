@@ -71,25 +71,9 @@ bool ClientSession::routeInitial() {
 }
 
 bool ClientSession::queueStatus(const DecisionResult* changes) {
-    namespace protocol = wire::protocol;
-    if (changes == nullptr || (changes->text.empty() && !changes->maxPlayers && !changes->online)) {
-        const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress());
-        return !answer.empty() && queueOrdered(answer);
-    }
-    wire::io::ByteBuffer packet{1024}, frame{1024};
-    protocol::status::ServerStatusPayload status{
-        .description = wire::text::miniMessage::parse(changes->text.empty() ? std::string_view{"Basalt Proxy"}
-                                                                            : std::string_view{changes->text}),
-        .players = protocol::status::ServerStatusPayload::Players{.max = changes->maxPlayers.value_or(
-                                                                      static_cast<std::int32_t>(settings_.maxSessions)),
-                                                                  .online = changes->online.value_or(0),
-                                                                  .sample = {}},
-        .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
-                                                                  buildInfo::kProtocolVersion},
-        .favicon = std::nullopt};
-    protocol::varInt::write(packet, protocol::status::StatusResponsePacket::kId);
-    protocol::status::StatusResponsePacket{std::move(status)}.write(packet);
-    return protocol::packetFraming::writeUncompressed(frame, packet.readable()) && queue(frame.readable());
+    const std::vector<std::uint8_t> answer =
+        status_(statusProtocol_, virtualHost_, connection_.remoteAddress(), changes);
+    return !answer.empty() && queueOrdered(answer);
 }
 
 bool ClientSession::relayHeld() {

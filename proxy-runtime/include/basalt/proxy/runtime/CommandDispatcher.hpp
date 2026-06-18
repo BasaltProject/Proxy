@@ -51,7 +51,13 @@ public:
 
     void reply(std::string_view miniMessage) const;
 
+    /// Marks the run as failed: the command was understood and executed, but did not do what was asked.
+    void fail() const noexcept { failed_ = true; }
+
+    [[nodiscard]] bool failed() const noexcept { return failed_; }
+
 private:
+    mutable bool failed_ = false;
     const CommandSource* source_;
     std::string line_;
     std::map<std::string, std::string, std::less<>> values_;
@@ -96,7 +102,7 @@ struct CommandRegistration {
     std::string owner;
 };
 
-enum class CommandOutcome : std::uint8_t { Unknown, Denied, Usage, Executed };
+enum class CommandOutcome : std::uint8_t { Unknown, Denied, Usage, Executed, Failed };
 
 struct CommandResult {
     CommandOutcome outcome = CommandOutcome::Unknown;

@@ -22,6 +22,7 @@ void CommandService::run(const CommandSource& source, std::string_view line) {
     const CommandResult result = dispatcher_->execute(source, line);
     switch (result.outcome) {
     case CommandOutcome::Executed:
+    case CommandOutcome::Failed:
         return;
     case CommandOutcome::Unknown:
         source.reply(messages_->command("unknown"));

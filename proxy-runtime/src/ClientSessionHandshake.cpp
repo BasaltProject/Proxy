@@ -183,7 +183,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             deciding_ = true;
             return true;
         }
-        const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress());
+        const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, connection_.remoteAddress(), nullptr);
         if (answer.empty() || !queueOrdered(answer))
             return false;
         state_ = State::Ping;

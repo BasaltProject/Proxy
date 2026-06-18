@@ -61,8 +61,8 @@ public:
     static constexpr std::size_t kBufferBytes = kBufferCapacity * 3;
     static constexpr std::size_t kAuthenticationBytes = 128 * 1024;
     static constexpr std::size_t kResolutionBytes = 16 * 1024;
-    using StatusSource = std::function<std::vector<std::uint8_t>(std::int32_t protocol, std::string_view host,
-                                                                 std::string_view address)>;
+    using StatusSource = std::function<std::vector<std::uint8_t>(
+        std::int32_t protocol, std::string_view host, std::string_view address, const DecisionResult* changes)>;
     using AuthenticationStart = std::function<std::optional<std::stop_source>(wire::auth::OnlineLoginRequest)>;
     using ResolutionStart = std::function<std::optional<std::stop_source>(BackendAttempt, Clock::time_point)>;
     ClientSession(

@@ -299,6 +299,7 @@ struct Walk {
     std::size_t deepestAt = 0;
     std::vector<std::string> path;
     std::vector<std::string> deepestPath;
+    bool failed = false;
 };
 
 } // namespace
@@ -337,7 +338,9 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
         std::function<bool(const CommandNode&, std::size_t)> step;
         std::function<bool(const CommandNode&)> finish = [&](const CommandNode& node) -> bool {
             if (node.executor_) {
-                node.executor_(CommandContext{source, line, walk.values});
+                const CommandContext context{source, line, walk.values};
+                node.executor_(context);
+                walk.failed = context.failed();
                 return true;
             }
             return std::ranges::any_of(node.children_, [&](const CommandNode& child) {
@@ -379,7 +382,7 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
             return false;
         };
         if (step(root, 1))
-            return {CommandOutcome::Executed, {}};
+            return {walk.failed ? CommandOutcome::Failed : CommandOutcome::Executed, {}};
         std::string prefix;
         for (const std::string& word : walk.deepestPath)
             prefix += (prefix.empty() ? "" : " ") + word;

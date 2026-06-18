@@ -426,7 +426,7 @@ int run(const cliCommand::Run& command) {
         return detail::SendResult::kBusy;
     };
     environment.kick = kickPlayer;
-    environment.reload = reloadConfiguration;
+    environment.reload = reloadOutcome;
     environment.status = [&runtime, &bedrockPlayers] {
         auto* side = bedrockPlayers.load(std::memory_order_acquire);
         return detail::statusText(*runtime, side != nullptr ? std::optional{side->playingCount()} : std::nullopt);

@@ -187,6 +187,13 @@ struct RemoteApi::Impl {
         return ok(std::move(object));
     }
 
+    [[nodiscard]] static std::string joinLines(const std::vector<std::string>& lines) {
+        std::string joined;
+        for (const std::string& text : lines)
+            joined += (joined.empty() ? "" : "\n") + text;
+        return joined;
+    }
+
     [[nodiscard]] HttpReply run(std::string_view peer, const std::string& line) const {
         if (!hooks.command)
             return failure(503, "commands are not available");
@@ -199,17 +206,14 @@ struct RemoteApi::Impl {
             return failure(403, "the API source is not allowed to run that command");
         case runtime::CommandOutcome::Usage:
             return failure(400, "the command was refused as malformed");
+        case runtime::CommandOutcome::Failed:
+            return failure(422, joinLines(reply.lines));
         case runtime::CommandOutcome::Executed:
             break;
         }
-        std::string joined;
-        for (const std::string& text : reply.lines)
-            joined += (joined.empty() ? "" : "\n") + text;
-        if (joined.starts_with("Reload rejected"))
-            return failure(422, joined);
         JsonObject object;
         object.set("status", str("executed"));
-        object.set("message", str(joined));
+        object.set("message", str(joinLines(reply.lines)));
         return ok(std::move(object));
     }
 
