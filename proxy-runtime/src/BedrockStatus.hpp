@@ -26,6 +26,20 @@ namespace basalt::proxy::runtime::detail {
 class BedrockStatus {
 public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
+
+    /// Where the antibot reaches Bedrock: address in dotted form, shared with the Java side's reputation.
+    struct Guard {
+        std::function<bool(std::string_view address, bool connecting)> offline;
+        std::function<std::optional<std::string>(std::string_view address, std::string_view name, std::string_view xuid,
+                                                 bool authenticated)>
+            login;
+        std::function<void(std::string_view address)> failed;
+        std::function<int()> packetsPerSecond;
+        std::function<int()> loginSeconds;
+    };
+
+    void guard(Guard guard) { guard_ = std::move(guard); }
+
     using Lookup = std::function<std::optional<config::BackendConfig>(std::string_view name)>;
 
     BedrockStatus(const config::BedrockConfig& options, std::function<std::string()> motd,
@@ -82,7 +96,13 @@ private:
         std::unique_ptr<wire::bedrock::BedrockConnection> connection;
         std::unique_ptr<BedrockSession> session;
         std::shared_ptr<wire::bedrock::NetherNetLink> link;
+        std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point windowStart = since;
+        std::uint32_t packets = 0;
+        bool stalled = false;
     };
+
+    Guard guard_;
 
     std::unordered_map<wire::io::UdpEndpoint, Client> clients_;
 

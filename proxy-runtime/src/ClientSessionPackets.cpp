@@ -62,6 +62,8 @@ void ClientSession::attachPackets(std::shared_ptr<wire::plugins::PluginPacketBus
 }
 
 ClientSession::~ClientSession() {
+    if (limboRun_ && access_.policy)
+        access_.policy->antibot.limboFailed(origin(), name_, antibot::Reason::kTimeout, Clock::now());
     if (endpoint_)
         endpoint_->detach();
     if (packets_ && connectionId_ != 0)

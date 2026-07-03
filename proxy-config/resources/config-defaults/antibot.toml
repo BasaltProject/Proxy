@@ -1,0 +1,234 @@
+# Antibot: decides which connections get to a backend. It runs before any backend is chosen, costs next to nothing
+# for a player it already trusts, and spends more only on origins that look wrong. Every option here is NO VANILLA.
+# A change is applied live: the file is read and checked as a whole, and a bad one leaves the running settings alone.
+
+[general]
+# Master switch. Off, the proxy does no verification at all (the limits in limits.toml and the admission rules in
+# proxy.toml still apply).
+enabled = true
+
+[lists]
+# Origins that are never scored, held in the limbo or banned: IP addresses or CIDR ranges, IPv4 or IPv6.
+# Put your own monitoring, load balancer health checks and staff addresses here.
+trusted = []
+# Plain text files of addresses or CIDR ranges to block, one per line, # starts a comment. A relative path is read from
+# this config directory; the files are read on start and on reload, so a scheduled download keeps one current.
+blocked-files = []
+# Origins refused at once, before a session is even created.
+blocked = []
+
+[reputation]
+# Most origins remembered at once. The oldest ones are forgotten first when it fills, so a flood of addresses
+# cannot grow memory.
+max-origins = 65536
+# Seconds an origin is remembered after it was last seen. Its score fades away over this time.
+origin-expiry-seconds = 3600
+# Score at which an origin is banned for ban-seconds.
+ban-score = 100
+ban-seconds = 600
+# Points an origin gains for each of these events. Scores fade by one point every six seconds.
+new-origin-score = 5
+failed-login-score = 20
+limbo-failure-score = 35
+
+[handshake]
+# Host names a client may put in its handshake (the address it typed), compared without case. Empty accepts any.
+# Bots that connect by IP and not by name are the usual catch.
+# allowed-hosts = ["play.example.org"]
+allowed-hosts = []
+# Client protocol numbers that are refused outright, for versions you do not want on this network. For example [47].
+blocked-protocols = []
+# Longest host name accepted. Vanilla's own limit is 255.
+max-host-length = 255
+# Points added when allowed-hosts is set and the host is not in it. 0 refuses those connections outright.
+unknown-host-score = 10
+
+[names]
+# Regular expressions (ECMAScript); a login name that matches any of them is refused. Most bot tools use a
+# recognisable pattern, for example a prefix and then digits.
+# blocked-patterns = ["^Bot_?[0-9]+$"]
+blocked-patterns = []
+# Most different names one origin may log in with while it is remembered. Above it the origin is scored. 0 turns it off.
+max-names-per-origin = 3
+# Points for the second name an origin sends that looks like an earlier one (the same letters, only digits changed).
+similar-names-score = 30
+# Points for each name over max-names-per-origin.
+names-per-origin-score = 40
+
+[status]
+# Server list requests one origin may make each second before the extra ones are dropped. 0 means no limit.
+requests-per-second = 5
+# While an attack is under way, only let an origin log in if it asked for the server list in the last
+# ping-validity-seconds. Players using Direct Connect do not ping first, so this is off until you want it.
+require-ping-in-attack = false
+# Points for logging in without a recent ping while the above is off. 0 never scores it.
+no-ping-score = 5
+ping-validity-seconds = 600
+
+[attack-mode]
+# Switch on by itself when the proxy is flooded and off again when it calms down. In attack mode, the limbo
+# (see [limbo]) is used for every login that is not trusted or verified.
+enabled = true
+# Connections per second, across all origins, that count as an attack.
+connections-per-second = 40
+# Second, harder level: at this many connections each second every unverified login is sent through the captcha, not
+# only the limbo. 0 turns the level off.
+hard-connections-per-second = 0
+# Logins per second that fail (refused names, failed authentication, limbo failures) that count as an attack.
+failed-logins-per-second = 8
+# Origins never seen before, per second, that count as an attack.
+new-origins-per-second = 25
+# Seconds the numbers above must hold before attack mode starts.
+confirm-seconds = 2
+# Seconds everything must stay under half of the thresholds before attack mode stops.
+cooldown-seconds = 60
+
+[limbo]
+# Where a login is held, in a small empty world on the proxy, before a backend sees it. A client that cannot behave
+# like a real one in there never costs a backend anything. One of:
+#   "off"        never use it
+#   "attack"     only while attack mode is on
+#   "suspicious" while attack mode is on, and when an origin's score reaches suspicious-score
+#   "always"     every login that is not trusted or verified
+mode = "attack"
+suspicious-score = 40
+# What to do with a client older than 1.20.2, which has no configuration phase to come back through. "skip" lets it
+# straight to the backend (it is still scored); "kick" refuses it while the limbo would have been used.
+legacy-clients = "skip"
+# Seconds a client has to finish the limbo.
+timeout-seconds = 20
+# Milliseconds between keep-alives, and how long a client has to answer one.
+# Require the client brand and refuse malformed ones or any in blocked-brands (compared ignoring case).
+check-brand = true
+blocked-brands = []
+# Let one name be in the limbo once at a time.
+one-per-name = true
+# When a client fails the gravity or movement check and the captcha is enabled, give it the captcha instead of
+# kicking it, so a real player on a poor connection is not lost.
+soft-fail-to-captcha = true
+# Most packets a client may send while it is in the limbo play phase (the configuration phase allows 64). Past it the
+# client is refused; a real client sends well under 30 each second.
+max-packets = 1200
+# Largest round trip, in milliseconds, measured with the limbo keep-alives. A client over it for latency-strikes
+# answers in a row is refused, which stops slow proxies and bots that hold connections. 0 turns it off.
+max-latency-ms = 1500
+latency-strikes = 3
+keep-alive-interval-ms = 2000
+keep-alive-timeout-ms = 8000
+# Drop the player from a few blocks up and require that it falls the way vanilla's physics do and lands on the floor.
+check-gravity = true
+drop-height = 6
+# Most ticks of falling a client must report before landing. A bot that never moves, or that teleports, fails.
+min-fall-ticks = 3
+# How far, in blocks, a client may be from the physics at any tick, to leave room for lag.
+fall-tolerance = 0.35
+# Refuse a client that moves impossibly in the limbo. A player is free to walk around while the check runs.
+check-movement = true
+# Fastest sideways move, in blocks per tick (sprinting is about 0.3), and farthest from where it spawned, in blocks.
+max-speed = 0.7
+max-distance = 16.0
+# Require the client to send its settings and brand, as every real client does when it enters the configuration.
+require-client-information = true
+# Most limbo sessions at once for one origin, and in total. Past them the login is refused, not sent to the backend.
+max-per-origin = 2
+max-sessions = 2048
+
+[captcha]
+# Ask the player to read a code and type it in chat. It is the strongest check and the most annoying one, so by default
+# only a very suspicious origin ever sees it: ordinary players and ordinary attack-mode logins never do.
+enabled = true
+# "blocks" builds the number out of real blocks on a wall in the limbo world, which the player reads by looking at
+# it; a bot that does not render chunks cannot. "map" shows a noisy picture on a map in the player's hand instead.
+type = "blocks"
+# When to ask. "suspicious": only when the origin's score reaches score. "attack": every login the limbo holds while
+# attack mode is on. "always": every login the limbo holds.
+mode = "suspicious"
+# Score that triggers the captcha in "suspicious" mode. It must be high: a ban comes at ban-score, so a score close to
+# it means the origin has already done several things a real player does not.
+score = 90
+# Digits in the code (a new one is drawn for every player), tries a player gets, and seconds they have.
+length = 4
+attempts = 3
+timeout-seconds = 45
+
+[passthrough]
+# Make a new origin pass every check and then disconnect it with the order to join again; only origins that come back
+# inside the window, or that are verified, reach the Mojang login and the plugins. Spares the authentication servers.
+enabled = false
+# "attack": only while attack mode is on. "always": every unverified origin.
+mode = "attack"
+# Seconds an origin has to come back after being sent away.
+window-seconds = 120
+
+[notifications]
+# While attack mode is on, do not log each refused connection; one summary with the attack's numbers is logged when
+# it ends. Outside attack mode every refusal is logged.
+quiet-logs-in-attack = true
+# An https:// address that gets a JSON POST when attack mode starts and ends. Empty sends nothing.
+webhook-url = ""
+
+[tcp]
+# Linux only (ignored elsewhere): read the kernel's view of each new connection (TCP_INFO) and score the origin when it
+# looks relayed through a tunnel or proxy: a tiny segment size, many retransmissions or a long round trip.
+enabled = false
+# Smallest acceptable maximum segment size in bytes; tunnels and some proxies lower it. 0 turns the check off.
+min-mss = 536
+# Most retransmitted segments tolerated before login. 0 turns the check off.
+max-retransmits = 4
+# Largest kernel round trip estimate in milliseconds. 0 turns the check off.
+max-rtt-ms = 0
+# Points added to the origin's score for each of these.
+score = 50
+
+[kernel-block]
+# Run a command when an origin is banned, so the kernel drops its packets before they reach this process. It needs
+# privileges that the proxy usually does not have, so it is off by default.
+enabled = false
+# Only for bans that happen while attack mode is on.
+only-in-attack = true
+# The command and its arguments, run without a shell. {ip} is the address and {seconds} the ban length. For example:
+# ["nft", "add", "element", "inet", "filter", "basalt_banned", "{", "{ip}", "timeout", "{seconds}s", "}"]
+command = []
+
+[bedrock]
+# Apply the antibot to Bedrock players too. They share the reputation, bans and attack mode of Java players by address,
+# and their server-list pings and new sessions are throttled by the same rules.
+enabled = true
+# Most Bedrock packets a client may send each second once it is playing. 0 turns the limit off.
+packets-per-second = 1500
+# Seconds a Bedrock client has from its session opening to finish logging in.
+login-seconds = 15
+# While attack mode is on, only let in Bedrock players whose identity Xbox Live signed.
+xbox-in-attack = true
+
+[exploits]
+# Refuse text and payloads built to attack a backend (Log4j lookups, oversized or abusive plugin messages, spam of
+# tab-complete and commands). The proxy is the only point in front of every backend, so this is the place for it.
+enabled = true
+# Case-insensitive texts searched anywhere in the message; * matches any run of characters. A match kicks the player
+# and adds score to the origin. The search is linear, so a long message cannot make it slow.
+patterns = ["${*:", "jndi:", "ldap:", "rmi:", "dns:"]
+# Which text is searched.
+scan-chat = true
+scan-commands = true
+scan-names = true
+scan-plugin-payloads = true
+# Largest plugin message from a client, in bytes (0 turns the limit off), and channels no client may use.
+max-plugin-payload-bytes = 8192
+blocked-channels = []
+# Limits for NBT and text components a client sends inside items (creative slot packets): nesting depth, keys in all
+# compounds together, and bytes of names and values. Past one the player is kicked. 0 turns a limit off.
+max-nbt-depth = 24
+max-nbt-keys = 512
+max-nbt-bytes = 32768
+# Most tab-complete requests and commands a player may send each second (0 turns the limit off).
+max-tab-completes-per-second = 8
+max-commands-per-second = 15
+# Points added to the origin's score for each of these refusals.
+score = 100
+
+[verified]
+# Hours a player that passed the limbo is trusted from the same origin, so they pass straight through next time.
+# 0 verifies nobody. A Lua plugin can add players to and remove them from this list.
+ttl-hours = 24
+max-entries = 100000

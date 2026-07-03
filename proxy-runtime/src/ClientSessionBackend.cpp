@@ -331,6 +331,8 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         auto finished = backend()->acceptLogin(frame_);
         if (!finished)
             return false;
+        if (limboHandover_)
+            return completeLimboHandover();
         frame_.clear();
         if (compressionThreshold_ >= 0) {
             wire::protocol::varInt::write(frame_, wire::protocol::login::LoginCompressionPacket::kId);

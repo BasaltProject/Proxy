@@ -275,7 +275,11 @@ int run(const cliCommand::Run& command) {
             return std::string{"<red>The proxy is loading, please wait</red>"};
         return std::nullopt;
     };
-    services.playerEvents = [&pluginHost, &roster, &serverList](PlayerEvent event) {
+    services.playerEvents = [&pluginHost, &roster, &serverList, &runtimeRef](PlayerEvent event) {
+        if (event.kind == PlayerEventKind::kAntibot && event.backend.starts_with("attack_"))
+            if (auto* live = runtimeRef.load(std::memory_order_acquire))
+                live->notifyOperators(event.backend == "attack_started" ? "<red>[Antibot] Attack mode on.</red>"
+                                                                        : "<green>[Antibot] Attack mode off.</green>");
         roster.apply(event);
         if (event.kind == PlayerEventKind::kJoin)
             (*serverList)->playerJoined(event.uuid, event.player);
@@ -302,6 +306,14 @@ int run(const cliCommand::Run& command) {
         logger.error([&runtime] { return runtime.error(); });
         return 1;
     }
+    runtimeRef.store(&*runtime, std::memory_order_release);
+
+    struct RuntimeRefReset {
+        std::atomic<ProxyRuntime*>& ref;
+
+        ~RuntimeRefReset() { ref.store(nullptr, std::memory_order_release); }
+    } runtimeRefReset{runtimeRef};
+
     signalStop.store(false);
     const auto oldInterrupt = std::signal(SIGINT, stopSignal);
     const auto oldTerminate = std::signal(SIGTERM, stopSignal);
@@ -431,6 +443,9 @@ int run(const cliCommand::Run& command) {
         auto* side = bedrockPlayers.load(std::memory_order_acquire);
         return detail::statusText(*runtime, side != nullptr ? std::optional{side->playingCount()} : std::nullopt);
     };
+    environment.antibot = [&runtime](std::span<const std::string_view> words) {
+        return runtime->antibotCommand(words);
+    };
     environment.stop = [&stopping] { stopping.request_stop(); };
     environment.plugins = [&pluginHost] {
         auto* host = pluginHost.load(std::memory_order_acquire);
@@ -512,6 +527,10 @@ int run(const cliCommand::Run& command) {
         hooks.resolveDecision = [&runtime](std::string_view player, std::uint64_t token, DecisionResult result) {
             runtime->resolveDecision(player, token, std::move(result));
         };
+        hooks.antibotVerify = [&runtime](std::string_view player) { runtime->antibotVerify(player); };
+        hooks.antibotUnverify = [&runtime](std::string_view player) { runtime->antibotUnverify(player); };
+        hooks.antibotVerified = [&runtime](std::string_view player) { return runtime->antibotVerified(player); };
+        hooks.antibotAttack = [&runtime] { return runtime->antibotAttack(); };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
         };
@@ -638,6 +657,16 @@ int run(const cliCommand::Run& command) {
                                                  return names;
                                              },
                                              loginGate});
+        bedrock->guard(
+            {[&runtime](std::string_view address, bool connecting) {
+                 return runtime->bedrockOffline(address, connecting);
+             },
+             [&runtime](std::string_view address, std::string_view name, std::string_view xuid, bool authenticated) {
+                 return runtime->bedrockLogin(address, name, xuid, authenticated);
+             },
+             [&runtime](std::string_view address) { runtime->bedrockFailed(address); },
+             [&runtime] { return runtime->bedrockPacketsPerSecond(); },
+             [&runtime] { return runtime->bedrockLoginSeconds(); }});
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not start Bedrock on port " + std::to_string(configuration->bedrock.port) +

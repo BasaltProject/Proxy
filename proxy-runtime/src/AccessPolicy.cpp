@@ -43,7 +43,8 @@ bool AccessSettings::allowsName(std::string_view name) const {
 }
 
 AccessPolicy::AccessPolicy(const config::ProxyConfig& config, Admission& admission)
-    : admission(admission), settings_(AccessSettings::make(config)) {}
+    : admission(admission), antibot(config.antibot), limbo(config.network.compressionThreshold),
+      settings_(AccessSettings::make(config)) {}
 
 std::shared_ptr<const AccessSettings> AccessPolicy::settings() const {
     const std::lock_guard lock{mutex_};

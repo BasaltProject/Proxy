@@ -215,6 +215,8 @@ bool ClientSession::packet() {
     const auto id = protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    if (limboState())
+        return limboPacket(id, raw);
     switch (tap(frame_, true, id, raw)) {
     case Tapped::kDrop:
         return true;
@@ -252,6 +254,9 @@ bool ClientSession::packet() {
             if (const auto handled = limited(id))
                 return *handled;
         const bool shaped = !legacyRaw_;
+        if (shaped && access_.policy && profile_)
+            if (const auto handled = screenExploits(id))
+                return *handled;
         if (shaped && state_ == State::kPlay && access_.policy && profile_)
             if (const auto handled = screenChat(id))
                 return *handled;
@@ -503,6 +508,8 @@ bool ClientSession::authenticated(
                 return refuseMiniMessage(*turnedAway);
         return afterLogin();
     }
+    if (access_.policy)
+        access_.policy->antibot.loginFailed(origin(), Clock::now());
     closing_ = true;
     return refuseWith("login-failed", "Login could not be completed.");
 }
@@ -510,6 +517,8 @@ bool ClientSession::authenticated(
 bool ClientSession::timedOut(Clock::time_point now) {
     if (now < deadline())
         return true;
+    if (limboRun_ && !closing_)
+        return now < writeDeadline_ && limboTimer(now);
     if (!closing_ && now >= uiDeadline_ && now < baseDeadline()) {
         uiTick(now);
         return true;
@@ -564,6 +573,8 @@ bool ClientSession::acceptOrigin(std::string_view address, std::uint16_t port) {
     }
     if (policy.admission.attempt(clientAddress(), Clock::now()) != AdmissionResult::Accepted)
         return false;
+    if (policy.antibot.connection(origin(), Clock::now()).action == antibot::Action::kDeny)
+        return false;
     access_.slot = policy.gate.open(clientAddress(), access_.settings->network.maxConnectionsPerAddress);
     if (!access_.slot)
         return false;
@@ -574,6 +585,12 @@ bool ClientSession::acceptOrigin(std::string_view address, std::uint16_t port) {
 bool ClientSession::beginJoin() {
     if (!access_.policy)
         return route();
+    if (pendingLimbo_ != antibot::Action::kAllow)
+        return startLimbo();
+    return continueJoin();
+}
+
+bool ClientSession::continueJoin() {
     const auto wait = access_.policy->gate.joinWait(access_.settings->network.maxJoinsPerTick, Clock::now());
     joinRetryAt_ = wait.value_or(Clock::time_point::max());
     if (!wait)

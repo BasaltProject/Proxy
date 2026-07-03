@@ -38,6 +38,39 @@ packet-rate = "<red>Kicked for exceeding packet rate limit</red>"
 spam = "<red>Kicked for spamming</red>"
 unsigned-chat = "<red>Received a chat packet with a missing or invalid signature.</red>"
 
+# Antibot: a refused connection.
+antibot-denied = "<red>Your connection was refused. Please try again later.</red>"
+
+# Antibot: the origin failed verification too often.
+antibot-banned = "<red>Too many failed attempts. Please try again later.</red>"
+
+# Antibot: the verification was not passed.
+antibot-failed = "<red>Verification failed. Please reconnect.</red>"
+
+# Antibot: every verification slot is taken.
+antibot-busy = "<red>The server is busy verifying players. Please try again shortly.</red>"
+
+# Antibot: the verification took too long.
+antibot-timeout = "<red>Verification timed out. Please reconnect.</red>"
+
+# Antibot: the game version cannot be verified while the server is protected.
+antibot-legacy = "<red>Please connect with a newer game version while the server is protected.</red>"
+
+# Antibot: a verified origin has to join again.
+antibot-rejoin = "<red>Please join again to connect.</red>"
+
+# Antibot: a chat message that matched an exploit pattern.
+antibot-exploit = "<red>Your message was refused.</red>"
+
+# Antibot captcha: instruction shown with the block captcha.
+antibot-captcha-blocks = "<yellow>Read the number built of blocks ahead and type it in chat.</yellow>"
+
+# Antibot captcha: instruction shown with the map captcha.
+antibot-captcha = "<yellow>Hold the map and type the number shown in chat.</yellow>"
+
+# Antibot captcha: a wrong answer.
+antibot-wrong-code = "<red>That is not the code. Try again.</red>"
+
 [command]
 # The reason used when /kick, /ban give none.
 default-reason = "No reason given"

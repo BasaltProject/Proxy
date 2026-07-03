@@ -719,6 +719,37 @@ void PluginHost::callLogin(Plugin& plugin, const std::string& player, const std:
     }
 }
 
+void PluginHost::callAntibot(Plugin& plugin, const runtime::PlayerEvent& event) {
+    const auto found = plugin.handlers.find(std::string{kAntibotEvent});
+    if (found == plugin.handlers.end())
+        return;
+    for (const Plugin::Handler& handler : found->second) {
+        if (plugin.broken)
+            return;
+        call(
+            plugin, handler.function,
+            [&](wire::lua::LuaArgs& lua) {
+                lua.pushTable();
+                lua.pushString(event.backend);
+                lua.setField("kind");
+                lua.pushString(event.player);
+                lua.setField("player_name");
+                const auto first = event.uuid.find(':');
+                const auto second = event.uuid.find(':', first + 1);
+                lua.pushString(event.uuid.substr(0, first));
+                lua.setField("action");
+                lua.pushString(first == std::string::npos ? std::string{} : event.uuid.substr(first + 1, second - first - 1));
+                lua.setField("reason");
+                lua.pushInteger(second == std::string::npos ? 0 : std::stoll(event.uuid.substr(second + 1)));
+                lua.setField("skipped");
+                lua.pushString(event.from);
+                lua.setField("origin");
+                return 1;
+            },
+            std::string{kAntibotEvent});
+    }
+}
+
 void PluginHost::deliver(const runtime::PlayerEvent& event) {
     using Kind = runtime::PlayerEventKind;
     for (auto& adapter : adapters_)
@@ -745,6 +776,11 @@ void PluginHost::deliver(const runtime::PlayerEvent& event) {
         for (auto& plugin : plugins_)
             if (!plugin->broken)
                 callLogin(*plugin, event.player, event.uuid);
+        return;
+    } else if (event.kind == Kind::kAntibot) {
+        for (auto& plugin : plugins_)
+            if (!plugin->broken)
+                callAntibot(*plugin, event);
         return;
     } else if (event.kind == Kind::kPing) {
         for (auto& plugin : plugins_)

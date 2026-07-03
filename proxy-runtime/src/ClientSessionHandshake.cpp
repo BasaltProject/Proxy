@@ -2,6 +2,7 @@
 #include "ClientSession.hpp"
 #include "LoginShapes.hpp"
 #include "RouteVersions.hpp"
+#include "antibot/TcpProbe.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
@@ -48,6 +49,10 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         const auto hello = protocol::handshake::HandshakePacket::read(frame_);
         if (!hello || frame_.readableBytes() != 0 || hello->hostName.empty() ||
             hello->hostName.find('\0') != std::string::npos)
+            return false;
+        if (access_.policy &&
+            access_.policy->antibot.handshake(origin(), hello->hostName, hello->protocolVersion, Clock::now()).action ==
+                antibot::Action::kDeny)
             return false;
         if (hello->intent == protocol::handshake::ClientIntent::Status) {
             virtualHost_ = hello->hostName;
@@ -115,6 +120,30 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                                                    Clock::now()))
                 return refuseWith("connection-throttled", "Connection throttled! Please wait before reconnecting.");
         }
+        if (access_.policy) {
+            const auto antibotConfig = access_.policy->antibot.config();
+            if (antibotConfig->tcpEnabled)
+                if (const auto facts = antibot::probeTcp(connection_.nativeHandle())) {
+                    const auto& c = *antibotConfig;
+                    const bool odd =
+                        (c.tcpMinMss > 0 && facts->mss > 0 && facts->mss < static_cast<std::uint32_t>(c.tcpMinMss)) ||
+                        (c.tcpMaxRetransmits > 0 &&
+                         facts->retransmits > static_cast<std::uint32_t>(c.tcpMaxRetransmits)) ||
+                        (c.tcpMaxRttMs > 0 && facts->rttMicros > static_cast<std::uint32_t>(c.tcpMaxRttMs) * 1000U);
+                    if (odd)
+                        access_.policy->antibot.penalize(origin(), c.tcpScore, Clock::now());
+                }
+            const auto verdict = access_.policy->antibot.login(
+                origin(), *loginName,
+                !antibot::LimboAssets::serves(clientProtocol_ != 0 ? clientProtocol_ : buildInfo::kProtocolVersion),
+                Clock::now());
+            if (verdict.action == antibot::Action::kDeny)
+                return refuseAntibot(verdict.reason == antibot::Reason::kBanned        ? "antibot-banned"
+                                     : verdict.reason == antibot::Reason::kLegacy      ? "antibot-legacy"
+                                     : verdict.reason == antibot::Reason::kPassthrough ? "antibot-rejoin"
+                                                                                       : "antibot-denied");
+            pendingLimbo_ = verdict.action;
+        }
         name_ = std::move(*loginName);
         if (loadingMessage_) {
             if (const auto message = loadingMessage_()) {
@@ -176,6 +205,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         return true;
     } else if (state_ == State::StatusRequest) {
         if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !status_)
+            return false;
+        if (access_.policy && !access_.policy->antibot.statusAllowed(origin(), Clock::now()))
             return false;
         if (statusPing_)
             statusPing_(virtualHost_, statusProtocol_);

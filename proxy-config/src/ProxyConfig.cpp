@@ -13,7 +13,8 @@ namespace basalt::proxy::config {
 
 std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& backends,
                                                  std::string_view directory, const detail::TomlTable* pluginsTable,
-                                                 const detail::TomlTable* limitsTable) {
+                                                 const detail::TomlTable* limitsTable,
+                                                 const detail::TomlTable* antibotTable) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy,
@@ -259,6 +260,12 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         if (limits.error)
             return std::unexpected(*limits.error);
     }
+    if (antibotTable) {
+        auto antibot = readAntibot(*antibotTable, directory);
+        if (!antibot)
+            return std::unexpected(antibot.error());
+        result.antibot = std::move(*antibot);
+    }
     if (reader.error)
         return std::unexpected(*reader.error);
     auto parsedBackends = detail::readBackends(result, backends, std::string{directory} + "/backends.toml");
@@ -281,7 +288,10 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto limits = files.load("limits.toml", kLimitsDefaultToml);
     if (!limits)
         return std::unexpected(limits.error());
-    return fromToml(*proxy, *backends, directory, &*plugins, &*limits);
+    auto antibot = files.load("antibot.toml", kAntibotDefaultToml);
+    if (!antibot)
+        return std::unexpected(antibot.error());
+    return fromToml(*proxy, *backends, directory, &*plugins, &*limits, &*antibot);
 }
 
 } // namespace basalt::proxy::config

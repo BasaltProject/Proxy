@@ -85,6 +85,9 @@ bool BedrockStatus::start() {
             server_.reset();
         } else {
             server_->onAdvertise([this] { return advertisement(); });
+            server_->onOffline([this](const wire::io::UdpEndpoint& peer, bool connecting) {
+                return !guard_.offline || guard_.offline(originOf(peer), connecting);
+            });
             server_->onConnect([this](wire::bedrock::RakSession& session) { adopt(session, session.peer()); });
             server_->onMessage([this](wire::bedrock::RakSession& session, std::span<const std::uint8_t> payload) {
                 if (const auto found = clients_.find(session.peer()); found != clients_.end())
@@ -137,9 +140,17 @@ bool BedrockStatus::start() {
                     }
                 }
             }
+            const auto limit = guard_.loginSeconds ? guard_.loginSeconds() : 0;
+            const auto now = std::chrono::steady_clock::now();
             for (auto& [peer, client] : clients_) {
-                if (client.session)
+                if (client.session) {
                     client.session->pump();
+                } else if (limit > 0 && !client.stalled && now - client.since > std::chrono::seconds{limit}) {
+                    client.stalled = true;
+                    if (guard_.failed)
+                        guard_.failed(originOf(peer));
+                    client.connection->disconnect("Login took too long.");
+                }
             }
         }
     }};
@@ -163,6 +174,13 @@ void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire
         });
     });
     raw.onReady([this, &raw, peer] {
+        if (guard_.login) {
+            const auto login = raw.login();
+            if (const auto refusal = guard_.login(originOf(peer), login.name, login.xuid, login.authenticated)) {
+                raw.disconnect(*refusal);
+                return;
+            }
+        }
         if (requireAuthenticated_ && !raw.login().authenticated) {
             wire::common::Logger{"Bedrock"}.info([&raw] {
                 return raw.login().name + " was turned away: this proxy only lets in players signed in to Xbox Live.";
@@ -191,7 +209,24 @@ void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire
         }
     });
     raw.onPacket([this, peer](wire::bedrock::BedrockPacket packet, wire::io::ByteBuffer& body) {
-        if (const auto found = clients_.find(peer); found != clients_.end() && found->second.session)
+        const auto found = clients_.find(peer);
+        if (found == clients_.end())
+            return;
+        if (guard_.packetsPerSecond) {
+            const auto limit = guard_.packetsPerSecond();
+            const auto now = std::chrono::steady_clock::now();
+            if (now - found->second.windowStart >= std::chrono::seconds{1}) {
+                found->second.windowStart = now;
+                found->second.packets = 0;
+            }
+            if (limit > 0 && ++found->second.packets > static_cast<std::uint32_t>(limit)) {
+                if (guard_.failed)
+                    guard_.failed(originOf(peer));
+                found->second.connection->disconnect("Too many packets.");
+                return;
+            }
+        }
+        if (found->second.session)
             found->second.session->fromBedrock(packet, body);
     });
     if (link && !link->identityKey().empty())

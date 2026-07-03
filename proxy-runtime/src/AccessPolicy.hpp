@@ -1,5 +1,8 @@
 #pragma once
 
+#include "antibot/Antibot.hpp"
+#include "antibot/LimboAssets.hpp"
+
 #include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/Admission.hpp>
@@ -42,6 +45,8 @@ public:
 
     Admission& admission;
     mutable wire::io::ConnectionGate gate;
+    mutable antibot::Antibot antibot;
+    mutable antibot::LimboAssets limbo;
 
     [[nodiscard]] std::shared_ptr<const AccessSettings> settings() const;
     void apply(const config::ProxyConfig& config);

@@ -8,6 +8,10 @@
 #include "PendingCookies.hpp"
 #include "PendingResponses.hpp"
 #include "ResourcePacks.hpp"
+#include "antibot/Antibot.hpp"
+#include "antibot/Captcha.hpp"
+#include "antibot/LimboAssets.hpp"
+#include "antibot/LimboRun.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
@@ -169,6 +173,8 @@ public:
             return 3;
         if (state_ == State::kConfiguration)
             return 2;
+        if (state_ == State::kLimboLogin || state_ == State::kLimboConfiguration || state_ == State::kLimboPlay)
+            return 1;
         return state_ == State::Handshake || state_ == State::StatusRequest || state_ == State::Ping ||
                        state_ == State::kProxyHeader
                    ? 0
@@ -192,7 +198,10 @@ private:
         kCookieResponse,
         kLoginAck,
         kConfiguration,
-        kPlay
+        kPlay,
+        kLimboLogin,
+        kLimboConfiguration,
+        kLimboPlay
     };
     [[nodiscard]] wire::protocol::ProtocolState protocolState() const;
     [[nodiscard]] bool translateInbound();
@@ -218,6 +227,27 @@ private:
     /// A verdict when the packet is not to travel on, which is what `packet()` then returns; empty to relay it.
     [[nodiscard]] std::optional<bool> limited(std::int32_t id);
     [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
+    [[nodiscard]] bool continueJoin();
+    [[nodiscard]] bool startLimbo();
+    [[nodiscard]] bool limboPacket(std::int32_t id, std::span<const std::uint8_t> raw);
+    [[nodiscard]] bool limboTimer(Clock::time_point now);
+    [[nodiscard]] bool limboStep(const antibot::LimboRun::Step& step);
+    [[nodiscard]] bool limboKeepAlive(Clock::time_point now);
+    [[nodiscard]] bool limboPassed();
+    [[nodiscard]] bool limboFailed(antibot::Reason reason);
+    [[nodiscard]] bool limboSendCaptcha();
+    [[nodiscard]] bool completeLimboHandover();
+    [[nodiscard]] bool queueFramed(std::span<const std::uint8_t> framed);
+    [[nodiscard]] bool limboSystemChat(std::string_view key);
+    [[nodiscard]] wire::text::Component antibotText(std::string_view key) const;
+    [[nodiscard]] bool refuseAntibot(std::string_view key);
+    [[nodiscard]] antibot::OriginKey origin() const;
+
+    [[nodiscard]] bool limboState() const {
+        return state_ == State::kLimboLogin || state_ == State::kLimboConfiguration || state_ == State::kLimboPlay;
+    }
+
+    [[nodiscard]] std::optional<bool> screenExploits(std::int32_t id);
     config::TranslationMode translationMode_;
     [[nodiscard]] std::int32_t speaksTo(const config::BackendConfig& backend, std::int32_t client) const;
     [[nodiscard]] bool routeAllowed(std::int32_t client, const config::BackendConfig& backend) const;
@@ -419,8 +449,20 @@ private:
     std::uint16_t originPort_ = 0;
     wire::protocol::PacketLimiter limiter_;
     wire::protocol::SpamThrottle chatSpam_;
+    std::int64_t exploitSecond_ = -1;
+    std::int32_t tabCompletes_ = 0;
+    std::int32_t commandsSent_ = 0;
     wire::protocol::SpamThrottle commandSpam_;
     Clock::time_point joinRetryAt_ = Clock::time_point::max();
+    antibot::Action pendingLimbo_ = antibot::Action::kAllow;
+    std::unique_ptr<antibot::LimboRun> limboRun_;
+    std::optional<antibot::LimboSlot> limboSlot_;
+    std::shared_ptr<const antibot::LimboPackets> limboPackets_;
+    std::unique_ptr<antibot::CaptchaImage> captcha_;
+    std::unique_ptr<antibot::BlockCaptcha> blockCaptcha_;
+    std::vector<std::uint8_t> limboBrand_;
+    bool limboHandover_ = false;
+    bool limboOwnsChain_ = false;
 };
 
 } // namespace basalt::proxy::runtime::detail

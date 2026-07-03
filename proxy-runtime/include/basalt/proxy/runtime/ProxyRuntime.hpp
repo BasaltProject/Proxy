@@ -30,7 +30,7 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
-enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin, kLatency };
+enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin, kLatency, kAntibot };
 
 struct PlayerEvent {
     PlayerEventKind kind;
@@ -209,6 +209,22 @@ public:
                                          std::span<const std::uint8_t> data, bool towardBackend);
     /// Thread-safe. Answers a DecisionRequest; a stale token is ignored.
     void resolveDecision(std::string_view player, std::uint64_t token, DecisionResult result);
+    /// Thread-safe. Runs an operator antibot command (status, attack, ban, unban, verify, unverify, verified).
+    [[nodiscard]] std::string antibotCommand(std::span<const std::string_view> words);
+    /// Thread-safe. Sends a MiniMessage line to every configured operator who is online.
+    void notifyOperators(std::string_view text);
+    void antibotVerify(std::string_view player);
+    void antibotUnverify(std::string_view player);
+    [[nodiscard]] bool antibotVerified(std::string_view player) const;
+    [[nodiscard]] bool antibotAttack() const;
+    /// Thread-safe. Gates a Bedrock server-list ping (connecting false) or a new session (true) by address.
+    [[nodiscard]] bool bedrockOffline(std::string_view address, bool connecting);
+    /// Thread-safe. Why a Bedrock login is refused, or nothing to let it in.
+    [[nodiscard]] std::optional<std::string> bedrockLogin(std::string_view address, std::string_view name,
+                                                          std::string_view xuid, bool authenticated);
+    void bedrockFailed(std::string_view address);
+    [[nodiscard]] int bedrockPacketsPerSecond() const;
+    [[nodiscard]] int bedrockLoginSeconds() const;
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

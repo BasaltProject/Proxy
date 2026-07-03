@@ -9,6 +9,7 @@
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
 
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +33,7 @@ struct CommandEnvironment {
     std::function<void(std::string_view player, std::string_view miniMessage)> kick;
     std::function<std::expected<std::string, std::string>()> reload;
     std::function<std::string()> status;
+    std::function<std::string(std::span<const std::string_view> words)> antibot;
     std::function<void()> stop;
     std::function<std::vector<std::string>()> plugins;
     std::function<bool()> enforceWhitelist;

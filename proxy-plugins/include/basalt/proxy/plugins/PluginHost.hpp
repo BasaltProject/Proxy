@@ -99,6 +99,10 @@ struct PluginHooks {
     std::function<void(std::string_view player, wire::text::Component)> kickComponent;
     /// Answers a decision once the handlers ran; may be called after the deadline, when the runtime ignores it.
     std::function<void(std::string_view player, std::uint64_t token, runtime::DecisionResult)> resolveDecision;
+    std::function<void(std::string_view player)> antibotVerify;
+    std::function<void(std::string_view player)> antibotUnverify;
+    std::function<bool(std::string_view player)> antibotVerified;
+    std::function<bool()> antibotAttack;
 };
 
 /// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
@@ -206,6 +210,7 @@ private:
     void deliver(const runtime::PlayerEvent& event);
     void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
     void callLogin(Plugin& plugin, const std::string& player, const std::string& uuid);
+    void callAntibot(Plugin& plugin, const runtime::PlayerEvent& event);
     void callPing(Plugin& plugin, const std::string& host, const std::string& protocol);
     void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
     void call(Plugin& plugin, const wire::lua::LuaRef& function,

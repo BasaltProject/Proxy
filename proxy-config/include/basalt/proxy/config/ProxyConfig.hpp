@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/proxy/config/AntibotConfig.hpp>
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
 #include <basalt/wire/common/logging/LogLevel.hpp>
 #include <basalt/wire/config/AnimationsConfig.hpp>
@@ -198,6 +199,7 @@ struct ProxyConfig {
     GeneralConfig general;
     QueryConfig query;
     LimitsConfig limits;
+    AntibotConfig antibot;
     RuntimeConfig runtime;
     AdmissionConfig admission;
     ForwardingConfig forwarding;
@@ -216,7 +218,8 @@ struct ProxyConfig {
                                                                const wire::common::toml::TomlTable& backends,
                                                                std::string_view directory,
                                                                const wire::common::toml::TomlTable* plugins = nullptr,
-                                                               const wire::common::toml::TomlTable* limits = nullptr);
+                                                               const wire::common::toml::TomlTable* limits = nullptr,
+                                                               const wire::common::toml::TomlTable* antibot = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);

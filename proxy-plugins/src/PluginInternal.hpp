@@ -85,6 +85,7 @@ inline constexpr std::string_view kLoginEvent = "player.login";
 inline constexpr std::string_view kCommandEvent = "player.command";
 inline constexpr std::string_view kPreConnectEvent = "player.server_pre_connect";
 inline constexpr std::string_view kMessageEvent = "player.message";
+inline constexpr std::string_view kAntibotEvent = "antibot.event";
 inline constexpr std::string_view kServerChangeEvent = "player.server_change";
 
 } // namespace basalt::proxy::plugins

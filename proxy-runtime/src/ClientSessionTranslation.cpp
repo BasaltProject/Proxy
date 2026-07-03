@@ -41,8 +41,10 @@ wire::protocol::ProtocolState ClientSession::protocolState() const {
     case State::Ping:
         return ProtocolState::Status;
     case State::kConfiguration:
+    case State::kLimboConfiguration:
         return ProtocolState::Configuration;
     case State::kPlay:
+    case State::kLimboPlay:
         return ProtocolState::Play;
     default:
         return ProtocolState::Login;

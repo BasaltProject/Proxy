@@ -33,6 +33,17 @@ basalt_module(proxy-runtime-core
         src/BackendLoginIdentity.cpp
         src/BackendLoginCookies.cpp
         src/ClientSession.cpp
+        src/ClientSessionExploits.cpp
+        src/ClientSessionLimbo.cpp
+        src/antibot/AttackReport.cpp
+        src/antibot/TcpProbe.cpp
+        src/antibot/NbtShape.cpp
+        src/antibot/TextScan.cpp
+        src/antibot/Antibot.cpp
+        src/antibot/Captcha.cpp
+        src/antibot/LimboAssets.cpp
+        src/antibot/LimboRegistries.cpp
+        src/antibot/LimboRun.cpp
         src/ClientSessionRouting.cpp
         src/ClientSessionTranslation.cpp
         src/ClientSessionChat.cpp
@@ -124,6 +135,7 @@ basalt_test(proxy-runtime-access-test
     SOURCES test/AccessTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
 )
+
 
 basalt_test(proxy-runtime-admission-test
     SOURCES test/AdmissionTest.cpp

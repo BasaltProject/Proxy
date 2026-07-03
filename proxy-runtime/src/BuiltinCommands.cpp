@@ -173,6 +173,20 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
             context.reply(Messages::escape(env.status ? env.status() : std::string{"No status available."}));
         }));
 
+    const auto antibotRun = [env](const CommandContext& context, std::vector<std::string_view> words) {
+        context.reply(Messages::escape(env.antibot ? env.antibot(words) : std::string{"Antibot is not available."}));
+    };
+    add(env, "antibot", "Shows or controls the antibot (status, attack, ban, unban, verify, unverify, verified).",
+        Node::literal("antibot")
+            .executes([antibotRun](const CommandContext& context) { antibotRun(context, {}); })
+            .then(Node::argument("action", Kind::Word)
+                      .executes([antibotRun](const CommandContext& context) {
+                          antibotRun(context, {context.text("action")});
+                      })
+                      .then(Node::argument("target", Kind::Word).executes([antibotRun](const CommandContext& context) {
+                          antibotRun(context, {context.text("action"), context.text("target")});
+                      }))));
+
     add(env, "stop", "Stops the proxy.", Node::literal("stop").executes([env, say](const CommandContext& context) {
         say(context, "stopping");
         env.stop();
