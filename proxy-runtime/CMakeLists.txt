@@ -26,6 +26,9 @@ basalt_module(proxy-runtime-core
         src/bedrock/BedrockWorld.cpp
         src/BackendChangeRequest.cpp
         src/BackendRoutes.cpp
+        src/ServerHealth.cpp
+        src/StatusProbe.cpp
+        src/StatusRelay.cpp
         src/BackendAttempts.cpp
         src/BackendDial.cpp
         src/BackendLogin.cpp

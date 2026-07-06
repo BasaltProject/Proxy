@@ -191,7 +191,7 @@ void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire
         const auto found = clients_.find(peer);
         const auto backend = route_ ? route_() : std::nullopt;
         if (found == clients_.end() || !backend) {
-            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"No backend to send a Bedrock player to."}; });
+            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"No server to send a Bedrock player to."}; });
             raw.disconnect(kTurnedAway);
             return;
         }
@@ -203,7 +203,7 @@ void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire
         } else if (found->second.session->turnedAway()) {
             found->second.session.reset();
         } else {
-            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
+            wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The server could not be resolved."}; });
             found->second.session.reset();
             raw.disconnect("The server could not be reached.");
         }

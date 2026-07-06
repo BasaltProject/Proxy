@@ -25,7 +25,7 @@ requests-per-minute = 120
 
 [actions]
 # What the API may change. Reading state is always allowed once the API is on; turn these off for a read-only panel.
-# Move a player to another backend, disconnect a player, and reload the configuration files.
+# Move a player to another server, disconnect a player, and reload the configuration files.
 send = true
 kick = true
 reload = true

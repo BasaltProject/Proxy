@@ -11,7 +11,7 @@
 
 namespace basalt::proxy::config {
 
-std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& backends,
+std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& servers,
                                                  std::string_view directory, const detail::TomlTable* pluginsTable,
                                                  const detail::TomlTable* limitsTable,
                                                  const detail::TomlTable* antibotTable) {
@@ -268,9 +268,9 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     }
     if (reader.error)
         return std::unexpected(*reader.error);
-    auto parsedBackends = detail::readBackends(result, backends, std::string{directory} + "/backends.toml");
-    if (!parsedBackends)
-        return std::unexpected(parsedBackends.error());
+    auto parsedServers = detail::readServers(result, servers, std::string{directory} + "/servers.toml");
+    if (!parsedServers)
+        return std::unexpected(parsedServers.error());
     return result;
 }
 
@@ -279,9 +279,9 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto proxy = files.load("proxy.toml", kProxyDefaultToml);
     if (!proxy)
         return std::unexpected(proxy.error());
-    auto backends = files.load("backends.toml", kBackendsDefaultToml);
-    if (!backends)
-        return std::unexpected(backends.error());
+    auto servers = files.load("servers.toml", kServersDefaultToml);
+    if (!servers)
+        return std::unexpected(servers.error());
     auto plugins = files.load("plugins.toml", kPluginsDefaultToml);
     if (!plugins)
         return std::unexpected(plugins.error());
@@ -291,7 +291,7 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto antibot = files.load("antibot.toml", kAntibotDefaultToml);
     if (!antibot)
         return std::unexpected(antibot.error());
-    return fromToml(*proxy, *backends, directory, &*plugins, &*limits, &*antibot);
+    return fromToml(*proxy, *servers, directory, &*plugins, &*limits, &*antibot);
 }
 
 } // namespace basalt::proxy::config

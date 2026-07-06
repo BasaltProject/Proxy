@@ -26,23 +26,25 @@ std::expected<BackendRoutes, std::string> BackendRoutes::create(const config::Pr
     BackendRoutes result;
     if (config.backends.size() > 256 || config.forcedHosts.size() > 256)
         return std::unexpected("routing snapshot exceeds its size limit");
+    result.count_ = config.backends.size();
+    result.down_ = std::make_unique<std::atomic<bool>[]>(result.count_);
     for (std::size_t i = 0; i < config.backends.size(); ++i) {
         const auto& name = config.backends[i].name;
         if (name.empty() || !result.names_.emplace(name, i).second)
-            return std::unexpected("routing snapshot has duplicate or empty backend names");
+            return std::unexpected("routing snapshot has duplicate or empty server names");
     }
     const auto resolve =
         [&](const std::vector<std::string>& names) -> std::expected<std::vector<std::size_t>, std::string> {
         if (names.empty() || names.size() > 256)
-            return std::unexpected("routing list must contain 1..256 backend names");
+            return std::unexpected("routing list must contain 1..256 server names");
         std::vector<std::size_t> indices;
         indices.reserve(names.size());
         for (const auto& name : names) {
             const auto found = result.names_.find(name);
             if (found == result.names_.end())
-                return std::unexpected("routing list refers to an unknown backend");
+                return std::unexpected("routing list refers to an unknown server");
             if (std::ranges::find(indices, found->second) != indices.end())
-                return std::unexpected("routing list contains a duplicate backend");
+                return std::unexpected("routing list contains a duplicate server");
             indices.push_back(found->second);
         }
         return indices;
@@ -77,6 +79,15 @@ std::span<const std::size_t> BackendRoutes::select(std::string_view virtualHost)
 std::optional<std::size_t> BackendRoutes::named(std::string_view backend) const {
     const auto found = names_.find(std::string{backend});
     return found == names_.end() ? std::nullopt : std::optional{found->second};
+}
+
+bool BackendRoutes::reachable(std::size_t server) const noexcept {
+    return server >= count_ || !down_[server].load(std::memory_order_relaxed);
+}
+
+void BackendRoutes::setReachable(std::size_t server, bool reachable) const noexcept {
+    if (server < count_)
+        down_[server].store(!reachable, std::memory_order_relaxed);
 }
 
 } // namespace basalt::proxy::runtime::detail

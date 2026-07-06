@@ -2,7 +2,7 @@
 #
 # JAVA ONLY. Bedrock has no player list to decorate.
 #
-# Off by default. The proxy draws it for the whole network, so it does not flicker when a player changes backend.
+# Off by default. The proxy draws it for the whole network, so it does not flicker when a player changes server.
 #
 # Profiles work exactly as in server_list.toml: highest priority among those switched on with `active` or whose
 # every `when` holds, falling back to the one marked `default`. Text is MiniMessage, one entry per line, with the
@@ -10,8 +10,8 @@
 
 enabled = false
 
-# Who draws this when the backend sends its own: "proxy" keeps what this file says and discards the backend's,
-# "backend" lets the backend's version through and only draws this one when the backend sends nothing.
+# Who draws this when the server sends its own: "proxy" keeps what this file says and discards the server's,
+# "backend" lets the server's version through and only draws this one when the server sends nothing.
 [ui]
 priority = "proxy"
 

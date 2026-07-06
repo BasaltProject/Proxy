@@ -96,7 +96,7 @@ struct Reader {
         std::vector<std::string> result;
         const auto* list = value ? value->get<std::vector<TomlValue>>() : nullptr;
         if (!list || list->empty() || list->size() > 256) {
-            fail(field, "must be a nonempty array of at most 256 backend names");
+            fail(field, "must be a nonempty array of at most 256 server names");
             return result;
         }
         for (const auto& element : *list) {
@@ -106,7 +106,7 @@ struct Reader {
                 return {};
             }
             if (std::find(result.begin(), result.end(), *text) != result.end()) {
-                fail(field, "contains a duplicate backend");
+                fail(field, "contains a duplicate server");
                 return {};
             }
             result.push_back(*text);
@@ -115,7 +115,7 @@ struct Reader {
     }
 };
 
-[[nodiscard]] std::expected<void, std::string> readBackends(ProxyConfig& config, const TomlTable& root,
-                                                            std::string_view path);
+[[nodiscard]] std::expected<void, std::string> readServers(ProxyConfig& config, const TomlTable& root,
+                                                           std::string_view path);
 
 } // namespace basalt::proxy::config::detail

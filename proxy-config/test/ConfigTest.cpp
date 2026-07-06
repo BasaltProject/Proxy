@@ -12,10 +12,10 @@ using namespace basalt::proxy::config;
 namespace toml = basalt::wire::common::toml;
 
 namespace {
-std::expected<ProxyConfig, std::string> decode(std::string_view proxy, std::string_view backends = kBackendsDefaultToml,
+std::expected<ProxyConfig, std::string> decode(std::string_view proxy, std::string_view servers = kServersDefaultToml,
                                                std::string_view limits = kLimitsDefaultToml) {
     auto p = toml::parse(proxy);
-    auto b = toml::parse(backends);
+    auto b = toml::parse(servers);
     auto l = toml::parse(limits);
     if (!p || !b || !l)
         return std::unexpected("synthetic fixture did not parse");
@@ -24,7 +24,7 @@ std::expected<ProxyConfig, std::string> decode(std::string_view proxy, std::stri
 } // namespace
 
 TEST_CASE("commented defaults produce online authentication, bounded owners "
-          "and explicit backend identity") {
+          "and explicit server identity") {
     const auto defaults = decode(kProxyDefaultToml);
     REQUIRE(defaults);
     CHECK(defaults->network.onlineMode);
@@ -72,19 +72,19 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
 }
 
 TEST_CASE("routes preserve fallback order and normalize virtual hosts across "
-          "mixed backend versions") {
+          "mixed server versions") {
     const auto result = decode("[network]\nbind = '::'\ndual-stack = "
                                "true\n[translation]\nmode = 'proxy'",
                                R"(
 [routing]
-default = ['old', 'new']
+try = ['old', 'new']
 [forced-hosts]
 "PLAY.Example.test." = ['new', 'old']
-[backends.old]
+[servers.old]
 host = '::1'
 protocol = 47
 forwarding = 'bungeecord'
-[backends.new]
+[servers.new]
 host = '127.0.0.1'
 protocol = 777
 forwarding = 'velocity'
@@ -99,15 +99,15 @@ secret = 'synthetic-secret'
     CHECK(result->forcedHosts.front().backends == std::vector<std::string>{"new", "old"});
 }
 
-TEST_CASE("protocol auto lets a Basalt backend translate and keeps the proxy translating for the others") {
+TEST_CASE("protocol auto lets a Basalt server translate and keeps the proxy translating for the others") {
     const auto result = decode("", R"(
 [routing]
-default = ['basalt', 'other']
-[backends.basalt]
+try = ['basalt', 'other']
+[servers.basalt]
 host = '127.0.0.1'
 protocol = 'auto'
 forwarding = 'basalt'
-[backends.other]
+[servers.other]
 host = '127.0.0.2'
 protocol = 'auto'
 forwarding = 'velocity'

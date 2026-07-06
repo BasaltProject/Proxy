@@ -11,9 +11,9 @@
 # A permission nobody grants is denied. The console is always allowed everything.
 # Plugin commands declared with a permission are checked against these groups too.
 #
-# The proxy answers a command only for a player who may run it; anything else goes on to the backend, and so does a
-# command the backend has under the same name. Every command is also reachable as `basalt:<name>`, which is never
-# shadowed by a backend. Give players `basalt.command.list` or `basalt.command.help` only if you want those answered
+# The proxy answers a command only for a player who may run it; anything else goes on to the server, and so does a
+# command the server has under the same name. Every command is also reachable as `basalt:<name>`, which is never
+# shadowed by a server. Give players `basalt.command.list` or `basalt.command.help` only if you want those answered
 # by the proxy.
 
 [groups.default]

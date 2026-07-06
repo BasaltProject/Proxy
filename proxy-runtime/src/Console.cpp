@@ -45,9 +45,9 @@ std::string statusText(const ProxyRuntime& runtime, std::optional<std::size_t> b
            "; accepted: " + std::to_string(runtime.acceptedConnections()) +
            "; rejected: " + std::to_string(runtime.rejectedConnections()) +
            "; bytes toward clients: " + std::to_string(runtime.bytesTowardClients()) +
-           "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) +
+           "; toward servers: " + std::to_string(runtime.bytesTowardBackends()) +
            "; logins: " + std::to_string(relayCounters().logins.load(std::memory_order_relaxed)) +
-           "; backend changes: " + std::to_string(relayCounters().backendChanges.load(std::memory_order_relaxed)) +
+           "; server changes: " + std::to_string(relayCounters().backendChanges.load(std::memory_order_relaxed)) +
            "; ended in handshake or status: " + endedIn(0) + ", login: " + endedIn(1) +
            ", configuration: " + endedIn(2) + ", play: " + endedIn(3) + processUsage() +
            (bedrockPlayers ? "; Bedrock players: " + std::to_string(*bedrockPlayers) : std::string{}) + ".";

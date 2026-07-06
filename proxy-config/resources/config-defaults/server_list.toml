@@ -87,6 +87,19 @@ hide-player-count = true
 version-name = "Loading"
 version-protocol = -1
 
+# Showing a server's own numbers instead of the proxy's: with `source` a profile asks one server of servers.toml for
+# its status, so the list can show that server's player count and slots rather than the whole network's.
+#   source = "profile"        the default: everything comes from this file and the proxy's own count
+#   source = "server:lobby"   ask the server called lobby
+#   source = "route"          ask the first server that answers on the list `try` (or the forced host) of the address
+#                             the player typed
+#   relay = ["online", "max", "sample"]   what is taken from that server, among online (players now), max (slots),
+#                             sample (the hover list), motd, version and icon. These three are the default; the rest
+#                             stays as this file says. Anything relayed replaces `online-players` and `max-players`
+# %basalt_server_online% and %basalt_server_max_players% show the relayed numbers in the text of that same profile. When
+# the server cannot be asked or has not answered yet, the profile shows its own values. See [status-relay] in
+# servers.toml for how often it is asked.
+#
 # Other keys a profile takes:
 #   priority = 0              higher wins between profiles that both apply
 #   max-players = 80          what the list shows, not how many can actually join

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -21,9 +23,13 @@ public:
     [[nodiscard]] static std::expected<BackendRoutes, std::string> create(const config::ProxyConfig& config);
     [[nodiscard]] std::span<const std::size_t> select(std::string_view virtualHost) const;
     [[nodiscard]] std::optional<std::size_t> named(std::string_view backend) const;
+    [[nodiscard]] bool reachable(std::size_t server) const noexcept;
+    void setReachable(std::size_t server, bool reachable) const noexcept;
 
 private:
     std::unordered_map<std::string, std::size_t> names_;
+    std::unique_ptr<std::atomic<bool>[]> down_;
+    std::size_t count_ = 0;
     std::vector<std::size_t> defaults_;
     std::unordered_map<std::string, std::vector<std::size_t>> hosts_;
 };

@@ -27,6 +27,10 @@ public:
     struct Sources {
         std::int32_t slots = 0;
         PlayerDirectory* players = nullptr;
+        /// A server's status for a profile's `source`; must never block.
+        std::function<std::optional<wire::protocol::status::ServerStatusPayload>(std::string_view source,
+                                                                                 std::string_view host)>
+            relay;
     };
 
     [[nodiscard]] static std::expected<std::unique_ptr<ServerListService>, std::string>

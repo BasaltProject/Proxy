@@ -14,6 +14,6 @@ printf 'stop\n' | "$binary" >startup.log 2>&1 || {
 cat startup.log
 grep -q 'Listening on port ' startup.log
 grep -q 'Proxy stopped.' startup.log
-for config in proxy backends plugins; do
+for config in proxy servers plugins; do
     test -f "config/$config.toml"
 done

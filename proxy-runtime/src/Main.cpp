@@ -121,7 +121,7 @@ int run(const cliCommand::Run& command) {
         static_cast<void>(
             wire::io::logFile::install("./.basalt/logs", configuration->logging.keepDays, cli::versionLine()));
     logger.info([&configuration] {
-        return "Configuration validated: " + std::to_string(configuration->backends.size()) + " backend(s).";
+        return "Configuration validated: " + std::to_string(configuration->backends.size()) + " server(s).";
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
@@ -132,8 +132,12 @@ int run(const cliCommand::Run& command) {
         return 1;
     }
     auto serverList = detail::ServerListService::create(
-        command.configDirectory,
-        {.slots = static_cast<std::int32_t>(configuration->runtime.maxSessions), .players = players->get()});
+        command.configDirectory, {.slots = static_cast<std::int32_t>(configuration->runtime.maxSessions),
+                                  .players = players->get(),
+                                  .relay = [&runtimeRef](std::string_view source, std::string_view host) {
+                                      auto* live = runtimeRef.load(std::memory_order_acquire);
+                                      return live != nullptr ? live->relayStatus(source, host) : std::nullopt;
+                                  }});
     if (!serverList) {
         logger.error([&serverList] { return serverList.error(); });
         return 1;
@@ -384,7 +388,7 @@ int run(const cliCommand::Run& command) {
             access.setWhitelist(freshAccess.whitelist);
         }
         std::string message = "Reloaded " + std::to_string(*applied) +
-                              " backend(s), limits.toml, [general] and the access options of [network]; sessions in "
+                              " server(s), limits.toml, [general] and the access options of [network]; sessions in "
                               "progress keep their snapshot.";
         {
             const std::lock_guard lock{queryMutex};
@@ -412,6 +416,22 @@ int run(const cliCommand::Run& command) {
     environment.dispatcher = &dispatcher;
     environment.onlineMode = configuration->network.onlineMode;
     environment.servers = backendNames;
+    environment.serverStates = [&runtime] {
+        std::vector<detail::ServerState> states;
+        for (const auto& server : runtime->backends())
+            states.push_back({server.name, server.healthy});
+        return states;
+    };
+    environment.serverGroups = [&runtime] {
+        std::vector<detail::ServerGroupState> groups;
+        for (const auto& group : runtime->serverGroups()) {
+            detail::ServerGroupState state{group.name, {}};
+            for (const auto& member : group.servers)
+                state.servers.push_back({member.name, member.healthy});
+            groups.push_back(std::move(state));
+        }
+        return groups;
+    };
     environment.send = [&runtime, &bedrockPlayers](std::string_view player, std::string_view backend) {
         auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire);
         if (bedrockSide != nullptr && bedrockSide->connect(player, backend))
@@ -599,7 +619,7 @@ int run(const cliCommand::Run& command) {
     }};
     logger.info([&runtime] { return "Listening on port " + std::to_string(runtime->port()) + "."; });
     logger.warn([] {
-        return std::string{"Proxy is under development; only verified protocol/backend combinations are supported."};
+        return std::string{"Proxy is under development; only verified protocol and server combinations are supported."};
     });
     std::unique_ptr<detail::BedrockStatus> bedrock;
     if (configuration->bedrock.enabled) {
@@ -745,6 +765,7 @@ int run(const cliCommand::Run& command) {
     }};
     (*serverList)->setLoading(false);
     const auto result = runtime->run(stopping.get_token());
+    runtimeRef.store(nullptr, std::memory_order_release);
     remoteApi.reset();
     if (updateChecker.joinable()) {
         updateChecker.request_stop();

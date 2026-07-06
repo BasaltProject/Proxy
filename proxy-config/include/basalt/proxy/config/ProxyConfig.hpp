@@ -189,6 +189,30 @@ struct BackendConfig {
     std::string propertyName{wire::auth::forwarding::ProxyForwarding::kSafeNetProperty};
 };
 
+enum class HealthMode : std::uint8_t { kTcp, kStatus };
+
+struct HealthConfig {
+    bool enabled = false;
+    HealthMode mode = HealthMode::kTcp;
+    std::uint32_t intervalSeconds = 10;
+    std::uint32_t timeoutMs = 1500;
+    std::uint32_t failuresBeforeDown = 2;
+
+    friend bool operator==(const HealthConfig&, const HealthConfig&) = default;
+};
+
+struct StatusRelayConfig {
+    std::uint32_t ttlMs = 5000;
+    std::uint32_t timeoutMs = 1500;
+
+    friend bool operator==(const StatusRelayConfig&, const StatusRelayConfig&) = default;
+};
+
+struct ServerGroup {
+    std::string name;
+    std::vector<std::string> servers;
+};
+
 struct HostRoute {
     std::string host;
     std::vector<std::string> backends;
@@ -208,18 +232,19 @@ struct ProxyConfig {
     BedrockConfig bedrock;
     ReloadConfig reload;
     AccessConfig access;
+    HealthConfig health;
+    StatusRelayConfig statusRelay;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;
     std::vector<HostRoute> forcedHosts;
+    std::vector<ServerGroup> serverGroups;
 };
 
-[[nodiscard]] std::expected<ProxyConfig, std::string> fromToml(const wire::common::toml::TomlTable& proxy,
-                                                               const wire::common::toml::TomlTable& backends,
-                                                               std::string_view directory,
-                                                               const wire::common::toml::TomlTable* plugins = nullptr,
-                                                               const wire::common::toml::TomlTable* limits = nullptr,
-                                                               const wire::common::toml::TomlTable* antibot = nullptr);
+[[nodiscard]] std::expected<ProxyConfig, std::string>
+fromToml(const wire::common::toml::TomlTable& proxy, const wire::common::toml::TomlTable& servers,
+         std::string_view directory, const wire::common::toml::TomlTable* plugins = nullptr,
+         const wire::common::toml::TomlTable* limits = nullptr, const wire::common::toml::TomlTable* antibot = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);

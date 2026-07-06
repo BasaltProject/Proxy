@@ -30,7 +30,7 @@
 ## Overview
 
 Basalt Proxy sits in front of a set of Minecraft servers, gives players a single
-address and moves them between backends. It is written entirely in **C++23**,
+address and moves them between servers. It is written entirely in **C++23**,
 shipped as a native binary, and shares the network layer with
 [Basalt Server](https://github.com/BasaltProject/Server) through
 [Wire](https://github.com/BasaltProject/Wire).
@@ -55,7 +55,7 @@ Two goals drive every decision:
 | Distribution | Native binaries per platform |
 | Backends | Any Minecraft server; 26.3 natively, and older ones from 1.21.5 to 26.2 for 26.3 clients |
 | Plugin API | Lua, `.bppkg` packages (working) |
-| Configuration | A `proxy.toml` and a `backends.toml`, generated with comments |
+| Configuration | A `proxy.toml` and a `servers.toml`, generated with comments |
 | License | GPL-3.0 |
 
 ## Download and documentation
@@ -73,17 +73,17 @@ directory given with `--config <dir>`:
 ```
 config/
   proxy.toml      network, runtime limits, admission, translation
-  backends.toml   routing, forced hosts, and one table per backend
+  servers.toml    the servers, their order, forced hosts, server groups, health checks and status relay
 ```
 
 Existing files are never overwritten. A malformed file is reported by name and the
-proxy exits with code 1. A backend looks like this:
+proxy exits with code 1. A server looks like this:
 
 ```toml
 [routing]
-default = ["lobby"]
+try = ["lobby"]
 
-[backends.lobby]
+[servers.lobby]
 host = "127.0.0.1"
 port = 25566
 protocol = 777
@@ -92,11 +92,11 @@ secret = "change-me"
 bungee-messages = false
 ```
 
-Keep `backends.toml` private: it holds forwarding secrets.
+Keep `servers.toml` private: it holds forwarding secrets.
 
 ## Console
 
-Commands are `help`, `servers`, `status`, `reload`, `send <player> <backend>` and `stop`.
+Commands are `help`, `servers`, `status`, `reload`, `send <player> <server>` and `stop`.
 Player names match the verified name exactly, including case. A successful `send`
 acknowledges preparation, and the destination may still reject the login. It uses
 the same change a Bungee `Connect` does and needs no plugins. Console commands do

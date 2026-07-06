@@ -165,6 +165,18 @@ struct BackendInfo {
     std::int32_t protocol = 0;
     bool automatic = false;
     std::string forwarding;
+    /// False while the health check has the server down; always true with the check off.
+    bool healthy = true;
+};
+
+struct ServerGroupInfo {
+    struct Member {
+        std::string name;
+        bool healthy = true;
+    };
+
+    std::string name;
+    std::vector<Member> servers;
 };
 
 class ProxyRuntime {
@@ -188,6 +200,10 @@ public:
     /// Thread-safe. The players who have finished joining, in the order they did.
     [[nodiscard]] std::vector<std::string> playerNames() const;
     [[nodiscard]] std::vector<BackendInfo> backends() const;
+    [[nodiscard]] std::vector<ServerGroupInfo> serverGroups() const;
+    /// Thread-safe, never blocks. The cached status of the server a server list profile's `source` names, if any.
+    [[nodiscard]] std::optional<wire::protocol::status::ServerStatusPayload> relayStatus(std::string_view source,
+                                                                                         std::string_view host) const;
     /// Thread-safe. Asks every session owner for its sessions and waits up to `timeout` for all of them.
     [[nodiscard]] std::expected<std::vector<SessionInfo>, std::string>
     sessions(std::chrono::milliseconds timeout) const;

@@ -269,7 +269,7 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
             frame_.clear();
             if (inner.empty()) {
                 wire::common::Logger{"Proxy"}.debug(
-                    [] { return std::string{"The backend accepted the session envelope."}; });
+                    [] { return std::string{"The server accepted the session envelope."}; });
                 continue;
             }
             frame_.writeBytes(inner);

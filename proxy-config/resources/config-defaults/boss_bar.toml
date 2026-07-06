@@ -1,7 +1,7 @@
 # The bar across the top of the screen.
 #
 # Off by default. It sits over the game and the client gives it to real bosses, so a proxy that turns it on is
-# spending attention it cannot get back. A backend usually has bars of its own, which is why `[ui] priority` below
+# spending attention it cannot get back. A server usually has bars of its own, which is why `[ui] priority` below
 # defaults to "backend".
 #
 # Profiles work exactly as in server_list.toml: highest priority among those switched on with `active` or whose
@@ -15,8 +15,8 @@
 
 enabled = false
 
-# Who draws this when the backend sends its own: "proxy" keeps what this file says and discards the backend's,
-# "backend" lets the backend's version through and only draws this one when the backend sends nothing.
+# Who draws this when the server sends its own: "proxy" keeps what this file says and discards the server's,
+# "backend" lets the server's version through and only draws this one when the server sends nothing.
 [ui]
 priority = "backend"
 

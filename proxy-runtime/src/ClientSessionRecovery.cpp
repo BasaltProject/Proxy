@@ -35,10 +35,10 @@ bool ClientSession::recoveryFailed() {
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::play::PlayDisconnectPacket::kId);
     if (legacyRaw_)
-        wire::protocol::writeString(frame_, R"({"text":"No backend is available. Please reconnect later."})");
+        wire::protocol::writeString(frame_, R"({"text":"No server is available. Please reconnect later."})");
     else
         wire::protocol::play::PlayDisconnectPacket{
-            wire::text::Component::text("No backend is available. Please reconnect later.")}
+            wire::text::Component::text("No server is available. Please reconnect later.")}
             .write(frame_);
     return queuePacket(frame_.readable());
 }

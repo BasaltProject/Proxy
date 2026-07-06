@@ -10,20 +10,45 @@
 #include <algorithm>
 
 namespace basalt::proxy::runtime::detail {
+namespace {
+/// What the ping being answered on this thread takes from a relayed status, so the placeholders agree with the list.
+struct RelayedNumbers {
+    std::optional<std::int32_t> online;
+    std::optional<std::int32_t> max;
+};
+
+thread_local RelayedNumbers tRelayed;
+} // namespace
 
 ServerListService::ServerListService(std::string directory, wire::config::ServerListConfig initial, Sources sources)
     : directory_(std::move(directory)), sources_(std::move(sources)), config_(std::move(initial)) {
-    wire::config::registerBasicPlaceholders(placeholders_, {.versionName = std::string{buildInfo::kMinecraftVersion},
-                                                            .protocolVersion = buildInfo::kProtocolVersion,
-                                                            .online =
-                                                                [this] {
-                                                                    const std::lock_guard lock{rosterMutex_};
-                                                                    return static_cast<std::int32_t>(roster_.size());
-                                                                },
-                                                            .maxPlayers = [slots = sources_.slots] { return slots; }});
+    wire::config::registerBasicPlaceholders(
+        placeholders_, {.versionName = std::string{buildInfo::kMinecraftVersion},
+                        .protocolVersion = buildInfo::kProtocolVersion,
+                        .online =
+                            [this] {
+                                if (tRelayed.online)
+                                    return *tRelayed.online;
+                                const std::lock_guard lock{rosterMutex_};
+                                return static_cast<std::int32_t>(roster_.size());
+                            },
+                        .maxPlayers = [slots = sources_.slots] { return tRelayed.max.value_or(slots); }});
     wire::config::ServerListStatus::Hooks hooks;
     hooks.playerByAddress = [this](const std::string& address) {
         return sources_.players != nullptr ? sources_.players->nameByAddress(address) : std::nullopt;
+    };
+    hooks.relay = [this](const std::string& source, const std::string& host, const std::vector<std::string>& fields) {
+        auto answer = sources_.relay ? sources_.relay(source, host) : std::nullopt;
+        if (answer && answer->players) {
+            const auto takes = [&fields](std::string_view name) {
+                return std::ranges::find(fields, name) != fields.end();
+            };
+            if (takes("online"))
+                tRelayed.online = answer->players->online;
+            if (takes("max"))
+                tRelayed.max = answer->players->max;
+        }
+        return answer;
     };
     status_ = std::make_unique<wire::config::ServerListStatus>(
         [this] { return config_.current(); }, placeholders_,
@@ -53,11 +78,16 @@ ServerListService::create(std::string_view configDirectory, Sources sources) {
 
 wire::protocol::status::ServerStatusPayload ServerListService::statusFor(std::int32_t protocol, std::string_view host,
                                                                          std::string_view address) {
-    return status_->statusFor(protocol, std::string{host}, std::string{address});
+    tRelayed = {};
+    auto payload = status_->statusFor(protocol, std::string{host}, std::string{address});
+    tRelayed = {};
+    return payload;
 }
 
 std::string ServerListService::bedrockMotd() {
+    tRelayed = {};
     const auto payload = status_->statusFor(buildInfo::kProtocolVersion, "", std::nullopt);
+    tRelayed = {};
     std::string line = wire::text::toPlainText(payload.description);
     line = line.substr(0, line.find('\n'));
     std::ranges::replace(line, ';', ',');

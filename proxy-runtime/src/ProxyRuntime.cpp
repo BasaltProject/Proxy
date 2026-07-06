@@ -5,6 +5,8 @@
 #include "ForwardingKey.hpp"
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
+#include "ServerHealth.hpp"
+#include "StatusRelay.hpp"
 #include "antibot/AttackReport.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -42,6 +44,7 @@ namespace basalt::proxy::runtime {
 namespace {
 struct Topology {
     std::vector<config::BackendConfig> backends;
+    std::vector<config::ServerGroup> groups;
     detail::BackendRoutes routes;
     std::shared_ptr<const detail::NativeForwarding> forwarding;
 };
@@ -63,6 +66,10 @@ private:
     mutable std::mutex mutex_;
     std::shared_ptr<const Topology> value_;
 };
+
+std::int32_t nativeProtocol(const config::BackendConfig& server) {
+    return server.protocol == config::BackendConfig::kClientProtocol ? buildInfo::kProtocolVersion : server.protocol;
+}
 
 std::expected<std::shared_ptr<const detail::NativeForwarding>, std::string>
 loadForwarding(const config::ProxyConfig& config) {
@@ -484,6 +491,9 @@ struct ProxyRuntime::Impl {
     detail::IdentityRegistry identities;
     std::vector<std::unique_ptr<Owner>> owners;
     std::vector<std::jthread> threads;
+    // Apart from `threads`, whose clear() is how run() waits: it would stop this one the moment it started.
+    std::jthread health;
+    std::unique_ptr<detail::StatusRelay> relay;
     std::atomic<bool> stopped{false};
     std::shared_ptr<std::atomic<bool>> controlStopped = std::make_shared<std::atomic<bool>>(false);
     std::atomic<bool> failed{false};
@@ -524,6 +534,7 @@ struct ProxyRuntime::Impl {
     ~Impl() {
         stop();
         threads.clear();
+        health = {};
         if (workers)
             workers->join();
     }
@@ -559,7 +570,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         if (!forwarding)
             return std::unexpected(forwarding.error());
         impl->topology.store(std::make_shared<const Topology>(
-            Topology{impl->config.backends, std::move(*routes), std::move(*forwarding)}));
+            Topology{impl->config.backends, impl->config.serverGroups, std::move(*routes), std::move(*forwarding)}));
         impl->services = std::move(services);
         impl->report = std::make_unique<antibot::AttackReport>(impl->access.antibot);
         {
@@ -582,6 +593,15 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                             event.origin});
                 });
         }
+        impl->relay = std::make_unique<detail::StatusRelay>(
+            impl->config.statusRelay,
+            [state = impl.get()](const std::string& name) -> std::optional<detail::ProbeTarget> {
+                const auto topology = state->topology.load();
+                const auto found = std::ranges::find(topology->backends, name, &config::BackendConfig::name);
+                if (found == topology->backends.end())
+                    return std::nullopt;
+                return detail::ProbeTarget{found->host, found->port, nativeProtocol(*found)};
+            });
         if (impl->config.network.onlineMode) {
             impl->key = wire::auth::SessionKeyPair::generate();
             if (!impl->key)
@@ -671,6 +691,16 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
         return std::unexpected("runtime already started");
     std::stop_callback canceled{stop, [this] { impl_->stop(); }};
     try {
+        if (impl_->config.health.enabled)
+            impl_->health = std::jthread([this](std::stop_token token) {
+                detail::ServerHealth::run(token, impl_->config.health, [this] {
+                    const auto topology = impl_->topology.load();
+                    detail::HealthSnapshot snapshot{.routes = {topology, &topology->routes}};
+                    for (const auto& server : topology->backends)
+                        snapshot.targets.push_back({server.name, server.host, server.port, nativeProtocol(server)});
+                    return snapshot;
+                });
+            });
         for (std::size_t i = 0; i < impl_->owners.size(); ++i)
             impl_->threads.emplace_back([this, i] { impl_->owners[i]->run(i == 0); });
     } catch (...) {
@@ -678,6 +708,7 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
         impl_->stop();
     }
     impl_->threads.clear();
+    impl_->health = {};
     if (impl_->workers)
         impl_->workers->join();
     impl_->statusSource = nullptr;
@@ -760,6 +791,8 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.logging == fresh.logging, "[logging]");
     compare(current.bedrock == fresh.bedrock, "[bedrock]");
     compare(current.reload == fresh.reload, "[reload]");
+    compare(current.health == fresh.health, "[health] in servers.toml");
+    compare(current.statusRelay == fresh.statusRelay, "[status-relay] in servers.toml");
     compare(current.plugins == fresh.plugins, "plugins.toml");
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
@@ -774,8 +807,8 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
         return std::unexpected(antibot.error());
     const auto count = fresh.backends.size();
     impl_->access.apply(fresh);
-    impl_->topology.store(std::make_shared<const Topology>(
-        Topology{std::move(fresh.backends), std::move(*routes), std::move(*forwarding)}));
+    impl_->topology.store(std::make_shared<const Topology>(Topology{
+        std::move(fresh.backends), std::move(fresh.serverGroups), std::move(*routes), std::move(*forwarding)}));
     return count;
 }
 
@@ -1058,10 +1091,43 @@ std::vector<std::string> ProxyRuntime::backendNames() const {
 
 std::vector<BackendInfo> ProxyRuntime::backends() const {
     std::vector<BackendInfo> result;
-    for (const auto& backend : impl_->topology.load()->backends)
+    const auto topology = impl_->topology.load();
+    for (std::size_t i = 0; i < topology->backends.size(); ++i) {
+        const auto& backend = topology->backends[i];
         result.push_back({backend.name, backend.host, backend.port, backend.protocol, backend.automatic,
-                          std::string{wire::auth::forwarding::forwardingModeName(backend.forwarding)}});
+                          std::string{wire::auth::forwarding::forwardingModeName(backend.forwarding)},
+                          topology->routes.reachable(i)});
+    }
     return result;
+}
+
+std::vector<ServerGroupInfo> ProxyRuntime::serverGroups() const {
+    std::vector<ServerGroupInfo> result;
+    const auto topology = impl_->topology.load();
+    for (const auto& group : topology->groups) {
+        ServerGroupInfo info{group.name, {}};
+        for (const auto& name : group.servers)
+            if (const auto index = topology->routes.named(name))
+                info.servers.push_back({name, topology->routes.reachable(*index)});
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+std::optional<wire::protocol::status::ServerStatusPayload> ProxyRuntime::relayStatus(std::string_view source,
+                                                                                     std::string_view host) const {
+    const auto topology = impl_->topology.load();
+    std::optional<std::size_t> index;
+    if (source.starts_with("server:")) {
+        index = topology->routes.named(source.substr(7));
+    } else if (source == "route") {
+        for (const auto candidate : topology->routes.select(host))
+            if (topology->routes.reachable(candidate)) {
+                index = candidate;
+                break;
+            }
+    }
+    return index && impl_->relay ? impl_->relay->get(topology->backends[*index].name) : std::nullopt;
 }
 
 std::expected<std::vector<SessionInfo>, std::string> ProxyRuntime::sessions(std::chrono::milliseconds timeout) const {

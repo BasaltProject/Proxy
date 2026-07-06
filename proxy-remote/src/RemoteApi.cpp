@@ -50,7 +50,7 @@ constexpr std::string_view kApiPrefix = "/v1/";
     object.set("uuid", session.uuid.empty() ? null() : str(session.uuid));
     object.set("edition", str("java"));
     object.set("phase", str(session.phase));
-    object.set("backend", session.backend.empty() ? null() : str(session.backend));
+    object.set("server", session.backend.empty() ? null() : str(session.backend));
     object.set("protocol", num(static_cast<std::uint64_t>(session.protocol)));
     object.set("version",
                session.protocol == 0 ? null() : str(wire::multiversion::protocolVersions::describe(session.protocol)));
@@ -92,7 +92,7 @@ struct RemoteApi::Impl {
         object.set("uptime-seconds", num(static_cast<std::uint64_t>(uptime.count())));
         object.set("port", num(runtime.port()));
         object.set("sessions", num(runtime.sessionCount()));
-        object.set("backends", num(runtime.backendNames().size()));
+        object.set("servers", num(runtime.backendNames().size()));
         object.set("bedrock-players", hooks.bedrockPlaying ? num(hooks.bedrockPlaying()) : null());
         object.set("plugins", hooks.loadedPlugins ? num(hooks.loadedPlugins()) : null());
         return ok(std::move(object));
@@ -111,14 +111,14 @@ struct RemoteApi::Impl {
         object.set("accepted-connections", num(runtime.acceptedConnections()));
         object.set("rejected-connections", num(runtime.rejectedConnections()));
         object.set("bytes-toward-clients", num(runtime.bytesTowardClients()));
-        object.set("bytes-toward-backends", num(runtime.bytesTowardBackends()));
+        object.set("bytes-toward-servers", num(runtime.bytesTowardBackends()));
         object.set("logins", num(stats.logins));
-        object.set("backend-changes", num(stats.backendChanges));
+        object.set("server-changes", num(stats.backendChanges));
         object.set("sessions-ended-in", obj(std::move(ended)));
         return ok(std::move(object));
     }
 
-    [[nodiscard]] HttpReply backends() const {
+    [[nodiscard]] HttpReply servers() const {
         const auto sessions = hooks.runtime->sessions(kSessionsTimeout);
         std::vector<JsonValue> entries;
         for (const runtime::BackendInfo& backend : hooks.runtime->backends()) {
@@ -130,6 +130,7 @@ struct RemoteApi::Impl {
             object.set("follows-client", flag(backend.protocol == 0));
             object.set("automatic", flag(backend.automatic));
             object.set("forwarding", str(backend.forwarding));
+            object.set("healthy", flag(backend.healthy));
             std::optional<std::uint64_t> players;
             if (sessions)
                 players = static_cast<std::uint64_t>(std::ranges::count_if(*sessions, [&backend](const auto& session) {
@@ -138,8 +139,23 @@ struct RemoteApi::Impl {
             object.set("players", players ? num(*players) : null());
             entries.push_back(obj(std::move(object)));
         }
+        std::vector<JsonValue> groups;
+        for (const runtime::ServerGroupInfo& group : hooks.runtime->serverGroups()) {
+            std::vector<JsonValue> members;
+            for (const auto& member : group.servers) {
+                JsonObject entry;
+                entry.set("name", str(member.name));
+                entry.set("healthy", flag(member.healthy));
+                members.push_back(obj(std::move(entry)));
+            }
+            JsonObject entry;
+            entry.set("name", str(group.name));
+            entry.set("servers", list(std::move(members)));
+            groups.push_back(obj(std::move(entry)));
+        }
         JsonObject object;
-        object.set("backends", list(std::move(entries)));
+        object.set("servers", list(std::move(entries)));
+        object.set("groups", list(std::move(groups)));
         return ok(std::move(object));
     }
 
@@ -156,7 +172,7 @@ struct RemoteApi::Impl {
         JsonObject object;
         object.set("native", obj(std::move(native)));
         object.set("clients", list(std::move(clients)));
-        object.set("backends", list(std::move(backendProtocols)));
+        object.set("servers", list(std::move(backendProtocols)));
         return ok(std::move(object));
     }
 
@@ -226,14 +242,14 @@ struct RemoteApi::Impl {
         if (!settings.actions.send)
             return failure(403, "sending players is turned off in remote.toml");
         bool wellFormed = false;
-        const std::string backend = stringField(request.body, "backend", wellFormed);
+        const std::string backend = stringField(request.body, "server", wellFormed);
         if (!wellFormed || backend.empty())
-            return failure(400, "the body must be a JSON object with a \"backend\" string");
+            return failure(400, "the body must be a JSON object with a \"server\" string");
         if (!plainName(name))
             return failure(400, "invalid player name");
         const auto known = hooks.runtime->backends();
         if (std::ranges::none_of(known, [&](const auto& entry) { return entry.name == backend; }))
-            return failure(404, "no such backend");
+            return failure(404, "no such server");
         if (!hooks.playerOnline || !hooks.playerOnline(name))
             return failure(404, "no such player (names are case-sensitive)");
         return run(peer, "send " + std::string{name} + " " + backend);
@@ -271,7 +287,7 @@ struct RemoteApi::Impl {
             const std::string_view leaf = parts[0];
             if (leaf == "reload")
                 return post ? reload(peer) : wrongMethod();
-            if (leaf != "status" && leaf != "counters" && leaf != "backends" && leaf != "versions" &&
+            if (leaf != "status" && leaf != "counters" && leaf != "servers" && leaf != "versions" &&
                 leaf != "players" && leaf != "sessions")
                 return failure(404, "unknown endpoint");
             if (!get)
@@ -280,8 +296,8 @@ struct RemoteApi::Impl {
                 return status();
             if (leaf == "counters")
                 return counters();
-            if (leaf == "backends")
-                return backends();
+            if (leaf == "servers")
+                return servers();
             if (leaf == "versions")
                 return versions();
             return sessions(leaf == "players");

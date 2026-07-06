@@ -67,9 +67,16 @@ bool ClientSession::routeNext() {
             return refuseWith("already-connected", "This player is already connected.");
         identityClaimed_ = true;
     }
-    while (nextTarget_ < targets_.size() && ((recovering_ && recoveryVisited_.test(targets_[nextTarget_])) ||
-                                             !acceptsBackend(backends_[targets_[nextTarget_]])))
+    const auto eligible = [this](std::size_t i) {
+        return !(recovering_ && recoveryVisited_.test(targets_[i])) && acceptsBackend(backends_[targets_[i]]);
+    };
+    while (nextTarget_ < targets_.size() && !eligible(nextTarget_))
         ++nextTarget_;
+    auto live = nextTarget_;
+    while (live < targets_.size() && !(eligible(live) && routes_.reachable(targets_[live])))
+        ++live;
+    if (live < targets_.size())
+        nextTarget_ = live;
     if (nextTarget_ == targets_.size()) {
         if (recovering_)
             return recoveryFailed();

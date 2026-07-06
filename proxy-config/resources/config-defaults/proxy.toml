@@ -1,4 +1,4 @@
-# Public listener and authentication. Backends are configured in backends.toml.
+# Public listener and authentication. The servers behind it are configured in servers.toml.
 [network]
 # Literal IPv4 or IPv6 bind address. IPv6 dual-stack must be requested explicitly.
 bind = "0.0.0.0"
@@ -36,7 +36,7 @@ max-connections-per-address = 0
 max-joins-per-tick = 0
 
 [general]
-# Name sent to a player's client as the server brand (the F3 screen) when a backend switch rebuilds its
+# Name sent to a player's client as the server brand (the F3 screen) when a server switch rebuilds its
 # configuration. Empty sends "Basalt Proxy".
 brand = ""
 
@@ -93,8 +93,8 @@ max-origins = 65536
 origin-expiry-ms = 60000
 
 [forwarding]
-# Identity this proxy signs into basalt-scheme backends, and the private Ed25519 key file.
-# The key is generated on first use and its public half is printed for the backends' trusted-keys.
+# Identity this proxy signs into basalt-scheme servers, and the private Ed25519 key file.
+# The key is generated on first use and its public half is printed for the servers' trusted-keys.
 proxy-id = "proxy"
 key-file = ".basalt/forwarding.key"
 
@@ -109,7 +109,7 @@ keep-days = 14
 color = "auto"
 
 [bedrock]
-# Bedrock Edition listener (UDP). A Bedrock player joins the first backend of the default route as a Java client,
+# Bedrock Edition listener (UDP). A Bedrock player joins the first server of the default route as a Java client,
 # with chunks, position and chat translated; everything else is not translated yet. Off by default.
 enabled = false
 port = 19132
@@ -127,9 +127,9 @@ nethernet-port = 0
 advertise-address = ""
 # With online-mode on, a Bedrock player must be signed in to Xbox Live; a player without a signed chain is turned away.
 # Path to a Minecraft server jar or to an en_us.json language file, used to put into words the translatable messages a
-# backend sends (join and leave lines, death messages). Empty keeps the raw keys. Nothing is downloaded.
+# server sends (join and leave lines, death messages). Empty keeps the raw keys. Nothing is downloaded.
 language = ""
-# Let a backend with forwarding = "basalt" serve Bedrock players itself over the session envelope; the proxy relays. Off by default.
+# Let a server with forwarding = "basalt" serve Bedrock players itself over the session envelope; the proxy relays. Off by default.
 delegate = false
 
 [reload]
@@ -140,7 +140,7 @@ interval-ms = 2000
 
 [translation]
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
-# proxy: force translation here. off: require compatible client/backend protocols.
+# proxy: force translation here. off: require compatible client/server protocols.
 mode = "auto"
 
 [access]

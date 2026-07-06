@@ -1,6 +1,6 @@
 # The panel down the right-hand side of the screen.
 #
-# Off by default: it covers part of the view, and a client shows only one sidebar, which a backend usually already
+# Off by default: it covers part of the view, and a client shows only one sidebar, which a server usually already
 # fills. That is why `[ui] priority` below defaults to "backend".
 #
 # Profiles work exactly as in server_list.toml: highest priority among those switched on with `active` or whose
@@ -9,8 +9,8 @@
 
 enabled = false
 
-# Who draws this when the backend sends its own: "proxy" keeps what this file says and discards the backend's,
-# "backend" lets the backend's version through and only draws this one when the backend sends nothing.
+# Who draws this when the server sends its own: "proxy" keeps what this file says and discards the server's,
+# "backend" lets the server's version through and only draws this one when the server sends nothing.
 [ui]
 priority = "backend"
 

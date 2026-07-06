@@ -56,9 +56,18 @@ std::string_view sendMessageKey(SendResult result, std::string_view accepted) {
     return "send-unavailable";
 }
 
+std::string_view statusKey(bool healthy) { return healthy ? "status-up" : "status-down"; }
+
 bool hasServer(const CommandEnvironment& environment, std::string_view name) {
     const auto names = environment.servers();
     return std::ranges::find(names, name) != names.end();
+}
+
+std::vector<std::string> groupNames(const CommandEnvironment& environment) {
+    std::vector<std::string> names;
+    for (const ServerGroupState& group : environment.serverGroups())
+        names.push_back(group.name);
+    return names;
 }
 
 std::string joined(const std::vector<std::string>& names) {
@@ -109,15 +118,26 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
     add(env, "glist", "Shows the players on every server.",
         Node::literal("glist").executes([env](const CommandContext& context) {
             std::map<std::string, std::vector<std::string>> byServer;
-            for (const std::string& server : env.servers())
-                byServer[server];
+            std::map<std::string, bool> healthy;
+            for (const ServerState& server : env.serverStates()) {
+                byServer[server.name];
+                healthy[server.name] = server.healthy;
+            }
             const auto entries = env.roster->all();
             for (const auto& entry : entries)
                 byServer[entry.backend].push_back(entry.name);
             for (const auto& [server, names] : byServer)
                 context.reply(env.messages->command(
-                    "glist-server",
+                    healthy[server] ? "glist-server" : "glist-server-down",
                     {{"server", server}, {"count", std::to_string(names.size())}, {"players", joined(names)}}));
+            for (const ServerGroupState& group : env.serverGroups()) {
+                std::vector<std::string> members;
+                for (const ServerState& member : group.servers)
+                    members.push_back(member.name + " (" +
+                                      Messages::plain(env.messages->command(statusKey(member.healthy))) + ")");
+                context.reply(
+                    env.messages->command("glist-group", {{"group", group.name}, {"servers", joined(members)}}));
+            }
             context.reply(env.messages->command("glist-total", {{"total", std::to_string(entries.size())}}));
         }));
 
@@ -126,7 +146,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
         const auto current = env.roster->find(context.source().name);
         context.reply(
             env.messages->command("server-current", {{"server", current ? current->backend : std::string{"-"}},
-                                                     {"servers", joined(env.servers())}}));
+                                                     {"servers", joined(env.servers())},
+                                                     {"groups", joined(groupNames(env))}}));
     });
     server.then(Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
         const std::string target{context.text("server")};

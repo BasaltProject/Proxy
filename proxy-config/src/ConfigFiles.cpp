@@ -1,6 +1,8 @@
 #include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 
+#include <algorithm>
+#include <array>
 #include <deque>
 
 namespace basalt::proxy::config {
@@ -67,7 +69,24 @@ std::expected<MessageSet, std::string> loadMessages(std::string_view directory) 
 }
 
 std::expected<wire::config::ServerListConfig, std::string> loadServerList(std::string_view directory) {
-    return wire::config::ServerListConfig::load(configDirectory(directory), kServerListDefaultToml);
+    const auto files = configDirectory(directory);
+    auto loaded = wire::config::ServerListConfig::load(files, kServerListDefaultToml);
+    if (!loaded)
+        return loaded;
+    const std::string path = files.pathOf(wire::config::ServerListConfig::kFileName);
+    for (const auto& profile : loaded->profiles()) {
+        const std::string where = path + ": profiles." + profile.header.name;
+        if (profile.source && *profile.source != "profile" && *profile.source != "route" &&
+            !(profile.source->starts_with("server:") && profile.source->size() > 7))
+            return std::unexpected(where + ".source must be \"profile\", \"route\" or \"server:<name>\"");
+        for (const auto& field : profile.relay.value_or(std::vector<std::string>{})) {
+            static constexpr std::array<std::string_view, 6> kFields{"online", "max",     "sample",
+                                                                     "motd",   "version", "icon"};
+            if (std::ranges::find(kFields, field) == kFields.end())
+                return std::unexpected(where + ".relay has an unknown field \"" + field + "\"");
+        }
+    }
+    return loaded;
 }
 
 std::expected<UiConfig, std::string> loadUi(std::string_view directory) {

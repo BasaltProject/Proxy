@@ -18,6 +18,16 @@ namespace basalt::proxy::runtime::detail {
 
 enum class SendResult { kAccepted, kNotFound, kUnavailable, kBusy, kStopped };
 
+struct ServerState {
+    std::string name;
+    bool healthy = true;
+};
+
+struct ServerGroupState {
+    std::string name;
+    std::vector<ServerState> servers;
+};
+
 /// What the proxy's own commands act on.
 struct CommandEnvironment {
     PlayerDirectory* players = nullptr;
@@ -28,6 +38,9 @@ struct CommandEnvironment {
     CommandDispatcher* dispatcher = nullptr;
     bool onlineMode = true;
     std::function<std::vector<std::string>()> servers;
+    /// Every server with whether the health check has it up; all up when the check is off.
+    std::function<std::vector<ServerState>()> serverStates;
+    std::function<std::vector<ServerGroupState>()> serverGroups;
     /// Waits, briefly, for the proxy to say whether the move was accepted.
     std::function<SendResult(std::string_view player, std::string_view server)> send;
     std::function<void(std::string_view player, std::string_view miniMessage)> kick;

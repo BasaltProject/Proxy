@@ -1,0 +1,87 @@
+# The servers behind this proxy, and where each player is sent.
+#
+# This file is the routing of your network. proxy.toml says how players reach the proxy; this one says what they
+# reach through it. Any Minecraft server can sit behind the proxy, a Basalt Server or not. Keep this file private:
+# it holds forwarding secrets.
+#
+# Reload with /reload. A new server, a removed one and a changed order take effect for the next connection;
+# players already connected stay where they are.
+
+[routing]
+# Where a player is sent when the address they typed matches no entry of [forced-hosts]. The proxy tries the
+# servers in this order and moves to the next one when a server is down, refuses the connection or cannot take
+# the player's game version. Each entry is the name of a [servers.<name>] table or of a [server-groups.<name>].
+try = ["lobby"]
+
+# The order to try for a given address, so one proxy can front several networks or modes: a player who typed
+# "play.example.org" can land in the lobby while "survival.example.org" goes straight to the survival server.
+# The host name is compared without case and without a trailing dot. Same kind of list as `try`.
+# "play.example.org" = ["lobby"]
+[forced-hosts]
+
+# Names that stand for several servers at once. A group can be used anywhere a server can in `try` and in
+# [forced-hosts]: it expands, in the order written here, to its servers, and a server that was already listed
+# earlier is not tried twice. A group cannot share its name with a server.
+# [server-groups.lobbies]
+# servers = ["lobby-1", "lobby-2"]
+[server-groups]
+
+[health]
+# Look at the servers in the background and skip, when sending a player somewhere, the ones that are not answering.
+# Without this a player is only moved on after waiting for the connection to the dead server to fail, which takes up
+# to runtime.connect-timeout-ms. Off by default: nothing is checked and every server is always tried in order.
+# When every server of a list is down they are all tried anyway, so a wrong check never locks players out.
+enabled = false
+# What counts as answering. "tcp" only opens a connection, which is cheap and always works. "status" asks the server for
+# its multiplayer-list status the way a client does, so a server that accepts connections but is stuck or still loading
+# counts as down.
+mode = "tcp"
+# Seconds between two checks of the same server. The proxy does nothing at all between checks.
+interval-seconds = 10
+# How long, in milliseconds, a server has to accept a TCP connection to count as answering.
+timeout-ms = 1500
+# Failed checks in a row before a server is considered down. One success brings it back.
+failures-before-down = 2
+
+[status-relay]
+# Used when a profile in server_list.toml has `source` set to a server: the proxy asks that server for its status
+# (player count, slots, hover list, and what else the profile's `relay` lists) and shows it in the multiplayer list.
+# Nothing is asked until a profile that wants it is used, and an answer is reused for this long, in milliseconds, so a
+# busy list does not turn into a busy server. A ping is never held up: while an answer is being fetched, or when the
+# server does not give one, the profile's own values are shown.
+ttl-ms = 5000
+# How long, in milliseconds, the server has to answer.
+timeout-ms = 1500
+
+[servers.lobby]
+# Address of the server. A host name or a literal IP address, without the port.
+host = "127.0.0.1"
+# Port the server listens on.
+port = 25566
+# The Java protocol this server speaks. A number is a fixed version. "client" is for a server that speaks whatever
+# version each player connects with, as a Basalt Server does for the older versions it translates itself. "auto" is
+# "client" for a server with forwarding = "basalt" (the proxy still translates clients older than 1.13, which cannot
+# carry its login query) and the newest protocol otherwise. Compatibility is checked for each client and server pair.
+# A server on 26.2 (776), 26.1 (775), 1.21.11 (774), 1.21.9 or 1.21.10 (773), 1.21.7 or 1.21.8 (772), 1.21.6 (771)
+# or 1.21.5 (770) can serve current clients too, translated upward by the proxy.
+protocol = 777
+# How the player's identity reaches the server: none, basalt, velocity, bungeecord, bungeeguard or safenet. It has
+# to be chosen for every server and has to match what the server expects. none is for an offline vanilla server and
+# does not forward the premium UUID or skin. There is no fallback to a weaker scheme when the authentication fails.
+forwarding = "none"
+# Shared secret for velocity, or token for bungeeguard and safenet. Leave it empty for the other schemes.
+secret = ""
+# Name of the profile property that carries the token for safenet. Only valid with forwarding = "safenet".
+# property-name = "safenet-token"
+# Let this server ask the proxy for GetServer, GetServers, UUID and moving its own players with Connect, on the
+# bungeecord:main channel. Messages sent by a player's client are always discarded. Other subcommands are unsupported.
+bungee-messages = false
+
+# More servers go here, each with its own name. The name is what /server and /send take, and what the tables above
+# refer to.
+# [servers.survival]
+# host = "10.0.0.12"
+# port = 25565
+# protocol = "auto"
+# forwarding = "velocity"
+# secret = "the same secret as the server's paper-global.yml"

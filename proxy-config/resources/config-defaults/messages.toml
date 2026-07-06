@@ -13,13 +13,13 @@ banned-ip = "<red>Your address is banned from this network.</red>\n<gray>Reason:
 # The whitelist is on and the player is not on it.
 not-whitelisted = "<red>You are not whitelisted on this network.</red>"
 
-# No backend of the route accepted the player.
+# No server of the route accepted the player.
 unavailable = "<red>No server is available right now. Please try again shortly.</red>"
 
 # The client's game version is not one this proxy can speak.
 unsupported-version = "<red>Your game version is not supported on this network.</red>"
 
-# The version is supported, but no backend of the route can take it.
+# The version is supported, but no server of the route can take it.
 no-compatible-server = "<red>No server here can take your game version.</red>"
 
 # A second login of a player who is already connected.
@@ -88,13 +88,19 @@ unknown-server = "<red>There is no server called %server%.</red>"
 help-header = "<gold>Commands you can use:</gold>"
 help-entry = "<yellow>/%usage%</yellow> <gray>%description%</gray>"
 
-# /list and /glist. %online%, %players%, %server% (the backend), %count% and %total%.
+# /list and /glist. %online%, %players%, %server% (the server), %count% and %total%. /glist uses glist-server-down for a
+# server the health check has down ([health] in servers.toml; without it every server counts as up), and shows each group
+# with %group% and its %servers%, which are followed by the plain text of status-up or status-down.
 list = "<yellow>There are %online% player(s) online:</yellow> %players%"
 glist-server = "<yellow>[%server%]</yellow> <gray>(%count%)</gray> %players%"
+glist-server-down = "<red>[%server%]</red> <gray>(down)</gray> %players%"
+glist-group = "<gold>[%group%]</gold> <gray>%servers%</gray>"
+status-up = "up"
+status-down = "down"
 glist-total = "<yellow>Total players online: %total%</yellow>"
 
 # /server and /send. %server% and %player% are what the command named.
-server-current = "<yellow>You are connected to %server%. Available: %servers%</yellow>"
+server-current = "<yellow>You are connected to %server%. Available: %servers%. Groups: %groups%</yellow>"
 server-sending = "<green>Sending you to %server%.</green>"
 send-ok = "<green>Sending %player% to %server%.</green>"
 # What the proxy answered to a move, after waiting for it: the player was not found, cannot move now (not in play, already
