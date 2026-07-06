@@ -44,7 +44,11 @@ public final class BasaltBungee {
         root.addHandler(new java.util.logging.Handler() {
             @Override
             public void publish(java.util.logging.LogRecord record) {
-                Natives.log(new java.util.logging.SimpleFormatter().formatMessage(record));
+                final String message = new java.util.logging.SimpleFormatter().formatMessage(record);
+                if (message.startsWith("Could not initialize LibraryLoader")) {
+                    return;
+                }
+                Natives.log(message);
             }
 
             @Override
