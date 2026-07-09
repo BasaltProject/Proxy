@@ -453,7 +453,7 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
             return false;
     }
     if (!closing_ && !frontendPaused_ && !waiting && (event.readable || event.closed)) {
-        std::array<std::uint8_t, kBufferCapacity> chunk{};
+        thread_local std::array<std::uint8_t, kBufferCapacity> chunk;
         const auto room = input_.capacity() - input_.writerIndex();
         if (room == 0)
             return false;

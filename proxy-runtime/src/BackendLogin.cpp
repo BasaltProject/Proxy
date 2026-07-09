@@ -28,7 +28,7 @@ BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_
                            BackendAttempt attempt)
     : memory_(memory), attempt_(attempt), connection_(std::move(connection)), cookieKey_(0, memory), input_(0, memory),
       output_(0, memory), frame_(0, memory), serial_(gNextSerial.fetch_add(1, std::memory_order_relaxed)) {
-    allocationReady_ = input_.tryReserve(kCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
+    allocationReady_ = input_.tryReserve(kReadCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
 }
 
 std::expected<void, BackendLoginError> BackendLogin::start(const config::BackendConfig& backend,
@@ -222,7 +222,7 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
     if (!readEnabled || hasCookieRequest())
         return std::span<const std::uint8_t>{};
     if (!bufferedPacket() && (event.readable || event.closed)) {
-        std::array<std::uint8_t, kCapacity> chunk{};
+        thread_local std::array<std::uint8_t, kReadCapacity> chunk;
         const auto room = input_.capacity() - input_.writerIndex();
         if (room == 0)
             return std::unexpected(BackendLoginError::kLimit);

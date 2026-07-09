@@ -61,7 +61,7 @@ struct NativeForwarding;
 class ClientSession {
 public:
     using Clock = std::chrono::steady_clock;
-    static constexpr std::size_t kBufferCapacity = 1024;
+    static constexpr std::size_t kBufferCapacity = 8192;
     static constexpr std::size_t kBufferBytes = kBufferCapacity * 3;
     static constexpr std::size_t kAuthenticationBytes = 128 * 1024;
     static constexpr std::size_t kResolutionBytes = 16 * 1024;
@@ -165,6 +165,8 @@ public:
 
     [[nodiscard]] bool ready(const wire::io::IoReady& event);
     [[nodiscard]] bool flushOutput();
+    [[nodiscard]] bool relayBuffered() const;
+    static constexpr std::size_t kRelayBatch = 64;
     [[nodiscard]] wire::io::IoInterest interest() const;
     [[nodiscard]] Clock::time_point deadline() const;
     [[nodiscard]] Clock::time_point baseDeadline() const;

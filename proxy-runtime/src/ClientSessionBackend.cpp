@@ -45,8 +45,20 @@ bool ClientSession::answerKnownPacks() {
     return true;
 }
 
+bool ClientSession::relayBuffered() const {
+    return (state_ == State::kPlay || state_ == State::kConfiguration) && backend() && !backendPaused_ &&
+           !startingConfiguration_ && !closing_ && backend()->hasBufferedFrame();
+}
+
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
-    if (!backendEvent(event) || !flushOutput())
+    if (!backendEvent(event))
+        return false;
+    auto drain = event;
+    drain.readable = drain.writable = drain.closed = false;
+    for (std::size_t frames = 0; frames < kRelayBatch && relayBuffered(); ++frames)
+        if (!backendEvent(drain))
+            return false;
+    if (!flushOutput())
         return false;
     backpressure();
     return (!closing_ || output_.readableBytes() != 0) && advancePreparedChange();

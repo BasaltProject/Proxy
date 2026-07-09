@@ -54,6 +54,7 @@ public:
     [[nodiscard]] Phase phase() const { return phase_; }
 
     static constexpr std::size_t kCapacity = 1024;
+    static constexpr std::size_t kReadCapacity = 16 * 1024;
     static constexpr std::size_t kBytes = 3 * kCapacity;
     static constexpr std::size_t kLoginPacketLimit = 64 * 1024;
     static constexpr std::size_t kForwardingPacketLimit = 128 * 1024;
@@ -133,6 +134,8 @@ public:
     [[nodiscard]] bool finishConfiguration();
 
     [[nodiscard]] std::size_t allocated() const;
+
+    [[nodiscard]] bool hasBufferedFrame() const { return bufferedPacket(); }
 
 private:
     [[nodiscard]] bool bufferedPacket() const;
