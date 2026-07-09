@@ -199,6 +199,10 @@ void ClientSession::closeBackends() {
     activeBackend_.reset();
 }
 
+std::array<std::uint64_t, 2> ClientSession::backendSerials() const noexcept {
+    return {activeBackend_ ? activeBackend_->serial() : 0, candidateBackend_ ? candidateBackend_->serial() : 0};
+}
+
 std::array<ClientSession::BackendWatch, 3> ClientSession::backendWatches() const {
     std::array<BackendWatch, 3> result{};
     if (dial_ && dial_->handle() >= 0)

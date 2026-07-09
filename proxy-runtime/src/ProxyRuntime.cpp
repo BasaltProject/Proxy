@@ -447,8 +447,11 @@ struct ProxyRuntime::Impl {
                             healthy = session.ready(event);
                         } else if (std::ranges::find(session.watchedBackends, event.handle) !=
                                    session.watchedBackends.end()) {
-                            loop.unwatch(event.handle);
+                            const auto before = session.backendSerials();
+                            const bool dialing = session.dialing();
                             healthy = session.backendReady(event);
+                            if (healthy && (dialing || session.backendSerials() != before))
+                                loop.unwatch(event.handle);
                         } else {
                             continue;
                         }

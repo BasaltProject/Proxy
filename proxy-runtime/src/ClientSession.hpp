@@ -157,10 +157,14 @@ public:
     };
 
     [[nodiscard]] std::array<BackendWatch, 3> backendWatches() const;
+    /// Identity of the active and candidate transports; changes whenever one is replaced or dropped.
+    [[nodiscard]] std::array<std::uint64_t, 2> backendSerials() const noexcept;
+    [[nodiscard]] bool dialing() const noexcept { return dial_ != nullptr; }
 
     [[nodiscard]] bool frontendSuspended() const { return frontendPaused_ && output_.readableBytes() == 0; }
 
     [[nodiscard]] bool ready(const wire::io::IoReady& event);
+    [[nodiscard]] bool flushOutput();
     [[nodiscard]] wire::io::IoInterest interest() const;
     [[nodiscard]] Clock::time_point deadline() const;
     [[nodiscard]] Clock::time_point baseDeadline() const;

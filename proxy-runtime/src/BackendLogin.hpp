@@ -117,6 +117,8 @@ public:
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 
+    [[nodiscard]] std::uint64_t serial() const noexcept { return serial_; }
+
     [[nodiscard]] wire::io::IoInterest interest(bool read = true) const;
 
     [[nodiscard]] std::size_t pendingBytes() const { return output_.readableBytes(); }
@@ -165,6 +167,7 @@ private:
     wire::io::ByteBuffer input_;
     wire::io::ByteBuffer output_;
     wire::io::ByteBuffer frame_;
+    std::uint64_t serial_;
     bool allocationReady_ = false;
     Phase phase_ = Phase::kUnstarted;
     const IdRenumbering* ids_ = nullptr;

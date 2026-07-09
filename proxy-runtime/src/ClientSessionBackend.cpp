@@ -46,7 +46,10 @@ bool ClientSession::answerKnownPacks() {
 }
 
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
-    return backendEvent(event) && advancePreparedChange();
+    if (!backendEvent(event) || !flushOutput())
+        return false;
+    backpressure();
+    return (!closing_ || output_.readableBytes() != 0) && advancePreparedChange();
 }
 
 bool ClientSession::backendEvent(const wire::io::IoReady& event) {

@@ -425,6 +425,21 @@ bool ClientSession::decode() {
     return true;
 }
 
+bool ClientSession::flushOutput() {
+    if (output_.readableBytes() == 0)
+        return true;
+    const auto sent = connection_.writeSome(output_.readable());
+    if (!sent)
+        return sent.error().kind == wire::io::SocketError::Kind::WouldBlock;
+    output_.skip(*sent);
+    if (output_.readableBytes() == 0) {
+        output_.clear();
+        writeDeadline_ = Clock::time_point::max();
+        refillFromTail();
+    }
+    return true;
+}
+
 bool ClientSession::ready(const wire::io::IoReady& event) {
     if (Clock::now() >= deadline())
         return false;
@@ -456,20 +471,8 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
                 return false;
         }
     }
-    if (output_.readableBytes() != 0) {
-        const auto sent = connection_.writeSome(output_.readable());
-        if (!sent) {
-            if (sent.error().kind != wire::io::SocketError::Kind::WouldBlock)
-                return false;
-        } else {
-            output_.skip(*sent);
-            if (output_.readableBytes() == 0) {
-                output_.clear();
-                writeDeadline_ = Clock::time_point::max();
-                refillFromTail();
-            }
-        }
-    }
+    if (!flushOutput())
+        return false;
     backpressure();
     return accounted() && (!closing_ || output_.readableBytes() != 0) && advancePreparedChange();
 }

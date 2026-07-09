@@ -17,13 +17,17 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 
 namespace basalt::proxy::runtime::detail {
+namespace {
+std::atomic<std::uint64_t> gNextSerial{1};
+}
 
 BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory,
                            BackendAttempt attempt)
     : memory_(memory), attempt_(attempt), connection_(std::move(connection)), cookieKey_(0, memory), input_(0, memory),
-      output_(0, memory), frame_(0, memory) {
+      output_(0, memory), frame_(0, memory), serial_(gNextSerial.fetch_add(1, std::memory_order_relaxed)) {
     allocationReady_ = input_.tryReserve(kCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
 }
 
