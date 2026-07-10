@@ -968,7 +968,16 @@ bool ProxyRuntime::bedrockOffline(std::string_view address, bool connecting) {
     const auto now = antibot::Clock::now();
     if (!connecting)
         return engine.statusAllowed(origin, now);
-    return engine.connection(origin, now).action != antibot::Action::kDeny;
+    if (config->bedrockConnectScore > 0)
+        engine.penalize(origin, config->bedrockConnectScore, now);
+    const auto verdict = engine.connection(origin, now);
+    if (verdict.action == antibot::Action::kDeny)
+        return false;
+    if (verdict.score >= config->banScore) {
+        engine.ban(origin, now);
+        return false;
+    }
+    return true;
 }
 
 std::optional<std::string> ProxyRuntime::bedrockLogin(std::string_view address, std::string_view name,

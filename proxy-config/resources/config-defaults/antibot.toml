@@ -202,6 +202,8 @@ enabled = true
 packets-per-second = 1500
 # Seconds a Bedrock client has from its session opening to finish logging in.
 login-seconds = 15
+# Score added to an address each time it opens a new Bedrock session, so a flood from one address gets banned.
+connect-score = 2
 # While attack mode is on, only let in Bedrock players whose identity Xbox Live signed.
 xbox-in-attack = true
 

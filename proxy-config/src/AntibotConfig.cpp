@@ -283,10 +283,11 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
         reader.fail("kernel-block.command", "is required when the block is enabled");
 
     const auto* bedrock = reader.child(table, "bedrock");
-    reader.keys(bedrock, {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack"}, "bedrock.");
+    reader.keys(bedrock, {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack", "connect-score"}, "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrockEnabled, "bedrock.");
     reader.scalar(bedrock, "xbox-in-attack", result.bedrockXboxInAttack, "bedrock.");
     number(reader, bedrock, "packets-per-second", result.bedrockPacketsPerSecond, 0, 1000000, "bedrock.");
+    number(reader, bedrock, "connect-score", result.bedrockConnectScore, 0, 1000, "bedrock.");
     number(reader, bedrock, "login-seconds", result.bedrockLoginSeconds, 1, 600, "bedrock.");
 
     const auto* exploits = reader.child(table, "exploits");

@@ -118,6 +118,7 @@ struct AntibotConfig {
     std::int32_t bedrockPacketsPerSecond = 1500;
     std::int32_t bedrockLoginSeconds = 15;
     bool bedrockXboxInAttack = true;
+    std::int32_t bedrockConnectScore = 2;
     std::int32_t maxNbtDepth = 24;
     std::int32_t maxNbtKeys = 512;
     std::int32_t maxNbtBytes = 32768;
