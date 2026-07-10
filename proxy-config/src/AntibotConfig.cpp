@@ -156,6 +156,8 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
                  "legacy-clients",
                  "timeout-seconds",
                  "max-packets",
+                 "max-frame-bytes",
+                 "check-echo",
                  "check-brand",
                  "blocked-brands",
                  "one-per-name",
@@ -197,10 +199,12 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
         reader.fail("limbo.legacy-clients", "must be skip or kick");
     number(reader, limbo, "suspicious-score", result.limboScore, 1, 1000000, "limbo.");
     number(reader, limbo, "timeout-seconds", result.limboTimeoutSeconds, 2, 600, "limbo.");
+    reader.scalar(limbo, "check-echo", result.checkEcho, "limbo.");
     reader.scalar(limbo, "check-brand", result.checkBrand, "limbo.");
     reader.stringList(limbo, "blocked-brands", result.blockedBrands, "limbo.");
     reader.scalar(limbo, "one-per-name", result.onePerName, "limbo.");
     reader.scalar(limbo, "soft-fail-to-captcha", result.softFailToCaptcha, "limbo.");
+    number(reader, limbo, "max-frame-bytes", result.maxFrameBytes, 64, 1048576, "limbo.");
     number(reader, limbo, "max-packets", result.maxPackets, 100, 100000, "limbo.");
     number(reader, limbo, "max-latency-ms", result.maxLatencyMs, 0, 60000, "limbo.");
     number(reader, limbo, "latency-strikes", result.latencyStrikes, 1, 100, "limbo.");

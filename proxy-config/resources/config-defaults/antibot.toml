@@ -98,6 +98,10 @@ legacy-clients = "skip"
 # Seconds a client has to finish the limbo.
 timeout-seconds = 20
 # Milliseconds between keep-alives, and how long a client has to answer one.
+# Largest packet, in bytes, a client may send while in the limbo. Real clients send far less.
+max-frame-bytes = 2048
+# Send a ping the client must answer with the same id (clients 1.17 and newer).
+check-echo = true
 # Require the client brand and refuse malformed ones or any in blocked-brands (compared ignoring case).
 check-brand = true
 blocked-brands = []

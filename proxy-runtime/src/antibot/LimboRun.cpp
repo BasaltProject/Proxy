@@ -198,7 +198,7 @@ void LimboRun::armCaptcha(std::string answer) {
 
 LimboRun::Step LimboRun::finished() {
     const bool gravity = !config_.checkGravity || gravityDone_;
-    if (phase_ != Phase::kPlay || !gravity || answered_ == 0 || !solved_)
+    if (phase_ != Phase::kPlay || !gravity || (echo_ && !ponged_) || answered_ == 0 || !solved_)
         return {};
     phase_ = Phase::kReconfigure;
     return {Outcome::kContinue, Reason::kNone, Signal::kSendReconfigure};
@@ -233,6 +233,14 @@ LimboRun::Step LimboRun::play(std::int32_t id, wire::io::ByteBuffer& body, Clock
         }
         keepAliveSentAt_ = Clock::time_point::max();
         nextKeepAlive_ = now + std::chrono::milliseconds{config_.keepAliveIntervalMs};
+        return finished();
+    }
+    case 0x2d: {
+        const auto echoed = body.readInt();
+        if (body.failed() || !pingWaiting_ || echoed != pingId_)
+            return fail(Reason::kLimboFailed);
+        pingWaiting_ = false;
+        ponged_ = true;
         return finished();
     }
     case 0x1e: {
@@ -287,6 +295,15 @@ std::optional<std::int64_t> LimboRun::keepAliveDue(Clock::time_point now) {
     return outstanding_;
 }
 
+std::optional<std::int32_t> LimboRun::pingDue(Clock::time_point now) {
+    if (!echo_ || phase_ != Phase::kPlay || !teleported_ || pingWaiting_ || ponged_)
+        return std::nullopt;
+    pingId_ = static_cast<std::int32_t>(entropy());
+    pingWaiting_ = true;
+    pingSentAt_ = now;
+    return pingId_;
+}
+
 void LimboRun::captchaShown(Clock::time_point now) {
     captchaDeadline_ = now + std::chrono::seconds{config_.captchaTimeoutSeconds};
 }
@@ -296,6 +313,8 @@ LimboRun::Step LimboRun::tick(Clock::time_point now) {
         return fail(Reason::kTimeout);
     if (!solved_ && captchaDeadline_ != Clock::time_point::max() && now >= captchaDeadline_)
         return fail(Reason::kCaptchaFailed);
+    if (pingWaiting_ && now - pingSentAt_ >= std::chrono::milliseconds{config_.keepAliveTimeoutMs})
+        return fail(Reason::kTimeout);
     if (waiting_ && now - keepAliveSentAt_ >= std::chrono::milliseconds{config_.keepAliveTimeoutMs})
         return fail(Reason::kTimeout);
     return {};

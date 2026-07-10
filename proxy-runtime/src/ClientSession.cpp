@@ -384,11 +384,14 @@ bool ClientSession::decode() {
             continue;
         }
         const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
+        const std::size_t limboCap = limboState() && access_.policy
+                                         ? static_cast<std::size_t>(access_.policy->antibot.config()->maxFrameBytes)
+                                         : kBufferCapacity - 3;
         const auto hint = wire::protocol::packetFraming::inspectFrame(
             input_.readable(), compression_.has_value(),
             relay                              ? wire::protocol::packetFraming::kMaxUncompressedSize
             : state_ == State::kCookieResponse ? wire::protocol::cookie::kMaxPayloadBytes + 512
-                                               : kBufferCapacity - 3,
+                                               : limboCap,
             compression_);
         if (!hint)
             return false;

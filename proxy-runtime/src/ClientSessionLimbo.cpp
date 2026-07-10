@@ -45,6 +45,8 @@ bool ClientSession::queueFramed(std::span<const std::uint8_t> framed) {
     return true;
 }
 
+constexpr std::int32_t kFirstPingProtocol = 755;
+
 bool ClientSession::startLimbo() {
     auto& policy = *access_.policy;
     const auto now = Clock::now();
@@ -69,6 +71,7 @@ bool ClientSession::startLimbo() {
         }
     }
     limboRun_ = std::make_unique<antibot::LimboRun>(config, now, std::move(answer));
+    limboRun_->expectEcho(config.checkEcho && protocol >= kFirstPingProtocol);
     if (!translation_ && clientProtocol_ != 0) {
         translation_ = wire::multiversion::java::javaTranslators::chainFor(clientProtocol_);
         limboOwnsChain_ = true;
@@ -141,6 +144,13 @@ bool ClientSession::limboPacket(std::int32_t id, std::span<const std::uint8_t> r
 bool ClientSession::limboKeepAlive(Clock::time_point now) {
     if (state_ != State::kLimboPlay)
         return true;
+    if (const auto ping = limboRun_->pingDue(now)) {
+        wire::io::ByteBuffer out;
+        wire::protocol::varInt::write(out, 0x3e);
+        out.writeInt(*ping);
+        if (!queuePacket(out.readable()))
+            return false;
+    }
     const auto due = limboRun_->keepAliveDue(now);
     if (!due)
         return true;

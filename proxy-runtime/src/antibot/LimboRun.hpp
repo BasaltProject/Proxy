@@ -42,6 +42,11 @@ public:
     [[nodiscard]] Step play(std::int32_t id, wire::io::ByteBuffer& body, Clock::time_point now);
     /// A keep-alive to send now, if one is due.
     [[nodiscard]] std::optional<std::int64_t> keepAliveDue(Clock::time_point now);
+    /// A play ping to send now, once; the client has to answer it with the same id.
+    [[nodiscard]] std::optional<std::int32_t> pingDue(Clock::time_point now);
+
+    void expectEcho(bool on) noexcept { echo_ = on; }
+
     [[nodiscard]] Step tick(Clock::time_point now);
     [[nodiscard]] Clock::time_point nextWake() const;
 
@@ -76,6 +81,11 @@ private:
     bool groundSeen_ = false;
     bool gravityDone_ = false;
     bool brandSeen_ = false;
+    bool echo_ = false;
+    bool pingWaiting_ = false;
+    bool ponged_ = false;
+    std::int32_t pingId_ = 0;
+    Clock::time_point pingSentAt_;
     bool canCaptcha_ = false;
     bool degraded_ = false;
     std::int32_t slowAnswers_ = 0;

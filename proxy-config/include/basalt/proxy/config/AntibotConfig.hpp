@@ -59,6 +59,8 @@ struct AntibotConfig {
     std::int32_t limboScore = 40;
     LegacyAction legacy = LegacyAction::kSkip;
     std::uint32_t limboTimeoutSeconds = 20;
+    std::int32_t maxFrameBytes = 2048;
+    bool checkEcho = true;
     bool checkBrand = true;
     std::vector<std::string> blockedBrands;
     bool onePerName = true;
