@@ -6,6 +6,8 @@
 
 namespace basalt::proxy::runtime::detail {
 
+inline constexpr int kRelayZlibLevel = 3;
+
 /// Process-wide, relaxed: sessions on every owner thread add to them and the console reads them.
 struct RelayCounters {
     std::atomic<std::uint64_t> towardClients{0};

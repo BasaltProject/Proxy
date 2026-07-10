@@ -272,8 +272,9 @@ bool ClientSession::queueNative(std::span<const std::uint8_t> packet) {
     if (output_.readableBytes() == 0)
         writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
     const auto offset = output_.writerIndex();
-    auto encoded = compression_ ? wire::protocol::packetFraming::writeCompressed(output_, packet, *compression_)
-                                : wire::protocol::packetFraming::writeUncompressed(output_, packet);
+    auto encoded = compression_
+                       ? wire::protocol::packetFraming::writeCompressed(output_, packet, *compression_, kRelayZlibLevel)
+                       : wire::protocol::packetFraming::writeUncompressed(output_, packet);
     if (!encoded)
         return false;
     relayCounters().towardClients.fetch_add(output_.writerIndex() - offset, std::memory_order_relaxed);
