@@ -1,5 +1,6 @@
 #include "Antibot.hpp"
 
+#include "AddressFeeds.hpp"
 #include "TextScan.hpp"
 
 #include <basalt/proxy/config/AddressRange.hpp>
@@ -122,6 +123,8 @@ std::string_view reasonName(Reason reason) noexcept {
         return "passthrough";
     case Reason::kProtocol:
         return "protocol";
+    case Reason::kProxy:
+        return "proxy";
     case Reason::kExploit:
         return "exploit";
     case Reason::kTimeout:
@@ -148,6 +151,7 @@ struct Settings {
     config::AntibotConfig config;
     std::vector<config::AddressRange> trusted;
     std::vector<config::AddressRange> blocked;
+    std::vector<config::AddressRange> geo;
     std::vector<std::regex> patterns;
     TextScan exploits;
     std::unordered_set<std::string> hosts;
@@ -162,6 +166,9 @@ struct Settings {
         for (const auto& entry : config.blocked)
             if (auto range = config::AddressRange::parse(entry))
                 result->blocked.push_back(*range);
+        for (const auto& entry : config.geoRanges)
+            if (auto range = config::AddressRange::parse(entry))
+                result->geo.push_back(*range);
         try {
             for (const auto& pattern : config.blockedNamePatterns)
                 result->patterns.emplace_back(pattern);
@@ -227,6 +234,7 @@ struct Antibot::Impl {
 
     std::atomic<std::uint64_t> connections{0}, denied{0}, limboEntered{0}, limboPassed{0}, limboFailed{0}, attacks{0};
     std::atomic<std::uint32_t> limboNow{0};
+    std::unique_ptr<AddressFeeds> feeds;
 
     std::mutex verifiedMutex;
     std::unordered_map<std::uint64_t, Clock::time_point> verified;
@@ -409,9 +417,13 @@ Antibot::Antibot(const config::AntibotConfig& config, Clock::time_point start) {
     if (!settings)
         settings = Settings::make(config::AntibotConfig{});
     impl_ = std::make_unique<Impl>(std::move(*settings), start);
+    impl_->feeds = std::make_unique<AddressFeeds>([this] { return this->config(); });
 }
 
-Antibot::~Antibot() = default;
+Antibot::~Antibot() {
+    if (impl_)
+        impl_->feeds.reset();
+}
 
 std::expected<void, std::string> Antibot::apply(const config::AntibotConfig& config) {
     auto settings = Settings::make(config);
@@ -450,6 +462,14 @@ Verdict Antibot::connection(const OriginKey& origin, Clock::time_point now) {
         impl_->denied.fetch_add(1, std::memory_order_relaxed);
         return {Action::kDeny, Reason::kBlocked, 0};
     }
+    if ((!settings->geo.empty() && Settings::within(settings->geo, origin) &&
+         (!settings->config.geoOnlyInAttack || impl_->attackNow())) ||
+        impl_->feeds->imported(origin)) {
+        impl_->denied.fetch_add(1, std::memory_order_relaxed);
+        return {Action::kDeny, Reason::kBlocked, 0};
+    }
+    if (settings->config.antiVpnEnabled)
+        (void)impl_->feeds->proxyKnown(origin, now);
     auto& shard = impl_->shardOf(origin);
     const std::lock_guard lock{shard.mutex};
     bool fresh = false;
@@ -544,6 +564,14 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
         return deny(Reason::kNamePattern, 0);
 
     const bool verified = impl_->verifiedNow(*settings, name, origin, now);
+    std::int32_t proxyScore = 0;
+    if (c.antiVpnEnabled && !verified) {
+        if (const auto proxy = impl_->feeds->proxyKnown(origin, now); proxy && *proxy) {
+            if (c.antiVpnDeny)
+                return deny(Reason::kProxy, 0);
+            proxyScore = c.antiVpnScore;
+        }
+    }
     auto& shard = impl_->shardOf(origin);
     std::int32_t score = 0;
     bool banned = false;
@@ -553,6 +581,8 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
         const std::lock_guard lock{shard.mutex};
         bool fresh = false;
         auto& record = impl_->recordOf(shard, origin, *settings, now, fresh);
+        if (proxyScore > 0)
+            record.add(proxyScore, now);
         const auto nameHash = hashOf(name, false), skeleton = hashOf(name, true);
         const auto known = std::find(record.names.begin(), record.names.begin() + record.nameCount, nameHash) !=
                            record.names.begin() + record.nameCount;

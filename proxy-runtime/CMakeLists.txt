@@ -40,6 +40,7 @@ basalt_module(proxy-runtime-core
         src/ClientSessionLimbo.cpp
         src/antibot/AttackReport.cpp
         src/antibot/TcpProbe.cpp
+        src/antibot/AddressFeeds.cpp
         src/antibot/NbtShape.cpp
         src/antibot/TextScan.cpp
         src/antibot/Antibot.cpp

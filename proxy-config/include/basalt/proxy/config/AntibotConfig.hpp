@@ -29,6 +29,17 @@ struct AntibotConfig {
     std::uint32_t banSeconds = 600;
 
     std::vector<std::string> allowedHosts;
+    std::vector<std::string> blockedUrls;
+    std::int32_t listRefreshMinutes = 60;
+    bool antiVpnEnabled = false;
+    std::string antiVpnUrl;
+    std::string antiVpnMatch;
+    std::int32_t antiVpnScore = 60;
+    bool antiVpnDeny = false;
+    std::int32_t antiVpnQueriesPerMinute = 30;
+    std::int32_t antiVpnCacheHours = 24;
+    std::vector<std::string> geoRanges;
+    bool geoOnlyInAttack = false;
     std::vector<std::int32_t> blockedProtocols;
     std::int32_t maxHostLength = 255;
     std::int32_t unknownHostScore = 10;

@@ -3,6 +3,8 @@
 #include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/AntibotConfig.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -50,7 +52,8 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     Reader reader{std::string{directory} + "/antibot.toml", {}};
     reader.keys(&table,
                 {"general", "lists", "reputation", "handshake", "names", "status", "attack-mode", "limbo", "captcha",
-                 "passthrough", "notifications", "tcp", "kernel-block", "exploits", "bedrock", "verified"},
+                 "passthrough", "notifications", "tcp", "kernel-block", "exploits", "bedrock", "anti-vpn", "geo",
+                 "verified"},
                 "");
 
     const auto* general = reader.child(table, "general");
@@ -58,9 +61,14 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     reader.scalar(general, "enabled", result.enabled, "general.");
 
     const auto* lists = reader.child(table, "lists");
-    reader.keys(lists, {"trusted", "blocked", "blocked-files"}, "lists.");
+    reader.keys(lists, {"trusted", "blocked", "blocked-files", "blocked-urls", "refresh-minutes"}, "lists.");
     reader.stringList(lists, "trusted", result.trusted, "lists.");
     reader.stringList(lists, "blocked", result.blocked, "lists.");
+    reader.stringList(lists, "blocked-urls", result.blockedUrls, "lists.");
+    for (const auto& url : result.blockedUrls)
+        if (!url.starts_with("https://"))
+            reader.fail("lists.blocked-urls", "entry '" + url + "' must be an https:// address");
+    number(reader, lists, "refresh-minutes", result.listRefreshMinutes, 5, 10080, "lists.");
     std::vector<std::string> blockedFiles;
     reader.stringList(lists, "blocked-files", blockedFiles, "lists.");
     for (const auto& name : blockedFiles) {
@@ -282,8 +290,83 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     if (result.kernelBlockEnabled && result.kernelBlockCommand.empty())
         reader.fail("kernel-block.command", "is required when the block is enabled");
 
+    const auto* vpn = reader.child(table, "anti-vpn");
+    reader.keys(vpn, {"enabled", "url", "match", "score", "deny", "queries-per-minute", "cache-hours"}, "anti-vpn.");
+    reader.scalar(vpn, "enabled", result.antiVpnEnabled, "anti-vpn.");
+    reader.scalar(vpn, "url", result.antiVpnUrl, "anti-vpn.");
+    reader.scalar(vpn, "match", result.antiVpnMatch, "anti-vpn.");
+    reader.scalar(vpn, "deny", result.antiVpnDeny, "anti-vpn.");
+    number(reader, vpn, "score", result.antiVpnScore, 0, 1000, "anti-vpn.");
+    number(reader, vpn, "queries-per-minute", result.antiVpnQueriesPerMinute, 1, 100000, "anti-vpn.");
+    number(reader, vpn, "cache-hours", result.antiVpnCacheHours, 1, 8760, "anti-vpn.");
+    if (result.antiVpnEnabled && (!result.antiVpnUrl.starts_with("https://") || result.antiVpnMatch.empty()))
+        reader.fail("anti-vpn", "needs an https:// url and a non-empty match when enabled");
+
+    const auto* geo = reader.child(table, "geo");
+    reader.keys(geo, {"database", "blocked-countries", "blocked-asns", "only-in-attack"}, "geo.");
+    std::string geoDatabase;
+    std::vector<std::string> countries, asns;
+    reader.scalar(geo, "database", geoDatabase, "geo.");
+    reader.stringList(geo, "blocked-countries", countries, "geo.");
+    reader.stringList(geo, "blocked-asns", asns, "geo.");
+    reader.scalar(geo, "only-in-attack", result.geoOnlyInAttack, "geo.");
+    if (!geoDatabase.empty()) {
+        const auto path = std::filesystem::path{geoDatabase}.is_absolute()
+                              ? std::filesystem::path{geoDatabase}
+                              : std::filesystem::path{directory} / geoDatabase;
+        std::ifstream file{path};
+        if (!file)
+            reader.fail("geo.database", "cannot read " + path.string());
+        const auto upper = [](std::string text) {
+            for (auto& ch : text)
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            return text;
+        };
+        std::vector<std::string> wantedCountries, wantedAsns;
+        for (const auto& country : countries)
+            wantedCountries.push_back(upper(country));
+        for (const auto& asn : asns) {
+            auto text = upper(asn);
+            if (text.starts_with("AS"))
+                text.erase(0, 2);
+            wantedAsns.push_back(std::move(text));
+        }
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty() || line.front() == '#')
+                continue;
+            std::vector<std::string> fields;
+            std::size_t begin = 0;
+            while (begin <= line.size()) {
+                auto end = line.find(',', begin);
+                if (end == std::string::npos)
+                    end = line.size();
+                auto field = line.substr(begin, end - begin);
+                const auto first = field.find_first_not_of(" \t\r\"");
+                const auto last = field.find_last_not_of(" \t\r\"");
+                fields.push_back(first == std::string::npos ? std::string{}
+                                                            : upper(field.substr(first, last - first + 1)));
+                begin = end + 1;
+            }
+            if (fields.empty())
+                continue;
+            const bool country =
+                fields.size() > 1 && std::ranges::find(wantedCountries, fields[1]) != wantedCountries.end();
+            auto asnField = fields.size() > 2 ? fields[2] : std::string{};
+            if (asnField.starts_with("AS"))
+                asnField.erase(0, 2);
+            const bool asn = !asnField.empty() && std::ranges::find(wantedAsns, asnField) != wantedAsns.end();
+            if (country || asn)
+                result.geoRanges.push_back(fields[0]);
+        }
+        for (const auto& entry : result.geoRanges)
+            if (!config::AddressRange::parse(entry))
+                reader.fail("geo.database", "invalid range '" + entry + "'");
+    }
+
     const auto* bedrock = reader.child(table, "bedrock");
-    reader.keys(bedrock, {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack", "connect-score"}, "bedrock.");
+    reader.keys(bedrock, {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack", "connect-score"},
+                "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrockEnabled, "bedrock.");
     reader.scalar(bedrock, "xbox-in-attack", result.bedrockXboxInAttack, "bedrock.");
     number(reader, bedrock, "packets-per-second", result.bedrockPacketsPerSecond, 0, 1000000, "bedrock.");

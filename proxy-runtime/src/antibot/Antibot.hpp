@@ -52,6 +52,7 @@ enum class Reason : std::uint8_t {
     kTimeout,
     kPassthrough,
     kProtocol,
+    kProxy,
     kExploit
 };
 

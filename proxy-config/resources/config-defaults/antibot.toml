@@ -11,6 +11,10 @@ enabled = true
 # Origins that are never scored, held in the limbo or banned: IP addresses or CIDR ranges, IPv4 or IPv6.
 # Put your own monitoring, load balancer health checks and staff addresses here.
 trusted = []
+# https:// addresses of plain text lists (one address or CIDR range per line) to download and block. Downloads are
+# limited to 4 MiB and 20 seconds each, and repeat every refresh-minutes.
+blocked-urls = []
+refresh-minutes = 60
 # Plain text files of addresses or CIDR ranges to block, one per line, # starts a comment. A relative path is read from
 # this config directory; the files are read on start and on reload, so a scheduled download keeps one current.
 blocked-files = []
@@ -193,6 +197,30 @@ only-in-attack = true
 # The command and its arguments, run without a shell. {ip} is the address and {seconds} the ban length. For example:
 # ["nft", "add", "element", "inet", "filter", "basalt_banned", "{", "{ip}", "timeout", "{seconds}s", "}"]
 command = []
+
+[anti-vpn]
+# Ask a provider whether a new IPv4 address is a proxy or VPN. The answer is cached, so the first login from an
+# address is not held back: it is judged when the answer is known. You supply the provider and its key.
+enabled = false
+# https:// address with {ip} where the address goes, key included. Example: "https://provider.example/check/{ip}?key=..."
+url = ""
+# Text that appears in the provider's answer when the address is a proxy, e.g. "\"proxy\":true".
+match = ""
+# Score added to the origin when the answer says proxy.
+score = 60
+# Refuse the login at once instead of adding score.
+deny = false
+# Most lookups each minute, and hours an answer is kept.
+queries-per-minute = 30
+cache-hours = 24
+
+[geo]
+# Block origins by country or network using your own database: a text file of lines "cidr,country,asn" (for example
+# "203.0.113.0/24,US,64500"), which you can export from the database you license. Nothing is bundled.
+database = ""
+blocked-countries = []
+blocked-asns = []
+only-in-attack = false
 
 [bedrock]
 # Apply the antibot to Bedrock players too. They share the reputation, bans and attack mode of Java players by address,
