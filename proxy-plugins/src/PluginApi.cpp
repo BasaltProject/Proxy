@@ -337,6 +337,18 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 0;
     });
     lua.setField("unverify");
+    wire::lua::pushHostFunction(lua, "antibot.ban", [server](LuaArgs& args) {
+        const std::string address = args.checkString(1);
+        args.pushBoolean(server->hooks_.antibotBan && server->hooks_.antibotBan(address, true));
+        return 1;
+    });
+    lua.setField("ban");
+    wire::lua::pushHostFunction(lua, "antibot.unban", [server](LuaArgs& args) {
+        const std::string address = args.checkString(1);
+        args.pushBoolean(server->hooks_.antibotBan && server->hooks_.antibotBan(address, false));
+        return 1;
+    });
+    lua.setField("unban");
     wire::lua::pushHostFunction(lua, "antibot.under_attack", [server](LuaArgs& args) {
         args.pushBoolean(server->hooks_.antibotAttack && server->hooks_.antibotAttack());
         return 1;
@@ -500,13 +512,13 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
             if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
                 name != kKickEvent && name != kPingEvent && name != kLoginEvent && name != kMessageEvent &&
                 name != kPreConnectEvent && name != kCommandEvent && name != kAntibotEvent)
-                return args.fail(
-                    "there is no event called '" + name + "'; this proxy has plugin.enable, plugin.disable, " +
-                    std::string{kJoinEvent} + ", " + std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} +
-                    ", " + std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " + std::string{kPingEvent} +
-                    ", " + std::string{kLoginEvent} + ", " + std::string{kMessageEvent} + ", " +
-                    std::string{kPreConnectEvent} + ", " + std::string{kCommandEvent} + ", " +
-                    std::string{kAntibotEvent});
+                return args.fail("there is no event called '" + name +
+                                 "'; this proxy has plugin.enable, plugin.disable, " + std::string{kJoinEvent} + ", " +
+                                 std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} + ", " +
+                                 std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " +
+                                 std::string{kPingEvent} + ", " + std::string{kLoginEvent} + ", " +
+                                 std::string{kMessageEvent} + ", " + std::string{kPreConnectEvent} + ", " +
+                                 std::string{kCommandEvent} + ", " + std::string{kAntibotEvent});
             PluginHost::Plugin::Handler handler;
             handler.observer = observer;
             handler.function = LuaRef::of(args.state(), at);

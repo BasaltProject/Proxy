@@ -10,8 +10,8 @@
 #include <basalt/wire/protocol/ProtocolState.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/configuration/ConfigurationPackets.hpp>
-#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/PalettedContainer.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/PlayerStatePackets.hpp>
 #include <basalt/wire/protocol/play/WorldPackets.hpp>
 
@@ -87,8 +87,8 @@ std::vector<Native> configIntroPackets() {
     result.push_back(native(ProtocolState::Configuration, configuration::UpdateEnabledFeaturesPacket::kId,
                             configuration::UpdateEnabledFeaturesPacket{{"minecraft:vanilla"}}));
     result.push_back(native(ProtocolState::Configuration, configuration::SelectKnownPacksPacket::kClientboundId,
-                            configuration::SelectKnownPacksPacket{
-                                {configuration::KnownPack{"minecraft", "core", std::string{buildInfo::kMinecraftVersion}}}}));
+                            configuration::SelectKnownPacksPacket{{configuration::KnownPack{
+                                "minecraft", "core", std::string{buildInfo::kMinecraftVersion}}}}));
     return result;
 }
 
@@ -101,9 +101,9 @@ std::vector<Native> configRestPackets() {
             packet.entries.push_back(configuration::RegistryEntry{"minecraft:" + std::string{entry}, std::nullopt});
         result.push_back(native(ProtocolState::Configuration, configuration::RegistryDataPacket::kId, packet));
     }
-    for (const std::string_view empty : {"minecraft:trim_pattern", "minecraft:sulfur_cube_archetype",
-                                         "minecraft:enchantment", "minecraft:test_environment",
-                                         "minecraft:test_instance", "minecraft:dialog", "minecraft:timeline"})
+    for (const std::string_view empty :
+         {"minecraft:trim_pattern", "minecraft:sulfur_cube_archetype", "minecraft:enchantment",
+          "minecraft:test_environment", "minecraft:test_instance", "minecraft:dialog", "minecraft:timeline"})
         result.push_back(native(ProtocolState::Configuration, configuration::RegistryDataPacket::kId,
                                 configuration::RegistryDataPacket{std::string{empty}, {}}));
     result.push_back(native(ProtocolState::Configuration, configuration::TagsPacket::kId, configuration::TagsPacket{}));
@@ -127,12 +127,13 @@ std::vector<Native> playIntroPackets(std::int32_t dropHeight) {
     result.push_back(native(ProtocolState::Play, play::LoginPlayPacket::kId, login));
     result.push_back(native(ProtocolState::Play, play::ClientboundPlayerAbilitiesPacket::kId,
                             play::ClientboundPlayerAbilitiesPacket{.invulnerable = true}));
-    result.push_back(native(
-        ProtocolState::Play, play::SpawnPositionPacket::kId,
-        play::SpawnPositionPacket{{"minecraft:overworld", {8, static_cast<std::int32_t>(kLimboFloorY), 8}}, 0.0F, 0.0F}));
+    result.push_back(native(ProtocolState::Play, play::SpawnPositionPacket::kId,
+                            play::SpawnPositionPacket{
+                                {"minecraft:overworld", {8, static_cast<std::int32_t>(kLimboFloorY), 8}}, 0.0F, 0.0F}));
     result.push_back(native(ProtocolState::Play, play::GameEventPacket::kId,
                             play::GameEventPacket{play::GameEventPacket::kLevelChunksLoadStart, 0.0F}));
-    result.push_back(native(ProtocolState::Play, play::SetChunkCacheCenterPacket::kId, play::SetChunkCacheCenterPacket{0, 0}));
+    result.push_back(
+        native(ProtocolState::Play, play::SetChunkCacheCenterPacket::kId, play::SetChunkCacheCenterPacket{0, 0}));
     result.push_back(empty(ProtocolState::Play, play::kChunkBatchStartId));
     const auto sections = chunkSections();
     const auto surface = heightmap(play::HeightmapType::WorldSurface);
@@ -147,8 +148,8 @@ std::vector<Native> playIntroPackets(std::int32_t dropHeight) {
             chunk.chunkData = sections;
             result.push_back(native(ProtocolState::Play, play::MapChunkPacket::kId, chunk));
         }
-    result.push_back(native(ProtocolState::Play, play::ChunkBatchFinishedPacket::kId,
-                            play::ChunkBatchFinishedPacket{chunks}));
+    result.push_back(
+        native(ProtocolState::Play, play::ChunkBatchFinishedPacket::kId, play::ChunkBatchFinishedPacket{chunks}));
     play::PlayerPositionPacket position;
     position.teleportId = kLimboTeleportId;
     position.x = kLimboSpawnX;

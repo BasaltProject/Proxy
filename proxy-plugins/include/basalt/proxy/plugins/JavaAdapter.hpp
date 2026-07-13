@@ -11,8 +11,7 @@ namespace basalt::proxy::plugins {
 struct JavaRuntimeOptions {
     /// Where the jars to load are; no virtual machine starts when none of them belongs to a foreign proxy.
     std::string pluginsDirectory = "plugins";
-    /// Holds shim/ (the machine and its class library) plus bungee/ and velocity/ (a facade jar and a lib/ folder
-    /// each); BASALT_SHIM_DIR overrides it.
+    /// Holds shim/, bungee/ and velocity/ (a facade jar and a lib/ folder each); BASALT_SHIM_DIR overrides it.
     std::string runtimeDirectory = ".basalt";
 };
 

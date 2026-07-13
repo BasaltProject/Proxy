@@ -42,8 +42,7 @@ struct BungeeContext {
         toBackend;
 };
 
-/// The BungeeCord channel, answered natively; the same operations a Lua plugin has through players, servers and
-/// channels. Returns false when the payload is malformed or names no subchannel this proxy answers.
+/// Answers the BungeeCord channel natively; false when the payload is malformed or the subchannel is unknown.
 [[nodiscard]] bool handleBungeeMessage(const BungeeContext& context, std::string_view source,
                                        std::span<const std::uint8_t> payload);
 

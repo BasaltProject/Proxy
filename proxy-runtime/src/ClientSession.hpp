@@ -130,8 +130,7 @@ public:
     /// Owner only. Lets plugin listeners see, edit and cancel the packets this session relays.
     void attachPackets(std::shared_ptr<wire::plugins::PluginPacketBus> bus, std::uint64_t connection,
                        std::size_t maxBytes);
-    /// Owner only. Sends a plugin's packet toward the client or the backend; false when the session is in another
-    /// phase.
+    /// Owner only. Sends a plugin's packet toward the client or the backend; false in another phase.
     [[nodiscard]] bool pluginPacket(bool serverbound, std::int32_t phase, std::int32_t id,
                                     std::span<const std::uint8_t> body);
     bool announced = false;
@@ -159,6 +158,7 @@ public:
     [[nodiscard]] std::array<BackendWatch, 3> backendWatches() const;
     /// Identity of the active and candidate transports; changes whenever one is replaced or dropped.
     [[nodiscard]] std::array<std::uint64_t, 2> backendSerials() const noexcept;
+
     [[nodiscard]] bool dialing() const noexcept { return dial_ != nullptr; }
 
     [[nodiscard]] bool frontendSuspended() const { return frontendPaused_ && output_.readableBytes() == 0; }

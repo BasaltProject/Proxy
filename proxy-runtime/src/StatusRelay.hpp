@@ -16,8 +16,7 @@
 
 namespace basalt::proxy::runtime::detail {
 
-/// Short-lived copies of what servers answer to a status ping. Never blocks a caller; one thread fetches, asleep when
-/// idle.
+/// Short-lived copies of server status answers; never blocks a caller, one thread fetches.
 class StatusRelay {
 public:
     using Resolve = std::function<std::optional<ProbeTarget>(const std::string& server)>;

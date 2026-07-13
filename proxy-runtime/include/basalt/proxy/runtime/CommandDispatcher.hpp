@@ -134,8 +134,7 @@ public:
 
     void removeOwners(std::string_view ownerPrefix);
 
-    /// Applies renames, removals, permissions and custom commands; the new configuration takes effect for the next
-    /// line.
+    /// Applies renames, removals, permissions and custom commands from the next line on.
     void configure(std::shared_ptr<const wire::config::CommandsConfig> config);
 
     void renderCustomWith(TextRenderer renderer);

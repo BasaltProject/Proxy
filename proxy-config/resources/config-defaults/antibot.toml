@@ -64,6 +64,10 @@ names-per-origin-score = 40
 requests-per-second = 5
 # While an attack is under way, only let an origin log in if it asked for the server list in the last
 # ping-validity-seconds. Players using Direct Connect do not ping first, so this is off until you want it.
+# Milliseconds an answer to the same (protocol, host, address) is reused instead of being built again. 0 turns it off.
+cache-ms = 1000
+# Reuse answers only while attack mode is on.
+cache-only-in-attack = true
 require-ping-in-attack = false
 # Points for logging in without a recent ping while the above is off. 0 never scores it.
 no-ping-score = 5
@@ -96,7 +100,7 @@ cooldown-seconds = 60
 #   "always"     every login that is not trusted or verified
 mode = "attack"
 suspicious-score = 40
-# What to do with a client older than 1.20.2, which has no configuration phase to come back through. "skip" lets it
+# What to do with a client older than 1.20.5, which the limbo cannot hold (no matching configuration phase). "skip" lets it
 # straight to the backend (it is still scored); "kick" refuses it while the limbo would have been used.
 legacy-clients = "skip"
 # Seconds a client has to finish the limbo.

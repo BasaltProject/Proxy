@@ -136,10 +136,14 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     }
 
     const auto* status = reader.child(table, "status");
-    reader.keys(status, {"requests-per-second", "require-ping-in-attack", "no-ping-score", "ping-validity-seconds"},
+    reader.keys(status,
+                {"requests-per-second", "require-ping-in-attack", "no-ping-score", "ping-validity-seconds", "cache-ms",
+                 "cache-only-in-attack"},
                 "status.");
     number(reader, status, "requests-per-second", result.statusPerSecond, 0, 1000000, "status.");
     reader.scalar(status, "require-ping-in-attack", result.requirePingInAttack, "status.");
+    number(reader, status, "cache-ms", result.statusCacheMs, 0, 60000, "status.");
+    reader.scalar(status, "cache-only-in-attack", result.statusCacheOnlyInAttack, "status.");
     number(reader, status, "no-ping-score", result.noPingScore, 0, 1000000, "status.");
     number(reader, status, "ping-validity-seconds", result.pingValiditySeconds, 1, 604800, "status.");
 

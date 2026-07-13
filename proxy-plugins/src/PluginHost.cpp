@@ -738,7 +738,8 @@ void PluginHost::callAntibot(Plugin& plugin, const runtime::PlayerEvent& event) 
                 const auto second = event.uuid.find(':', first + 1);
                 lua.pushString(event.uuid.substr(0, first));
                 lua.setField("action");
-                lua.pushString(first == std::string::npos ? std::string{} : event.uuid.substr(first + 1, second - first - 1));
+                lua.pushString(first == std::string::npos ? std::string{}
+                                                          : event.uuid.substr(first + 1, second - first - 1));
                 lua.setField("reason");
                 lua.pushInteger(second == std::string::npos ? 0 : std::stoll(event.uuid.substr(second + 1)));
                 lua.setField("skipped");

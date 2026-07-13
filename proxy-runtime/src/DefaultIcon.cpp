@@ -13,7 +13,7 @@ constexpr int kSize = 64;
 constexpr double kCell = 9.0;
 
 std::uint32_t crc32(const std::uint8_t* data, std::size_t size, std::uint32_t crc = 0xFFFFFFFFU) {
-    static const std::array<std::uint32_t, 256> table = [] {
+    static const std::array<std::uint32_t, 256> kTable = [] {
         std::array<std::uint32_t, 256> built{};
         for (std::uint32_t index = 0; index < 256; ++index) {
             std::uint32_t value = index;
@@ -24,7 +24,7 @@ std::uint32_t crc32(const std::uint8_t* data, std::size_t size, std::uint32_t cr
         return built;
     }();
     for (std::size_t index = 0; index < size; ++index)
-        crc = table[(crc ^ data[index]) & 0xFFU] ^ (crc >> 8);
+        crc = kTable[(crc ^ data[index]) & 0xFFU] ^ (crc >> 8);
     return crc;
 }
 

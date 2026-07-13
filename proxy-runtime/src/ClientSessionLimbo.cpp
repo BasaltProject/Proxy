@@ -3,7 +3,6 @@
 #include "RelayCounters.hpp"
 #include "antibot/Antibot.hpp"
 
-#include <basalt/wire/text/MiniMessage.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/multiversion/java/JavaTranslators.hpp>
@@ -17,6 +16,7 @@
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/WorldPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
+#include <basalt/wire/text/MiniMessage.hpp>
 
 #include <algorithm>
 #include <map>

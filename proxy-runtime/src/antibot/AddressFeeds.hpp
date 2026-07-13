@@ -14,8 +14,7 @@
 
 namespace basalt::proxy::runtime::antibot {
 
-/// Background downloads for the antibot: block lists from URLs and anti-VPN lookups, all bounded in size, time and
-/// rate.
+/// Bounded background downloads for the antibot: URL block lists and anti-VPN lookups.
 class AddressFeeds {
 public:
     using ConfigSource = std::function<std::shared_ptr<const config::AntibotConfig>()>;

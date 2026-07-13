@@ -37,9 +37,8 @@ void AttackReport::kernelBlock(const Event& event) {
     }
     std::vector<std::string> words;
     for (std::string word : config->kernelBlockCommand) {
-        for (const auto& [token, value] :
-             {std::pair<std::string_view, std::string>{"{ip}", event.origin},
-              {"{seconds}", std::to_string(config->banSeconds)}})
+        for (const auto& [token, value] : {std::pair<std::string_view, std::string>{"{ip}", event.origin},
+                                           {"{seconds}", std::to_string(config->banSeconds)}})
             for (auto at = word.find(token); at != std::string::npos; at = word.find(token, at + value.size()))
                 word.replace(at, token.size(), value);
         words.push_back(std::move(word));

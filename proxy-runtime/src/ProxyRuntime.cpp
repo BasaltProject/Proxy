@@ -957,6 +957,13 @@ bool bedrockName(std::string_view name) {
 
 int ProxyRuntime::bedrockPacketsPerSecond() const { return impl_->access.antibot.config()->bedrockPacketsPerSecond; }
 
+int ProxyRuntime::statusCacheMs() const {
+    const auto config = impl_->access.antibot.config();
+    if (!config->enabled || config->statusCacheMs <= 0)
+        return 0;
+    return !config->statusCacheOnlyInAttack || antibotAttack() ? config->statusCacheMs : 0;
+}
+
 int ProxyRuntime::bedrockLoginSeconds() const { return impl_->access.antibot.config()->bedrockLoginSeconds; }
 
 bool ProxyRuntime::bedrockOffline(std::string_view address, bool connecting) {

@@ -224,8 +224,35 @@ int run(const cliCommand::Run& command) {
         services.packets = packetRegistry;
         services.packetMaxBytes = configuration->plugins.packetMaxKib * 1024;
     }
-    services.status = [&serverList](std::int32_t protocol, std::string_view host, std::string_view address) {
-        return (*serverList)->statusFor(protocol, host, address);
+
+    struct StatusCache {
+        std::mutex mutex;
+        std::unordered_map<
+            std::string, std::pair<std::chrono::steady_clock::time_point, wire::protocol::status::ServerStatusPayload>>
+            entries;
+    };
+
+    auto statusCache = std::make_shared<StatusCache>();
+    services.status = [&serverList, &runtimeRef, statusCache](std::int32_t protocol, std::string_view host,
+                                                              std::string_view address) {
+        auto* live = runtimeRef.load(std::memory_order_acquire);
+        const auto ttl = live != nullptr ? live->statusCacheMs() : 0;
+        if (ttl <= 0)
+            return (*serverList)->statusFor(protocol, host, address);
+        const auto now = std::chrono::steady_clock::now();
+        const std::string key = std::to_string(protocol) + '|' + std::string{host} + '|' + std::string{address};
+        {
+            const std::lock_guard lock{statusCache->mutex};
+            if (const auto found = statusCache->entries.find(key);
+                found != statusCache->entries.end() && now - found->second.first < std::chrono::milliseconds{ttl})
+                return found->second.second;
+        }
+        auto fresh = (*serverList)->statusFor(protocol, host, address);
+        const std::lock_guard lock{statusCache->mutex};
+        if (statusCache->entries.size() >= 4096)
+            statusCache->entries.clear();
+        statusCache->entries[key] = {now, fresh};
+        return fresh;
     };
     const auto playerCommandSpecs = [&dispatcher, playerSource](std::string_view player) {
         return dispatcher.specs(playerSource(player));
@@ -551,6 +578,10 @@ int run(const cliCommand::Run& command) {
         hooks.antibotUnverify = [&runtime](std::string_view player) { runtime->antibotUnverify(player); };
         hooks.antibotVerified = [&runtime](std::string_view player) { return runtime->antibotVerified(player); };
         hooks.antibotAttack = [&runtime] { return runtime->antibotAttack(); };
+        hooks.antibotBan = [&runtime](std::string_view address, bool ban) {
+            const std::array<std::string_view, 2> words{ban ? "ban" : "unban", address};
+            return runtime->antibotCommand(words).starts_with("Origin");
+        };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
         };

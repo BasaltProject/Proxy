@@ -111,8 +111,7 @@ struct RuntimeServices {
     std::function<void(std::string_view player, std::string_view reason)> playerKick = {};
     /// Told the host and protocol of every server-list request answered. Called on session owner threads.
     std::function<void(std::string_view host, std::int32_t protocol)> statusPing = {};
-    /// Told a player's name and uuid once they are authenticated, before any backend is chosen. A returned MiniMessage
-    /// turns the player away with that text.
+    /// Told name and uuid once a player is authenticated; a returned MiniMessage turns them away with that text.
     std::function<std::optional<std::string>(std::string_view player, std::string_view uuid, std::string_view address)>
         playerLogin = {};
     /// The text of one of the proxy's own refusals by its messages.toml key; empty keeps the built-in English one.
@@ -133,8 +132,7 @@ struct RuntimeServices {
     std::function<wire::protocol::status::ServerStatusPayload(std::int32_t protocol, std::string_view host,
                                                               std::string_view address)>
         status = {};
-    /// Plugin listeners for the packets sessions relay; unset costs nothing. Runs on owner threads and may block
-    /// briefly.
+    /// Plugin listeners for relayed packets; unset costs nothing. Runs on owner threads and may block briefly.
     std::shared_ptr<wire::plugins::PluginPacketBus> packets = {};
     /// Packets larger than this go past plugin listeners untouched.
     std::size_t packetMaxBytes = 256 * 1024;
@@ -213,8 +211,7 @@ public:
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.
     [[nodiscard]] bool kickPlayer(std::string_view player, std::string_view reason);
-    /// Thread-safe. Hands a packet (phase, id and body) to the session owners to send toward the client, or toward the
-    /// backend as if the client had sent it; true once handed over.
+    /// Thread-safe. Hands a packet to the session owners toward the client or the backend; true once handed over.
     [[nodiscard]] bool sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                                   std::span<const std::uint8_t> body);
     /// Thread-safe. The same as tellPlayer and kickPlayer with a finished component, no MiniMessage in between.
@@ -241,6 +238,8 @@ public:
     void bedrockFailed(std::string_view address);
     [[nodiscard]] int bedrockPacketsPerSecond() const;
     [[nodiscard]] int bedrockLoginSeconds() const;
+    /// Milliseconds a server-list answer may be reused right now, 0 when it may not.
+    [[nodiscard]] int statusCacheMs() const;
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

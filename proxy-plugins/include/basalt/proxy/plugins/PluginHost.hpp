@@ -84,8 +84,7 @@ struct PluginHooks {
     runtime::CommandDispatcher* commands = nullptr;
     /// Whether a player's group grants a permission node.
     std::function<bool(std::string_view player, std::string_view node)> hasPermission;
-    /// Sends a packet toward a player's client, or toward its backend as if the client had sent it; true once handed
-    /// over.
+    /// Sends a packet toward a player's client, or its backend as if the client sent it; true once handed over.
     std::function<bool(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                        std::span<const std::uint8_t> body)>
         packet;
@@ -103,6 +102,7 @@ struct PluginHooks {
     std::function<void(std::string_view player)> antibotUnverify;
     std::function<bool(std::string_view player)> antibotVerified;
     std::function<bool()> antibotAttack;
+    std::function<bool(std::string_view address, bool ban)> antibotBan;
 };
 
 /// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.

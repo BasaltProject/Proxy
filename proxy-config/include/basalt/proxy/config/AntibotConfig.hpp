@@ -50,6 +50,8 @@ struct AntibotConfig {
     std::int32_t namesPerOriginScore = 40;
 
     std::int32_t statusPerSecond = 5;
+    std::int32_t statusCacheMs = 1000;
+    bool statusCacheOnlyInAttack = true;
     bool requirePingInAttack = false;
     std::int32_t noPingScore = 5;
     std::uint32_t pingValiditySeconds = 600;

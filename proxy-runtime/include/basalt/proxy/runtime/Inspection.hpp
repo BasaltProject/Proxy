@@ -7,8 +7,7 @@
 
 namespace basalt::proxy::runtime {
 
-/// Process-wide relay counters since start; sessions ended while in the handshake or status, login, configuration,
-/// play.
+/// Process-wide relay counters since start, with the sessions ended in each phase.
 struct RelayStats {
     std::uint64_t logins = 0;
     std::uint64_t backendChanges = 0;
