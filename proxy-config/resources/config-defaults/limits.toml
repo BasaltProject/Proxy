@@ -22,7 +22,7 @@ rate-limit = 0
 [spam]
 # Seconds of chat, or of commands, a player may send at the pace of one message a second before being
 # kicked for spamming, as vanilla's chat-spam-threshold-seconds and command-spam-threshold-seconds do.
-# Operators (the ones listed in plugins.toml) are never kicked. 0 turns the kick off.
+# 0 turns the kick off.
 chat-threshold-seconds = 10
 command-threshold-seconds = 10
 
