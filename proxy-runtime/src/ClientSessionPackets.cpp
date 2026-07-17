@@ -45,7 +45,7 @@ public:
     [[nodiscard]] std::uint64_t connectionId() const override { return session_ ? session_->connectionId_ : 0; }
 
     [[nodiscard]] std::string address() const override {
-        return session_ ? session_->connection_.remoteAddress() : std::string{};
+        return session_ ? session_->clientAddress() : std::string{};
     }
 
     [[nodiscard]] std::uint16_t port() const override { return session_ ? session_->connection_.remotePort() : 0; }

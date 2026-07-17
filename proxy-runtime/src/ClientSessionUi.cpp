@@ -99,7 +99,7 @@ void ClientSession::uiTick(Clock::time_point now) {
             return;
         }
         uiRequest_.emplace(buildInfo::kProtocolVersion, virtualHost_,
-                           std::optional<std::string>{connection_.remoteAddress()},
+                           std::optional<std::string>{clientAddress()},
                            std::optional<std::string>{profile_->name});
         uiContext_ = wire::common::placeholder::PlaceholderContext{}.with(wire::config::pingSlot(), &*uiRequest_);
         ui_ = std::make_unique<wire::config::PlayerUi>(

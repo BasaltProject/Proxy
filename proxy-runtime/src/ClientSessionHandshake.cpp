@@ -158,7 +158,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
             if (playerLogin_)
                 if (const auto turnedAway =
-                        playerLogin_(profile_->name, profile_->id.toString(), connection_.remoteAddress()))
+                        playerLogin_(profile_->name, profile_->id.toString(), clientAddress()))
                     return refuseMiniMessage(*turnedAway);
             return afterLogin();
         }
@@ -215,7 +215,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             return true;
         }
         const std::vector<std::uint8_t> answer =
-            status_(statusProtocol_, virtualHost_, connection_.remoteAddress(), nullptr);
+            status_(statusProtocol_, virtualHost_, clientAddress(), nullptr);
         if (answer.empty() || !queueOrdered(answer))
             return false;
         state_ = State::Ping;

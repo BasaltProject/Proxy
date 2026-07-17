@@ -33,8 +33,8 @@ bool ClientSession::ask(DecisionKind kind, std::string_view backend, std::string
         request.player = profile_->name;
         request.uuid = profile_->id.toString();
     }
-    request.address = connection_.remoteAddress();
-    request.port = connection_.remotePort();
+    request.address = clientAddress();
+    request.port = clientPort();
     request.host = virtualHost_;
     request.backend = backend;
     request.from = from;
@@ -72,7 +72,7 @@ bool ClientSession::routeInitial() {
 
 bool ClientSession::queueStatus(const DecisionResult* changes) {
     const std::vector<std::uint8_t> answer =
-        status_(statusProtocol_, virtualHost_, connection_.remoteAddress(), changes);
+        status_(statusProtocol_, virtualHost_, clientAddress(), changes);
     return !answer.empty() && queueOrdered(answer);
 }
 
