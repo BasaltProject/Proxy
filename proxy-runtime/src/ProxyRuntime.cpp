@@ -677,7 +677,8 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
             impl->owners.push_back(std::make_unique<Impl::Owner>(*impl));
         auto bound = wire::io::TcpListener::bind(*address, 128, impl->config.network.dualStack);
         if (!bound || !bound->setNonBlocking())
-            return std::unexpected("could not bind the public listener");
+            return std::unexpected("could not bind the public listener on " + impl->config.network.bind + ":" +
+                                   std::to_string(impl->config.network.port) + ", is the port already in use?");
         auto port = bound->localPort();
         if (!port)
             return std::unexpected("could not query the listener port");

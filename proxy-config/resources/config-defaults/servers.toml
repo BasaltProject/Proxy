@@ -73,8 +73,9 @@ forwarding = "none"
 secret = ""
 # Name of the profile property that carries the token for safenet. Only valid with forwarding = "safenet".
 # property-name = "safenet-token"
-# Let this server ask the proxy for GetServer, GetServers, UUID and moving its own players with Connect, on the
-# bungeecord:main channel. Messages sent by a player's client are always discarded. Other subcommands are unsupported.
+# Let this server use the BungeeCord messaging channel (bungeecord:main) to ask the proxy for GetServer, GetServers,
+# PlayerCount, PlayerList, UUID, IP, ServerIP and Forward, and to move its players with Connect.
+# Messages sent by a player's client are always discarded.
 bungee-messages = false
 
 # More servers go here, each with its own name. The name is what /server and /send take, and what the tables above
