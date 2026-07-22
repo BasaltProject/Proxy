@@ -480,10 +480,10 @@ void PluginHost::run(std::stop_token stop) {
     }
     // Enable runs here rather than while loading so a handler can wait, schedule and look at the players.
     for (auto& plugin : plugins_) {
-        if (plugin->broken)
-            continue;
         for (const wire::lua::LuaRef& handler : plugin->onEnable) {
             const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
+            if (plugin->broken)
+                break;
             call(*plugin, handler, {}, "plugin.enable");
         }
     }
