@@ -252,6 +252,13 @@ struct RemoteApi::Impl {
             return failure(404, "no such server");
         if (!hooks.playerOnline || !hooks.playerOnline(name))
             return failure(404, "no such player (names are case-sensitive)");
+        if (const auto sessions = hooks.runtime->sessions(kSessionsTimeout)) {
+            const auto found = std::ranges::find_if(*sessions, [&](const auto& s) { return s.name == name; });
+            if (found != sessions->end() && found->phase != "play")
+                return failure(409, "the player is not in play");
+            if (found != sessions->end() && found->backend == backend)
+                return failure(409, "the player is already on that server");
+        }
         return run(peer, "send " + std::string{name} + " " + backend);
     }
 

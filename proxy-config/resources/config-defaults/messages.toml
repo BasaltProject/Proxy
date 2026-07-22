@@ -101,8 +101,8 @@ glist-total = "<yellow>Total players online: %total%</yellow>"
 
 # /server and /send. %server% and %player% are what the command named.
 server-current = "<yellow>You are connected to %server%. Available: %servers%. Groups: %groups%</yellow>"
-server-sending = "<green>Sending you to %server%.</green>"
-send-ok = "<green>Sending %player% to %server%.</green>"
+server-sending = "<green>Connecting you to %server%.</green>"
+send-ok = "<green>Connecting %player% to %server%.</green>"
 # What the proxy answered to a move, after waiting for it: the player was not found, cannot move now (not in play, already
 # there or another change is under way), the queue was full or the proxy stopped first.
 send-not-found = "<red>%player% is not online.</red>"
