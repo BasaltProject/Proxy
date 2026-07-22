@@ -515,8 +515,8 @@ int run(const cliCommand::Run& command) {
 #if defined(BASALT_HAS_SHIM)
         proxy::plugins::JavaRuntimeOptions javaOptions;
         javaOptions.pluginsDirectory = settings.directory;
-        if (const char* runtime = std::getenv("BASALT_SHIM_DIR"))
-            javaOptions.runtimeDirectory = runtime;
+        if (const char* shimDirectory = std::getenv("BASALT_SHIM_DIR"))
+            javaOptions.runtimeDirectory = shimDirectory;
         settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {
             return proxy::bungee::createBungeeAdapter(javaOptions, hooks);
         });

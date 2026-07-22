@@ -113,7 +113,8 @@ if(ANDROID)
     target_link_options(basalt-proxy PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
 endif()
 # wire-io comes through the core already; naming it twice makes the linker say so.
-target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins basalt::proxy-remote)
+target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins basalt::proxy-remote
+                      basalt::warnings basalt::sanitizers basalt::parity basalt::platform)
 if(TARGET basalt::wire-shim)
     target_link_libraries(basalt-proxy PRIVATE basalt::proxy-bungee basalt::proxy-velocity)
     target_compile_definitions(basalt-proxy PRIVATE BASALT_HAS_SHIM=1)
