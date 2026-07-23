@@ -57,4 +57,14 @@ void AccessPolicy::apply(const config::ProxyConfig& config) {
     settings_ = std::move(fresh);
 }
 
+std::shared_ptr<const wire::auth::ServicesKeySet> AccessPolicy::services() const {
+    const std::lock_guard lock{mutex_};
+    return services_;
+}
+
+void AccessPolicy::setServices(std::shared_ptr<const wire::auth::ServicesKeySet> keys) {
+    const std::lock_guard lock{mutex_};
+    services_ = std::move(keys);
+}
+
 } // namespace basalt::proxy::runtime::detail

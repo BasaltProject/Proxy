@@ -144,7 +144,7 @@ void PluginHost::stepDecision(const std::shared_ptr<DecisionRun>& run, std::size
                 result.reason.clear();
                 if (run->reason != run->request.text)
                     result.text = run->reason;
-            } else if (kind == Kind::kCommand) {
+            } else if (kind == Kind::kCommand || kind == Kind::kChat) {
                 if (run->text != run->request.text)
                     result.text = run->text;
             } else if (kind == Kind::kPing) {
@@ -187,10 +187,16 @@ void PluginHost::stepDecision(const std::shared_ptr<DecisionRun>& run, std::size
                 text("server", run->server);
                 text("from_server", run->request.from);
             }
-            if (kind == Kind::kChat)
+            if (kind == Kind::kChat) {
                 text("message", run->text);
-            if (kind == Kind::kCommand)
+                lua.pushBoolean(run->request.signedContent);
+                lua.setField("signed");
+            }
+            if (kind == Kind::kCommand) {
                 text("command", run->text);
+                lua.pushBoolean(run->request.signedContent);
+                lua.setField("signed");
+            }
             if (kind == Kind::kKick)
                 text("reason", run->reason);
             if (kind == Kind::kPing) {

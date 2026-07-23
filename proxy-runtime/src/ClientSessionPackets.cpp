@@ -164,6 +164,11 @@ ClientSession::Tapped ClientSession::tap(wire::io::ByteBuffer& source, bool serv
     else
         packet.backend.clear();
     packet.editable = tapEditable(serverbound, id);
+    if (packet.editable && serverbound && state_ == State::kPlay && isChatPacket(id))
+        packet.editable = id == wire::protocol::play::ChatCommandPacket::kId ||
+                          ((id == wire::protocol::play::ChatMessagePacket::kId ||
+                            id == wire::protocol::play::SignedChatCommandPacket::kId) &&
+                           !carriesSignature(id, body));
     packet.bytes.assign(body.begin(), body.end());
     packet.cancelled = false;
     packet.replacement.reset();

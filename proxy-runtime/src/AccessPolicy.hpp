@@ -6,6 +6,7 @@
 #include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/Admission.hpp>
+#include <basalt/wire/auth/SignatureValidator.hpp>
 #include <basalt/wire/io/ConnectionGate.hpp>
 #include <basalt/wire/protocol/PacketLimiter.hpp>
 
@@ -51,8 +52,13 @@ public:
     [[nodiscard]] std::shared_ptr<const AccessSettings> settings() const;
     void apply(const config::ProxyConfig& config);
 
+    /// The keys Mojang signs profile keys with; empty until fetched, and then a session cannot verify chat.
+    [[nodiscard]] std::shared_ptr<const wire::auth::ServicesKeySet> services() const;
+    void setServices(std::shared_ptr<const wire::auth::ServicesKeySet> keys);
+
 private:
     mutable std::mutex mutex_;
+    std::shared_ptr<const wire::auth::ServicesKeySet> services_;
     std::shared_ptr<const AccessSettings> settings_;
 };
 

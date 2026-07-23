@@ -496,6 +496,7 @@ struct ProxyRuntime::Impl {
     std::vector<std::jthread> threads;
     // Apart from `threads`, whose clear() is how run() waits: it would stop this one the moment it started.
     std::jthread health;
+    std::jthread serviceKeys;
     std::unique_ptr<detail::StatusRelay> relay;
     std::atomic<bool> stopped{false};
     std::shared_ptr<std::atomic<bool>> controlStopped = std::make_shared<std::atomic<bool>>(false);
@@ -704,6 +705,14 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
                         snapshot.targets.push_back({server.name, server.host, server.port, nativeProtocol(server)});
                     return snapshot;
                 });
+            });
+        if (impl_->config.general.enforceSecureProfile && impl_->config.network.onlineMode)
+            impl_->serviceKeys = std::jthread([this] {
+                auto keys =
+                    impl_->services.servicesKeys
+                        ? impl_->services.servicesKeys()
+                        : std::make_shared<const wire::auth::ServicesKeySet>(wire::auth::ServicesKeySet::fetch());
+                impl_->access.setServices(std::move(keys));
             });
         for (std::size_t i = 0; i < impl_->owners.size(); ++i)
             impl_->threads.emplace_back([this, i] { impl_->owners[i]->run(i == 0); });

@@ -38,6 +38,13 @@ packet-rate = "<red>Kicked for exceeding packet rate limit</red>"
 spam = "<red>Kicked for spamming</red>"
 unsigned-chat = "<red>Received a chat packet with a missing or invalid signature.</red>"
 
+# Secure chat: the client's chat state cannot be trusted or a plugin made it impossible to keep.
+chat-validation-failed = "<red>Chat message validation failed</red>"
+chat-signed-altered = "<red>A proxy plugin caused an illegal protocol state. Contact your network administrator.</red>"
+expired-public-key = "<red>Profile public key has expired. Restart your game and try again.</red>"
+invalid-public-key-signature = "<red>Invalid signature for profile public key. Try restarting your game.</red>"
+too-many-pending-chats = "<red>Too many pending chat messages</red>"
+
 # Antibot: a refused connection.
 antibot-denied = "<red>Your connection was refused. Please try again later.</red>"
 

@@ -50,6 +50,7 @@ basalt_module(proxy-runtime-core
         src/antibot/LimboRun.cpp
         src/ClientSessionRouting.cpp
         src/ClientSessionTranslation.cpp
+        src/ChatIntegrity.cpp
         src/ClientSessionChat.cpp
         src/ClientSessionUi.cpp
         src/ClientSessionHandshake.cpp
@@ -78,7 +79,7 @@ basalt_module(proxy-runtime-core
         src/ProxyRuntime.cpp
         src/UpdateChecker.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
-            basalt::wire-multiversion basalt::wire-auth basalt::wire-bedrock basalt::wire-config basalt::wire-storage
+            basalt::wire-multiversion basalt::wire-auth basalt::wire-chat basalt::wire-bedrock basalt::wire-config basalt::wire-storage
             basalt::wire-plugins
 )
 
@@ -138,6 +139,11 @@ basalt_test(proxy-runtime-network-test
 
 basalt_test(proxy-runtime-access-test
     SOURCES test/AccessTest.cpp
+    DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
+)
+
+basalt_test(proxy-runtime-chat-test
+    SOURCES test/ChatIntegrityTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
 )
 

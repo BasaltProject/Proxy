@@ -2,6 +2,7 @@
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/wire/chat/ChatMessage.hpp>
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
@@ -184,9 +185,46 @@ void ClientSession::kick(const wire::text::Component& component) {
     static_cast<void>(queuePacket(frame_.readable()));
 }
 
+void ClientSession::startSecureChat() {
+    chatGuard_.reset();
+    if (!access_.policy || !profile_ || !online_ || clientProtocol_ != 0 || legacyRaw_ ||
+        !access_.settings->general.enforceSecureProfile)
+        return;
+    auto services = access_.policy->services();
+    if (services && services->canValidateProfileKeys())
+        chatGuard_ = std::make_unique<SecureChatGuard>(profile_->id, std::move(services));
+}
+
+bool ClientSession::forwardAck(std::int32_t offset) {
+    if (offset <= 0 || !backend() || recovering_)
+        return true;
+    wire::io::ByteBuffer ack;
+    wire::protocol::varInt::write(ack, play::ChatAckPacket::kId);
+    play::ChatAckPacket{offset}.write(ack);
+    if (!toBackend(*backend(), ack.readable()))
+        return false;
+    backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    backpressure();
+    return true;
+}
+
+bool ClientSession::applyChatVerdict(const ChatVerdict& verdict) {
+    if (verdict.kind == ChatVerdict::Kind::kKick)
+        return kickClient(verdict.key, "Disconnected");
+    if (verdict.notify)
+        tell(wire::text::Component::translatable(verdict.key).color(wire::text::kRed));
+    return forwardAck(verdict.ackOffset);
+}
+
 std::optional<bool> ClientSession::screenChat(std::int32_t id) {
     const bool chat = id == play::ChatMessagePacket::kId;
     const bool command = id == play::ChatCommandPacket::kId || id == play::SignedChatCommandPacket::kId;
+    if (chatGuard_ && (id == play::ChatAckPacket::kId || id == play::ChatSessionUpdatePacket::kId)) {
+        const auto verdict = chatGuard_->serverbound(id, frame_.readable(), wire::chat::nowMillis());
+        if (verdict.kind != ChatVerdict::Kind::kForward)
+            return applyChatVerdict(verdict);
+        return std::nullopt;
+    }
     if (!chat && !command)
         return std::nullopt;
     const auto& policy = *access_.settings;
@@ -203,7 +241,11 @@ std::optional<bool> ClientSession::screenChat(std::int32_t id) {
     if (counted && !(chat ? chatSpam_ : commandSpam_).increment(Clock::now()) &&
         !(access_.isOperator && access_.isOperator(profile_->name)))
         return kickClient("spam", "Kicked for spamming");
-    if (chat && policy.general.enforceSecureProfile && online_ && clientProtocol_ == 0) {
+    if (chatGuard_) {
+        const auto verdict = chatGuard_->serverbound(id, frame_.readable(), wire::chat::nowMillis());
+        if (verdict.kind != ChatVerdict::Kind::kForward)
+            return applyChatVerdict(verdict);
+    } else if (chat && policy.general.enforceSecureProfile && online_ && clientProtocol_ == 0) {
         view.clear();
         view.writeBytes(frame_.readable());
         const auto packet = play::ChatMessagePacket::read(view);

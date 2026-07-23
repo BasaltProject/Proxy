@@ -2,6 +2,7 @@
 
 #include <basalt/proxy/runtime/BackendChangeRequest.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/auth/SignatureValidator.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/config/UiConfigs.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
@@ -81,6 +82,8 @@ struct DecisionRequest {
     std::string from;
     /// The kick reason as plain text, the chat message, the command without its slash, or the ping's protocol.
     std::string text;
+    /// A chat message or command that carries a signature: a plugin may neither cancel nor change it.
+    bool signedContent = false;
     std::uint32_t deadlineMs = 0;
 };
 
@@ -123,6 +126,8 @@ struct RuntimeServices {
     /// Completions for the last word of a command line a player is typing, when it starts with a proxy command.
     std::function<std::optional<std::vector<std::string>>(std::string_view player, std::string_view line)>
         commandSuggestions = {};
+    /// The Mojang keys that sign profile keys, when chat is enforced online; unset fetches them over HTTPS.
+    std::function<std::shared_ptr<const wire::auth::ServicesKeySet>()> servicesKeys = {};
     /// MiniMessage text a login is turned away with while the proxy is still starting; empty once it is ready.
     std::function<std::optional<std::string>()> loadingMessage = {};
     /// The tab list, boss bar and scoreboard the proxy draws; unset draws nothing. Runs on owner threads.

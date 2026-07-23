@@ -2,6 +2,7 @@
 
 #include "AccessPolicy.hpp"
 #include "BackendAttempts.hpp"
+#include "ChatIntegrity.hpp"
 #include "CookieCache.hpp"
 #include "IdRenumbering.hpp"
 #include "IdentityRegistry.hpp"
@@ -326,9 +327,12 @@ private:
 
     [[nodiscard]] bool queueStatus(const DecisionResult* changes);
     [[nodiscard]] bool relayHeld();
+    [[nodiscard]] bool forwardAck(std::int32_t offset);
+    [[nodiscard]] bool applyChatVerdict(const ChatVerdict& verdict);
+    void startSecureChat();
     [[nodiscard]] bool routeInitial();
     [[nodiscard]] bool ask(DecisionKind kind, std::string_view backend, std::string_view from,
-                           std::string_view text = {});
+                           std::string_view text = {}, bool signedContent = false);
     [[nodiscard]] BackendLogin* backend() const;
     [[nodiscard]] BackendLogin* backendFor(BackendAttempt attempt) const;
     [[nodiscard]] Clock::time_point backendDeadline() const;
@@ -344,6 +348,7 @@ private:
     std::int64_t keepAliveToken_ = -1;
     Clock::time_point keepAliveSent_;
     std::vector<std::uint8_t> held_;
+    std::unique_ptr<SecureChatGuard> chatGuard_;
     bool kickDeciding_ = false;
     std::uint64_t decisionToken_ = 0;
     Clock::time_point decisionDeadline_ = Clock::time_point::max();

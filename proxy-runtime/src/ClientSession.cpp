@@ -217,11 +217,24 @@ bool ClientSession::packet() {
         return false;
     if (limboState())
         return limboPacket(id, raw);
+    const bool chatTapped = state_ == State::kPlay && !legacyRaw_ && isChatPacket(id);
+    const std::vector<std::uint8_t> chatOriginal =
+        chatTapped ? std::vector<std::uint8_t>{frame_.readable().begin(), frame_.readable().end()}
+                   : std::vector<std::uint8_t>{};
     switch (tap(frame_, true, id, raw)) {
     case Tapped::kDrop:
+        if (chatTapped)
+            return applyChatVerdict(denyChat(id, chatOriginal));
         return true;
     case Tapped::kFailed:
         return false;
+    case Tapped::kChanged:
+        if (chatTapped) {
+            const auto verdict = checkReplacedChat(id, chatOriginal, frame_.readable());
+            if (verdict.kind != ChatVerdict::Kind::kForward)
+                return applyChatVerdict(verdict);
+        }
+        break;
     default:
         break;
     }
@@ -272,8 +285,10 @@ bool ClientSession::packet() {
                                                         root.starts_with('/') ? root.substr(1) : root)) !=
                     backendCommands_.end();
             if (!view.failed() && !theBackends && playerCommand_(profile_->name, command))
-                return true;
-            if (!view.failed() && !deciding_ && ask(DecisionKind::kCommand, {}, activeBackendName(), command)) {
+                return applyChatVerdict(denyChat(id, frame_.readable()));
+            if (!view.failed() && !deciding_ &&
+                ask(DecisionKind::kCommand, {}, activeBackendName(), command,
+                    carriesSignature(id, frame_.readable()))) {
                 held_.assign(raw.begin(), raw.end());
                 deciding_ = true;
                 return true;
@@ -294,7 +309,8 @@ bool ClientSession::packet() {
             const std::string message = protocol::readString(view, protocol::play::ChatMessagePacket::kMaxLength);
             if (!view.failed()) {
                 playerChat_(profile_->name, message);
-                if (ask(DecisionKind::kChat, {}, activeBackendName(), message)) {
+                if (ask(DecisionKind::kChat, {}, activeBackendName(), message,
+                        carriesSignature(id, frame_.readable()))) {
                     held_.assign(raw.begin(), raw.end());
                     deciding_ = true;
                     return true;
@@ -359,6 +375,7 @@ bool ClientSession::packet() {
             }
             state_ = State::kPlay;
             awaitingJoin_ = legacyRaw_;
+            startSecureChat();
             registerBungeeChannels();
         }
         backpressure();

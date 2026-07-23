@@ -22,7 +22,8 @@ constexpr std::chrono::milliseconds kDecisionWindow{3000};
 std::atomic<std::uint64_t> gNextToken{1};
 } // namespace
 
-bool ClientSession::ask(DecisionKind kind, std::string_view backend, std::string_view from, std::string_view text) {
+bool ClientSession::ask(DecisionKind kind, std::string_view backend, std::string_view from, std::string_view text,
+                        bool signedContent) {
     const bool anonymous = kind == DecisionKind::kPing;
     if (!decide_ || (!anonymous && !profile_) || decisionPending())
         return false;
@@ -39,6 +40,7 @@ bool ClientSession::ask(DecisionKind kind, std::string_view backend, std::string
     request.backend = backend;
     request.from = from;
     request.text = text.substr(0, 1024);
+    request.signedContent = signedContent;
     request.deadlineMs = static_cast<std::uint32_t>(kDecisionWindow.count());
     const auto token = request.token;
     if (!decide_(std::move(request)))
@@ -127,21 +129,21 @@ bool ClientSession::decided(std::uint64_t token, const DecisionResult& result, b
         return queuePacket(held_);
     }
     if (kind == DecisionKind::kChat || kind == DecisionKind::kCommand) {
+        wire::io::ByteBuffer view;
+        view.writeBytes(held_);
+        const auto id = protocol::varInt::read(view);
+        const auto body = view.readable();
         if (result.deny && !expired) {
             if (!result.reason.empty())
                 tell(result.reason);
-            return true;
+            return applyChatVerdict(denyChat(id, body));
         }
-        if (kind == DecisionKind::kCommand && !expired && !result.text.empty()) {
-            wire::io::ByteBuffer view;
-            view.writeBytes(held_);
-            if (protocol::varInt::read(view) == protocol::play::ChatCommandPacket::kId) {
-                held_.clear();
-                wire::io::ByteBuffer rebuilt;
-                protocol::varInt::write(rebuilt, protocol::play::ChatCommandPacket::kId);
-                protocol::writeString(rebuilt, result.text);
-                held_.assign(rebuilt.readable().begin(), rebuilt.readable().end());
-            }
+        if (!expired && !result.text.empty()) {
+            auto verdict = rewriteChat(id, body, result.text);
+            if (verdict.replacement)
+                held_ = std::move(*verdict.replacement);
+            else if (verdict.kind != ChatVerdict::Kind::kForward)
+                return applyChatVerdict(verdict);
         }
         return relayHeld();
     }

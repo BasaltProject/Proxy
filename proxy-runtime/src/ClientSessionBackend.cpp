@@ -203,6 +203,9 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
     default:
         break;
     }
+    if (chatGuard_ && state_ == State::kPlay && id == wire::protocol::play::PlayerChatPacket::kId &&
+        !chatGuard_->clientbound(id, frame_.readable()))
+        return kickClient("too-many-pending-chats", "Too many pending chats");
     if (legacyClient() && state_ == State::kPlay) {
         if (id == wire::protocol::play::BossEventPacket::kId)
             trackBossBar(frame_.readable());
