@@ -95,6 +95,12 @@ struct PluginHooks {
     std::function<std::optional<std::pair<std::string, std::uint16_t>>(std::string_view server)> serverAddress;
     /// The same as tell and kick with a finished component.
     std::function<void(std::string_view player, wire::text::Component)> tellComponent;
+    /// Draws something on a player's screen (title, tab list, boss bar), asks them to transfer, or stores a cookie.
+    std::function<bool(std::string_view player, runtime::PlayerHud)> hud;
+    /// Asks the client for a cookie; the reply may run on any thread and is empty when the client has none.
+    std::function<bool(std::string_view player, std::string_view key,
+                       std::function<void(std::optional<std::vector<std::uint8_t>>)>)>
+        requestCookie;
     std::function<void(std::string_view player, wire::text::Component)> kickComponent;
     /// Answers a decision once the handlers ran; may be called after the deadline, when the runtime ignores it.
     std::function<void(std::string_view player, std::uint64_t token, runtime::DecisionResult)> resolveDecision;

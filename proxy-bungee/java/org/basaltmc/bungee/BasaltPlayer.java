@@ -85,12 +85,16 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public void sendMessage(ChatMessageType type, BaseComponent... message) {
-        sendMessage(message);
+        if (type == ChatMessageType.ACTION_BAR) {
+            Hud.send(name, Hud.ACTION_BAR, Hud.json(message), null, 0, 0, 0, 0, null);
+        } else {
+            sendMessage(message);
+        }
     }
 
     @Override
     public void sendMessage(ChatMessageType type, BaseComponent message) {
-        sendMessage(message);
+        sendMessage(type, new BaseComponent[] {message});
     }
 
     @Override
@@ -230,20 +234,22 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public void setTabHeader(BaseComponent header, BaseComponent footer) {
-        throw new UnsupportedOperationException("tab headers are not available yet");
+        setTabHeader(new BaseComponent[] {header}, new BaseComponent[] {footer});
     }
 
     @Override
     public void setTabHeader(BaseComponent[] header, BaseComponent[] footer) {
-        throw new UnsupportedOperationException("tab headers are not available yet");
+        Hud.send(name, Hud.TAB, Hud.json(header), Hud.json(footer), 0, 0, 0, 0, null);
     }
 
     @Override
-    public void resetTabHeader() {}
+    public void resetTabHeader() {
+        Hud.send(name, Hud.TAB, Hud.json(new BaseComponent[0]), Hud.json(new BaseComponent[0]), 0, 0, 0, 0, null);
+    }
 
     @Override
     public void sendTitle(Title title) {
-        throw new UnsupportedOperationException("titles are not available yet");
+        title.send(this);
     }
 
     @Override
@@ -263,17 +269,17 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public CompletableFuture<byte[]> retrieveCookie(String cookie) {
-        return CompletableFuture.failedFuture(new UnsupportedOperationException("cookies are not available yet"));
+        return Hud.cookie(name, cookie);
     }
 
     @Override
     public void storeCookie(String cookie, byte[] data) {
-        throw new UnsupportedOperationException("cookies are not available yet");
+        Hud.send(name, Hud.STORE_COOKIE, cookie, null, 0, 0, 0, 0, data);
     }
 
     @Override
     public void transfer(String host, int port) {
-        throw new UnsupportedOperationException("transfers are not available yet");
+        Hud.send(name, Hud.TRANSFER, host, null, port, 0, 0, 0, null);
     }
 
     @Override
@@ -342,7 +348,7 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public boolean hasPermission(String permission) {
-        return false;
+        return Natives.permission(name, permission);
     }
 
     @Override

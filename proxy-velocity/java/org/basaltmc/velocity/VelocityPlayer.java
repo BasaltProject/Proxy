@@ -180,7 +180,84 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void clearPlayerListHeaderAndFooter() {
-        throw missing("tab headers");
+        getTabList().clearHeaderAndFooter();
+    }
+
+    @Override
+    public void sendPlayerListHeaderAndFooter(Component header, Component footer) {
+        getTabList().setHeaderAndFooter(header, footer);
+    }
+
+    @Override
+    public void showTitle(net.kyori.adventure.title.Title title) {
+        final net.kyori.adventure.title.Title.Times times = title.times();
+        Hud.send(name, Hud.TITLE, Hud.json(title.title()), Hud.json(title.subtitle()),
+                times == null ? -1 : (int) (times.fadeIn().toMillis() / 50), times == null ? -1 : (int) (times.stay().toMillis() / 50),
+                times == null ? -1 : (int) (times.fadeOut().toMillis() / 50), 0, null);
+    }
+
+    @Override
+    public void clearTitle() {
+        Hud.send(name, Hud.CLEAR_TITLE, null, null, 0, 0, 0, 0, null);
+    }
+
+    @Override
+    public void resetTitle() {
+        Hud.send(name, Hud.CLEAR_TITLE, null, null, 1, 0, 0, 0, null);
+    }
+
+    @Override
+    public void sendActionBar(Component message) {
+        Hud.send(name, Hud.ACTION_BAR, Hud.json(message), null, 0, 0, 0, 0, null);
+    }
+
+    private final java.util.Map<net.kyori.adventure.bossbar.BossBar, String> bars = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void showBossBar(net.kyori.adventure.bossbar.BossBar bar) {
+        final String id = bars.computeIfAbsent(bar, key -> UUID.randomUUID().toString());
+        Hud.send(name, Hud.BOSS_ADD, id, Hud.json(bar.name()), Hud.color(bar.color()), Hud.overlay(bar.overlay()), 0, bar.progress(), null);
+        bar.addListener(new net.kyori.adventure.bossbar.BossBar.Listener() {
+            @Override
+            public void bossBarNameChanged(net.kyori.adventure.bossbar.BossBar changed, Component was, Component now) {
+                if (bars.containsKey(changed)) {
+                    Hud.send(name, Hud.BOSS_NAME, id, Hud.json(now), 0, 0, 0, 0, null);
+                }
+            }
+
+            @Override
+            public void bossBarProgressChanged(net.kyori.adventure.bossbar.BossBar changed, float was, float now) {
+                if (bars.containsKey(changed)) {
+                    Hud.send(name, Hud.BOSS_PROGRESS, id, null, 0, 0, 0, now, null);
+                }
+            }
+
+            @Override
+            public void bossBarColorChanged(net.kyori.adventure.bossbar.BossBar changed, net.kyori.adventure.bossbar.BossBar.Color was,
+                    net.kyori.adventure.bossbar.BossBar.Color now) {
+                style(changed);
+            }
+
+            @Override
+            public void bossBarOverlayChanged(net.kyori.adventure.bossbar.BossBar changed, net.kyori.adventure.bossbar.BossBar.Overlay was,
+                    net.kyori.adventure.bossbar.BossBar.Overlay now) {
+                style(changed);
+            }
+
+            private void style(net.kyori.adventure.bossbar.BossBar changed) {
+                if (bars.containsKey(changed)) {
+                    Hud.send(name, Hud.BOSS_STYLE, id, null, Hud.color(changed.color()), Hud.overlay(changed.overlay()), 0, 0, null);
+                }
+            }
+        });
+    }
+
+    @Override
+    public void hideBossBar(net.kyori.adventure.bossbar.BossBar bar) {
+        final String id = bars.remove(bar);
+        if (id != null) {
+            Hud.send(name, Hud.BOSS_REMOVE, id, null, 0, 0, 0, 0, null);
+        }
     }
 
     @Override
@@ -195,7 +272,7 @@ final class VelocityPlayer implements Player {
 
     @Override
     public TabList getTabList() {
-        throw missing("tab lists");
+        return new VelocityTabList(name);
     }
 
     @Override
@@ -277,17 +354,18 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void transferToHost(InetSocketAddress target) {
-        throw missing("transfers");
+        Hud.send(name, Hud.TRANSFER, target.getHostString(), null, target.getPort(), 0, 0, 0, null);
     }
 
     @Override
     public void storeCookie(net.kyori.adventure.key.Key key, byte[] data) {
-        throw missing("cookies");
+        Hud.send(name, Hud.STORE_COOKIE, key.asString(), null, 0, 0, 0, 0, data);
     }
 
     @Override
     public void requestCookie(net.kyori.adventure.key.Key key) {
-        throw missing("cookies");
+        Hud.cookie(name, key.asString()).thenAccept(data -> BasaltVelocity.proxy().getEventManager()
+                .fire(new com.velocitypowered.api.event.player.CookieReceiveEvent(this, key, data)));
     }
 
     @Override
@@ -337,7 +415,7 @@ final class VelocityPlayer implements Player {
 
     @Override
     public Tristate getPermissionValue(String permission) {
-        return Tristate.UNDEFINED;
+        return Natives.permission(name, permission) ? Tristate.TRUE : Tristate.UNDEFINED;
     }
 
     @Override

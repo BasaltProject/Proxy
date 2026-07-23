@@ -39,6 +39,29 @@ public final class TestPlugin {
     }
 
     @Subscribe
+    public void onJoin(PostLoginEvent event) {
+        final Player player = event.getPlayer();
+        server.getScheduler().buildTask(this, () -> {
+            player.showTitle(net.kyori.adventure.title.Title.title(Component.text("Velocity title"), Component.text("sub")));
+            player.sendActionBar(Component.text("velocity action bar"));
+            player.sendPlayerListHeaderAndFooter(Component.text("vel header"), Component.text("vel footer"));
+            final net.kyori.adventure.bossbar.BossBar bar = net.kyori.adventure.bossbar.BossBar.bossBar(Component.text("vel boss"), 0.5f,
+                    net.kyori.adventure.bossbar.BossBar.Color.GREEN, net.kyori.adventure.bossbar.BossBar.Overlay.PROGRESS);
+            player.showBossBar(bar);
+            bar.progress(0.2f);
+            player.storeCookie(net.kyori.adventure.key.Key.key("basalt", "velocity"), new byte[] {9, 8});
+            logger.info("hud sent; permission " + player.hasPermission("basalt.velocity"));
+        }).delay(2, java.util.concurrent.TimeUnit.SECONDS).schedule();
+        server.getScheduler().buildTask(this, () -> player.requestCookie(net.kyori.adventure.key.Key.key("basalt", "velocity")))
+                .delay(4, java.util.concurrent.TimeUnit.SECONDS).schedule();
+    }
+
+    @Subscribe
+    public void onCookie(com.velocitypowered.api.event.player.CookieReceiveEvent event) {
+        logger.info("cookie " + event.getOriginalKey() + " " + (event.getOriginalData() == null ? "null" : event.getOriginalData().length));
+    }
+
+    @Subscribe
     public void onInit(ProxyInitializeEvent event) {
         server.getCommandManager().register(server.getCommandManager().metaBuilder("veltest").plugin(this).build(),
                 (SimpleCommand) invocation -> {

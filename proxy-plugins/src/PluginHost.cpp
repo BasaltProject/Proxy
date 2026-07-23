@@ -256,6 +256,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     }
     PluginApi::install(*this, *plugin, manifest, config);
     PluginApi::installMessaging(*this, *plugin);
+    PluginApi::installHud(*this, *plugin);
     auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);
     if (!chunk) {
         report("compile failed: " + chunk.error().message);
@@ -554,7 +555,7 @@ void PluginHost::runTimers(std::chrono::steady_clock::time_point now) {
             timer->resume();
             continue;
         }
-        call(*timer->plugin, *timer->function, {}, "timer");
+        call(*timer->plugin, *timer->function, timer->arguments, "timer");
         if (timer->period.count() > 0 && !(timer->cancelled && timer->cancelled->load())) {
             timer->due = now + timer->period;
             std::lock_guard lock{mutex_};

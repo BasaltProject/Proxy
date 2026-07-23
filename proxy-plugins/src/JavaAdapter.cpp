@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <map>
 #include <mutex>
@@ -283,7 +284,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 10> methodTable() {
+    static std::array<JNINativeMethod, 14> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              reinterpret_cast<void*>(nativeLog<Slot>)},
@@ -305,6 +306,15 @@ public:
              reinterpret_cast<void*>(nativeConfig<Slot>)},
             {const_cast<char*>("channel"), const_cast<char*>("(Ljava/lang/String;Z)V"),
              reinterpret_cast<void*>(nativeChannel<Slot>)},
+            {const_cast<char*>("hud"),
+             const_cast<char*>("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;IIIF[B)Z"),
+             reinterpret_cast<void*>(nativeHud<Slot>)},
+            {const_cast<char*>("permission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
+             reinterpret_cast<void*>(nativePermission<Slot>)},
+            {const_cast<char*>("cookieRequest"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)J"),
+             reinterpret_cast<void*>(nativeCookieRequest<Slot>)},
+            {const_cast<char*>("cookiePoll"), const_cast<char*>("(J)[[B"),
+             reinterpret_cast<void*>(nativeCookiePoll<Slot>)},
         }};
     }
 
@@ -401,6 +411,136 @@ private:
     }
 
     template <int Slot>
+    static jboolean nativeHud(JNIEnv* env, jclass, jstring player, jint kind, jstring first, jstring second, jint x,
+                              jint y, jint z, jfloat number, jbyteArray data) {
+        if (gAdapters[Slot] == nullptr || !gAdapters[Slot]->hooks_.hud)
+            return JNI_FALSE;
+        const std::string who = text(env, player);
+        const auto component = [&](jstring json) -> std::optional<wire::text::Component> {
+            return json == nullptr ? std::nullopt : componentOf(text(env, json));
+        };
+        runtime::PlayerHud action;
+        switch (kind) {
+        case 0: {
+            runtime::HudTitle title{component(first), component(second), std::nullopt, std::nullopt, false, false};
+            if (x >= 0 && y >= 0 && z >= 0)
+                title.times = {x, y, z};
+            action = std::move(title);
+            break;
+        }
+        case 1:
+            action = runtime::HudTitle{std::nullopt, std::nullopt, std::nullopt, std::nullopt, true, x != 0};
+            break;
+        case 2:
+            action = runtime::HudTitle{std::nullopt, std::nullopt, component(first), std::nullopt, false, false};
+            break;
+        case 3:
+            action = runtime::HudTabList{component(first), component(second)};
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8: {
+            runtime::HudBossBar bar;
+            bar.op = static_cast<runtime::HudBossBar::Op>(kind - 4);
+            bar.id = text(env, first);
+            if (auto name = component(second))
+                bar.name = std::move(*name);
+            bar.progress = number;
+            bar.color = x;
+            bar.overlay = y;
+            action = std::move(bar);
+            break;
+        }
+        case 9:
+            action = runtime::HudTransfer{text(env, first), x};
+            break;
+        case 10: {
+            runtime::HudStoreCookie cookie;
+            cookie.key = text(env, first);
+            const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
+            cookie.data.resize(static_cast<std::size_t>(size));
+            if (size > 0)
+                env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(cookie.data.data()));
+            action = std::move(cookie);
+            break;
+        }
+        default:
+            return JNI_FALSE;
+        }
+        return gAdapters[Slot]->hooks_.hud(who, std::move(action)) ? JNI_TRUE : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jboolean nativePermission(JNIEnv* env, jclass, jstring player, jstring node) {
+        return gAdapters[Slot] != nullptr && gAdapters[Slot]->hooks_.hasPermission &&
+                       gAdapters[Slot]->hooks_.hasPermission(text(env, player), text(env, node))
+                   ? JNI_TRUE
+                   : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jlong nativeCookieRequest(JNIEnv* env, jclass, jstring player, jstring key) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr || !self->hooks_.requestCookie)
+            return 0;
+        const jlong token = self->nextCookie_.fetch_add(1);
+        {
+            std::lock_guard lock{self->mutex_};
+            if (self->cookies_.size() >= 256)
+                return 0;
+            self->cookies_[token] = {};
+        }
+        const bool handed = self->hooks_.requestCookie(
+            text(env, player), text(env, key), [self, token](std::optional<std::vector<std::uint8_t>> value) {
+                std::lock_guard lock{self->mutex_};
+                if (const auto found = self->cookies_.find(token); found != self->cookies_.end())
+                    found->second = {true, std::move(value)};
+            });
+        if (!handed) {
+            std::lock_guard lock{self->mutex_};
+            self->cookies_.erase(token);
+            return 0;
+        }
+        return token;
+    }
+
+    /// Null while waiting; otherwise one element, the cookie or null when the client has none. A negative token forgets
+    /// it.
+    template <int Slot>
+    static jobjectArray nativeCookiePoll(JNIEnv* env, jclass, jlong token) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr)
+            return nullptr;
+        if (token < 0) {
+            std::lock_guard lock{self->mutex_};
+            self->cookies_.erase(-token);
+            return nullptr;
+        }
+        std::optional<std::vector<std::uint8_t>> value;
+        {
+            std::lock_guard lock{self->mutex_};
+            const auto found = self->cookies_.find(token);
+            if (found == self->cookies_.end() || !found->second.answered)
+                return nullptr;
+            value = std::move(found->second.value);
+            self->cookies_.erase(found);
+        }
+        const std::size_t size = value ? value->size() : 0;
+        jclass type = env->FindClass("[B");
+        jobjectArray holder = env->NewObjectArray(1, type, nullptr);
+        if (value) {
+            jbyteArray bytes = env->NewByteArray(static_cast<jsize>(size));
+            env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(size), reinterpret_cast<const jbyte*>(value->data()));
+            env->SetObjectArrayElement(holder, 0, bytes);
+            env->DeleteLocalRef(bytes);
+        }
+        env->DeleteLocalRef(type);
+        return holder;
+    }
+
+    template <int Slot>
     static jobjectArray nativeConfig(JNIEnv* env, jclass) {
         ProxyInfo info;
         if (gAdapters[Slot] != nullptr && gAdapters[Slot]->hooks_.info)
@@ -475,6 +615,14 @@ private:
     mutable std::mutex mutex_;
     std::map<std::string, PlayerRow, std::less<>> players_;
     std::set<std::string, std::less<>> channels_;
+
+    struct CookieSlot {
+        bool answered = false;
+        std::optional<std::vector<std::uint8_t>> value;
+    };
+
+    std::map<jlong, CookieSlot> cookies_;
+    std::atomic<jlong> nextCookie_{1};
 };
 
 std::unique_ptr<ForeignAdapter> createJavaAdapter(const JavaRuntimeOptions& options, const PluginHooks& hooks,

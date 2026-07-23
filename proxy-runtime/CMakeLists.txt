@@ -61,6 +61,7 @@ basalt_module(proxy-runtime-core
         src/ClientSessionResourcePacks.cpp
         src/ResourcePacks.cpp
         src/ClientSessionCookies.cpp
+        src/ClientSessionHud.cpp
         src/ClientSessionCandidate.cpp
         src/ClientSessionDecision.cpp
         src/ClientSessionRecovery.cpp

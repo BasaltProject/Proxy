@@ -887,6 +887,22 @@ bool ProxyRuntime::kickComponent(std::string_view player, wire::text::Component 
     return deliverToPlayer(*impl_, player, [shared](auto& session) { session.kick(*shared); });
 }
 
+bool ProxyRuntime::sendHud(std::string_view player, PlayerHud action) {
+    const auto shared = std::make_shared<const PlayerHud>(std::move(action));
+    return deliverToPlayer(*impl_, player, [shared](auto& session) { static_cast<void>(session.applyHud(*shared)); });
+}
+
+bool ProxyRuntime::requestCookie(std::string_view player, std::string_view key,
+                                 std::function<void(std::optional<std::vector<std::uint8_t>>)> reply) {
+    const auto shared = std::make_shared<const std::string>(key);
+    const auto callback =
+        std::make_shared<std::function<void(std::optional<std::vector<std::uint8_t>>)>>(std::move(reply));
+    return deliverToPlayer(*impl_, player, [shared, callback](auto& session) {
+        if (!session.requestPluginCookie(*shared, *callback))
+            (*callback)(std::nullopt);
+    });
+}
+
 bool ProxyRuntime::sendPacket(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                               std::span<const std::uint8_t> body) {
     if (id < 0 || body.size() > impl_->services.packetMaxBytes)

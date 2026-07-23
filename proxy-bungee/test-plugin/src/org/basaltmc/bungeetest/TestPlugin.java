@@ -44,6 +44,18 @@ public final class TestPlugin extends Plugin implements Listener {
     @EventHandler
     public void onPostLogin(PostLoginEvent event) {
         getLogger().info("postlogin " + event.getPlayer().getName());
+        final ProxiedPlayer player = event.getPlayer();
+        getProxy().getScheduler().schedule(this, () -> {
+            player.sendTitle(getProxy().createTitle().title(new TextComponent("Bungee title")).subTitle(new TextComponent("sub"))
+                    .fadeIn(5).stay(40).fadeOut(10));
+            player.sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, new TextComponent("bungee action bar"));
+            player.setTabHeader(new TextComponent("bungee header"), new TextComponent("bungee footer"));
+            player.storeCookie("basalt:bungee", new byte[] {1, 2, 3});
+            getLogger().info("hud sent; permission " + player.hasPermission("basalt.bungee"));
+        }, 2, java.util.concurrent.TimeUnit.SECONDS);
+        getProxy().getScheduler().schedule(this, () -> player.retrieveCookie("basalt:bungee").whenComplete(
+                (data, error) -> getLogger().info("cookie " + (data == null ? "null" : data.length) + " " + error)), 4,
+                java.util.concurrent.TimeUnit.SECONDS);
     }
 
     @EventHandler

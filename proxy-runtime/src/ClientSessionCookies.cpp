@@ -6,6 +6,7 @@
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 
+#include <algorithm>
 #include <array>
 
 namespace basalt::proxy::runtime::detail {
@@ -45,6 +46,16 @@ bool ClientSession::cookieResponse() {
     auto response = wire::protocol::cookie::ResponsePacket::read(frame_);
     if (!response || frame_.readableBytes() != 0)
         return false;
+    if (!initial) {
+        const auto asked =
+            std::ranges::find(pluginCookies_, response->key, &decltype(pluginCookies_)::value_type::first);
+        if (asked != pluginCookies_.end()) {
+            auto reply = std::move(asked->second);
+            pluginCookies_.erase(asked);
+            reply(std::move(response->payload));
+            return true;
+        }
+    }
     const auto request = pendingCookies_.consume(response->key);
     if (!request)
         return false;

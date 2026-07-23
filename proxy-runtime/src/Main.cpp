@@ -568,6 +568,13 @@ int run(const cliCommand::Run& command) {
         hooks.tellComponent = [&runtime](std::string_view player, wire::text::Component component) {
             static_cast<void>(runtime->tellComponent(player, std::move(component)));
         };
+        hooks.hud = [&runtime](std::string_view player, PlayerHud action) {
+            return runtime->sendHud(player, std::move(action));
+        };
+        hooks.requestCookie = [&runtime](std::string_view player, std::string_view key,
+                                         std::function<void(std::optional<std::vector<std::uint8_t>>)> reply) {
+            return runtime->requestCookie(player, key, std::move(reply));
+        };
         hooks.kickComponent = [&runtime](std::string_view player, wire::text::Component component) {
             static_cast<void>(runtime->kickComponent(player, std::move(component)));
         };

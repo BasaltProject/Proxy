@@ -5,6 +5,7 @@ basalt_module(proxy-plugins
         src/PluginApi.cpp
         src/PluginDecisions.cpp
         src/PluginMessagingApi.cpp
+        src/PluginHudApi.cpp
         src/PluginHost.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-lua basalt::wire-plugins basalt::wire-sqlite
     PRIVATE_DEPENDS basalt::lua

@@ -12,6 +12,7 @@
 #include <basalt/wire/text/Component.hpp>
 
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -23,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace basalt::proxy::config {
@@ -46,6 +48,50 @@ struct PlayerEvent {
     std::uint16_t port = 0;
     std::int64_t value = 0;
 };
+
+/// Title, subtitle and action bar in one go; unset parts are left alone.
+struct HudTitle {
+    std::optional<wire::text::Component> title;
+    std::optional<wire::text::Component> subtitle;
+    std::optional<wire::text::Component> actionBar;
+    /// Fade in, stay and fade out in ticks.
+    std::optional<std::array<std::int32_t, 3>> times;
+    /// Clear what is shown, resetting the times too when `reset` is set.
+    bool clear = false;
+    bool reset = false;
+};
+
+/// Header and footer of the tab list; the part left unset keeps what the player already has.
+struct HudTabList {
+    std::optional<wire::text::Component> header;
+    std::optional<wire::text::Component> footer;
+};
+
+/// One operation on a boss bar a plugin owns, named by its id.
+struct HudBossBar {
+    enum class Op : std::uint8_t { kAdd, kRemove, kProgress, kName, kStyle };
+    Op op = Op::kAdd;
+    std::string id;
+    wire::text::Component name;
+    float progress = 1.0F;
+    /// The bar colour, 0 pink to 6 white, and the overlay, 0 plain to 4 notched in 20.
+    std::int32_t color = 5;
+    std::int32_t overlay = 0;
+};
+
+/// Tells the client to reconnect to another address, keeping its cookies.
+struct HudTransfer {
+    std::string host;
+    std::int32_t port = 25565;
+};
+
+/// Hands the client a cookie to keep for the next connection.
+struct HudStoreCookie {
+    std::string key;
+    std::vector<std::uint8_t> data;
+};
+
+using PlayerHud = std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie>;
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
 struct PlayerCommandSpec {
@@ -222,6 +268,11 @@ public:
     /// Thread-safe. The same as tellPlayer and kickPlayer with a finished component, no MiniMessage in between.
     [[nodiscard]] bool tellComponent(std::string_view player, wire::text::Component component);
     [[nodiscard]] bool kickComponent(std::string_view player, wire::text::Component component);
+    /// Thread-safe. Draws something on a player's screen; true once handed to the session owners.
+    [[nodiscard]] bool sendHud(std::string_view player, PlayerHud action);
+    /// Thread-safe. Asks the client for a cookie; the reply runs on a session owner thread, empty when it has none.
+    [[nodiscard]] bool requestCookie(std::string_view player, std::string_view key,
+                                     std::function<void(std::optional<std::vector<std::uint8_t>>)> reply);
     /// Thread-safe. Queues a plugin message toward the player's client or backend; true once handed to the owners.
     [[nodiscard]] bool sendPluginMessage(std::string_view player, std::string_view channel,
                                          std::span<const std::uint8_t> data, bool towardBackend);

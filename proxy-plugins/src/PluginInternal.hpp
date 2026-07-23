@@ -56,6 +56,7 @@ struct PluginHost::Timer {
     Plugin* plugin = nullptr;
     std::shared_ptr<wire::lua::LuaRef> function;
     std::function<void()> resume;
+    std::function<std::int32_t(wire::lua::LuaArgs&)> arguments;
     std::shared_ptr<std::atomic<bool>> cancelled;
 };
 
@@ -71,6 +72,7 @@ struct PluginApi {
     static void install(PluginHost& host, PluginHost::Plugin& plugin, const wire::plugins::PluginManifest& manifest,
                         const wire::common::toml::TomlTable& config);
     static void installMessaging(PluginHost& host, PluginHost::Plugin& plugin);
+    static void installHud(PluginHost& host, PluginHost::Plugin& plugin);
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
 

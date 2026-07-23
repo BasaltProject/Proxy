@@ -16,6 +16,18 @@ final class Natives {
 
     static native void channel(String name, boolean add);
 
+    /** Draws on a player's screen; kind and the other arguments are the native side's table. */
+    static native boolean hud(String player, int kind, String first, String second, int x, int y, int z, float number, byte[] data);
+
+    /** Whether the proxy's own groups grant the player the node. */
+    static native boolean permission(String player, String node);
+
+    /** A token for a cookie asked of the client, or 0 when it cannot be asked. */
+    static native long cookieRequest(String player, String key);
+
+    /** Null while waiting, otherwise one element: the cookie, or null when the client has none. A negative token forgets it. */
+    static native byte[][] cookiePoll(long token);
+
     /** bind, port, online mode, compression, connect timeout, read timeout, max sessions, anti proxy, default route, forced hosts. */
     static native String[] config();
 

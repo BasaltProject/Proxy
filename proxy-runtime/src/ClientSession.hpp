@@ -111,6 +111,9 @@ public:
     /// Owner only. Preparation preserves the frontend play state.
     [[nodiscard]] bool prepareBackend(std::size_t target);
     [[nodiscard]] bool inPlay() const;
+    [[nodiscard]] bool applyHud(const PlayerHud& action);
+    [[nodiscard]] bool requestPluginCookie(std::string_view key,
+                                           std::function<void(std::optional<std::vector<std::uint8_t>>)> reply);
     /// Relays the backend's command tree with the plugins' player commands added; the tree untouched if unreadable.
     [[nodiscard]] bool relayCommandTree(std::span<const std::uint8_t> original);
     /// Queues a system chat line; ignored unless the client is in play.
@@ -375,6 +378,9 @@ private:
     std::vector<wire::common::Uuid> listedPlayers_;
     PendingResponses pendingPings_;
     CookieCache cookieCache_;
+    std::vector<std::pair<std::string, std::function<void(std::optional<std::vector<std::uint8_t>>)>>> pluginCookies_;
+    std::optional<wire::text::Component> tabHeader_;
+    std::optional<wire::text::Component> tabFooter_;
     ResourcePacks resourcePacks_;
     IdentityRegistry& identities_;
     const NativeForwarding* nativeForwarding_;
