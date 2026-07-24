@@ -29,6 +29,7 @@ public final class TestPlugin extends Plugin implements Listener {
                 sender.sendMessage(new TextComponent("bungeetest ok " + String.join(",", args)));
             }
         });
+        getProxy().registerChannel("basalt:pm");
         getLogger().info("BasaltBungeeTest enabled");
     }
 
@@ -88,5 +89,21 @@ public final class TestPlugin extends Plugin implements Listener {
     @EventHandler
     public void onMessage(PluginMessageEvent event) {
         getLogger().info("message " + event.getTag() + " " + event.getData().length);
+        if (event.getTag().equals("basalt:pm") && event.getSender() instanceof net.md_5.bungee.api.connection.Server backend
+                && event.getReceiver() instanceof ProxiedPlayer player) {
+            final java.io.DataInputStream in = new java.io.DataInputStream(new java.io.ByteArrayInputStream(event.getData()));
+            try {
+                final String text = in.readUTF();
+                getLogger().info("pm from backend " + text);
+                event.setCancelled(true);
+                if (!text.startsWith("echo")) {
+                    final java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                    new java.io.DataOutputStream(bytes).writeUTF("ping from bungee");
+                    backend.sendData("basalt:pm", bytes.toByteArray());
+                }
+            } catch (java.io.IOException exception) {
+                getLogger().warning(exception.toString());
+            }
+        }
     }
 }

@@ -14,6 +14,7 @@ import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.messages.LegacyChannelIdentifier;
+import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.plugin.Plugin;
@@ -77,7 +78,7 @@ public final class TestPlugin {
                     }
                     invocation.source().sendMessage(Component.text("veltest ok " + String.join(",", args)));
                 });
-        server.getChannelRegistrar().register(new LegacyChannelIdentifier("BungeeCord"));
+        server.getChannelRegistrar().register(new LegacyChannelIdentifier("BungeeCord"), MinecraftChannelIdentifier.create("basalt", "pm"));
         logger.info("BasaltVelocityTest enabled, data directory {}", data.getFileName());
     }
 
@@ -141,5 +142,14 @@ public final class TestPlugin {
     @Subscribe
     public void onMessage(PluginMessageEvent event) {
         logger.info("message {} {}", event.getIdentifier().getId(), event.getData().length);
+        if (event.getIdentifier().getId().equals("basalt:pm") && event.getSource() instanceof com.velocitypowered.api.proxy.ServerConnection backend) {
+            final com.google.common.io.ByteArrayDataInput in = com.google.common.io.ByteStreams.newDataInput(event.getData());
+            final String text = in.readUTF();
+            logger.info("pm from backend {}", text);
+            event.setResult(PluginMessageEvent.ForwardResult.handled());
+            if (!text.startsWith("echo")) {
+                backend.sendPluginMessage(MinecraftChannelIdentifier.create("basalt", "pm"), out -> out.writeUTF("ping from velocity"));
+            }
+        }
     }
 }

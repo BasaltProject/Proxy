@@ -22,6 +22,15 @@ final class Natives {
     /** Whether the proxy's own groups grant the player the node. */
     static native boolean permission(String player, String node);
 
+    /** The name of the proxy group the player is in. */
+    static native String group(String player);
+
+    /** Puts the player in a group of groups.toml, or in none when empty; false when that is not possible. */
+    static native boolean setGroup(String player, String group);
+
+    /** Overrides a node for the player until the proxy stops: 1 grants, 0 denies, negative removes. */
+    static native void setPermission(String player, String node, int value);
+
     /** A token for a cookie asked of the client, or 0 when it cannot be asked. */
     static native long cookieRequest(String player, String key);
 

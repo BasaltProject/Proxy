@@ -284,7 +284,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 14> methodTable() {
+    static std::array<JNINativeMethod, 17> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              reinterpret_cast<void*>(nativeLog<Slot>)},
@@ -311,6 +311,12 @@ public:
              reinterpret_cast<void*>(nativeHud<Slot>)},
             {const_cast<char*>("permission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
              reinterpret_cast<void*>(nativePermission<Slot>)},
+            {const_cast<char*>("group"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+             reinterpret_cast<void*>(nativeGroup<Slot>)},
+            {const_cast<char*>("setGroup"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
+             reinterpret_cast<void*>(nativeSetGroup<Slot>)},
+            {const_cast<char*>("setPermission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;I)V"),
+             reinterpret_cast<void*>(nativeSetPermission<Slot>)},
             {const_cast<char*>("cookieRequest"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)J"),
              reinterpret_cast<void*>(nativeCookieRequest<Slot>)},
             {const_cast<char*>("cookiePoll"), const_cast<char*>("(J)[[B"),
@@ -478,6 +484,29 @@ private:
                        gAdapters[Slot]->hooks_.hasPermission(text(env, player), text(env, node))
                    ? JNI_TRUE
                    : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jstring nativeGroup(JNIEnv* env, jclass, jstring player) {
+        auto* self = gAdapters[Slot];
+        const std::string group =
+            self != nullptr && self->hooks_.groupOf ? self->hooks_.groupOf(text(env, player)) : "";
+        return env->NewStringUTF(group.c_str());
+    }
+
+    template <int Slot>
+    static jboolean nativeSetGroup(JNIEnv* env, jclass, jstring player, jstring group) {
+        auto* self = gAdapters[Slot];
+        return self != nullptr && self->hooks_.setGroup && self->hooks_.setGroup(text(env, player), text(env, group))
+                   ? JNI_TRUE
+                   : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static void nativeSetPermission(JNIEnv* env, jclass, jstring player, jstring node, jint value) {
+        auto* self = gAdapters[Slot];
+        if (self != nullptr && self->hooks_.setPermission)
+            self->hooks_.setPermission(text(env, player), text(env, node), value);
     }
 
     template <int Slot>

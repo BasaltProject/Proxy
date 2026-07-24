@@ -560,6 +560,15 @@ int run(const cliCommand::Run& command) {
         hooks.hasPermission = [&permissions](std::string_view player, std::string_view node) {
             return permissions.hasPlayer(player, node);
         };
+        hooks.groupOf = [&permissions](std::string_view player) { return permissions.groupOf(player); };
+        hooks.setGroup = [&permissions](std::string_view player, std::string_view group) {
+            if (group.empty())
+                return permissions.setGroup(player, std::nullopt);
+            return permissions.groupExists(group) && permissions.setGroup(player, std::string{group});
+        };
+        hooks.setPermission = [&permissions](std::string_view player, std::string_view node, int value) {
+            permissions.setOverride(player, node, value < 0 ? std::nullopt : std::optional<bool>{value != 0});
+        };
         hooks.sendMessage = [&runtime](std::string_view player, std::string_view channel,
                                        std::span<const std::uint8_t> data, bool towardBackend) {
             return runtime->sendPluginMessage(player, channel, data, towardBackend);

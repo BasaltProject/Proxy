@@ -337,14 +337,22 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public Collection<String> getGroups() {
-        return new ArrayList<>();
+        return new ArrayList<>(List.of(Natives.group(name)));
     }
 
     @Override
-    public void addGroups(String... groups) {}
+    public void addGroups(String... groups) {
+        if (groups.length > 0) {
+            Natives.setGroup(name, groups[groups.length - 1]);
+        }
+    }
 
     @Override
-    public void removeGroups(String... groups) {}
+    public void removeGroups(String... groups) {
+        if (java.util.Arrays.asList(groups).contains(Natives.group(name))) {
+            Natives.setGroup(name, "");
+        }
+    }
 
     @Override
     public boolean hasPermission(String permission) {
@@ -352,7 +360,9 @@ final class BasaltPlayer implements ProxiedPlayer {
     }
 
     @Override
-    public void setPermission(String permission, boolean value) {}
+    public void setPermission(String permission, boolean value) {
+        Natives.setPermission(name, permission, value ? 1 : 0);
+    }
 
     @Override
     public Collection<String> getPermissions() {

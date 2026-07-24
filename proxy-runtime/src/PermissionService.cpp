@@ -35,7 +35,22 @@ bool PermissionService::has(const CommandSource& source, std::string_view node) 
     return source.console || hasPlayer(source.name, node);
 }
 
+void PermissionService::setOverride(std::string_view name, std::string_view node, std::optional<bool> value) {
+    const std::lock_guard lock{mutex_};
+    auto& nodes = overrides_[lowercaseAscii(name)];
+    if (value)
+        nodes[std::string{node}] = *value;
+    else if (const auto found = nodes.find(node); found != nodes.end())
+        nodes.erase(found);
+}
+
 bool PermissionService::hasPlayer(std::string_view name, std::string_view node) const {
+    {
+        const std::lock_guard lock{mutex_};
+        if (const auto player = overrides_.find(lowercaseAscii(name)); player != overrides_.end())
+            if (const auto found = player->second.find(node); found != player->second.end())
+                return found->second;
+    }
     const auto stored = storedGroup(name);
     return groups_.current()->resolve(stored ? std::optional<std::string_view>{*stored} : std::nullopt, node);
 }

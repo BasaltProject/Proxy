@@ -84,6 +84,11 @@ struct PluginHooks {
     runtime::CommandDispatcher* commands = nullptr;
     /// Whether a player's group grants a permission node.
     std::function<bool(std::string_view player, std::string_view node)> hasPermission;
+    std::function<std::string(std::string_view player)> groupOf;
+    /// False when the player has never joined or the group does not exist; an empty group clears it.
+    std::function<bool(std::string_view player, std::string_view group)> setGroup;
+    /// Overrides one node for the player until the proxy stops; a negative value removes the override.
+    std::function<void(std::string_view player, std::string_view node, int value)> setPermission;
     /// Sends a packet toward a player's client, or its backend as if the client sent it; true once handed over.
     std::function<bool(std::string_view player, bool serverbound, std::int32_t phase, std::int32_t id,
                        std::span<const std::uint8_t> body)>

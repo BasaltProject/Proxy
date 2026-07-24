@@ -28,6 +28,9 @@ public:
 
     [[nodiscard]] bool hasPlayer(std::string_view name, std::string_view node) const;
 
+    /// A per-session override of one node for a player, kept until the proxy stops; nullopt removes it.
+    void setOverride(std::string_view name, std::string_view node, std::optional<bool> value);
+
     [[nodiscard]] bool isOperator(std::string_view name) const;
 
     [[nodiscard]] std::string groupOf(std::string_view name) const;
@@ -55,6 +58,7 @@ private:
     wire::config::LiveValue<wire::config::GroupsConfig> groups_;
     mutable std::mutex mutex_;
     mutable std::map<std::string, std::optional<std::string>, std::less<>> cache_;
+    std::map<std::string, std::map<std::string, bool, std::less<>>, std::less<>> overrides_;
 };
 
 } // namespace basalt::proxy::runtime::detail
