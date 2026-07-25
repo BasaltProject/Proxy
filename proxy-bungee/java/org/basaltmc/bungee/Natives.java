@@ -22,6 +22,9 @@ final class Natives {
     /** Whether the proxy's own groups grant the player the node. */
     static native boolean permission(String player, String node);
 
+    /** Has the player say a line, or run it as a command when it starts with a slash. */
+    static native boolean spoofChat(String player, String line);
+
     /** The name of the proxy group the player is in. */
     static native String group(String player);
 

@@ -148,6 +148,14 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
         return 1;
     });
     lua.setField("transfer");
+    wire::lua::pushHostFunction(lua, "chat", [server, player](LuaArgs& args) {
+        const auto name = player(args, "chat");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(...)");
+        args.pushBoolean(server->hooks_.spoofChat && server->hooks_.spoofChat(*name, args.checkString(2)));
+        return 1;
+    });
+    lua.setField("chat");
     wire::lua::pushHostFunction(lua, "set_cookie", [server, player](LuaArgs& args) {
         const auto name = player(args, "set_cookie");
         if (!name)

@@ -34,10 +34,14 @@
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/common/logging/Panic.hpp>
 #include <basalt/wire/config/BasicPlaceholders.hpp>
+#include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/io/LogFile.hpp>
 #include <basalt/wire/io/Platform.hpp>
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketRegistry.hpp>
+#include <basalt/wire/protocol/PacketNames.hpp>
+#include <basalt/wire/protocol/play/ChatPackets.hpp>
+#include <basalt/wire/protocol/play/CommandPackets.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -559,6 +563,25 @@ int run(const cliCommand::Run& command) {
         hooks.commands = &dispatcher;
         hooks.hasPermission = [&permissions](std::string_view player, std::string_view node) {
             return permissions.hasPlayer(player, node);
+        };
+        hooks.spoofChat = [&runtime](std::string_view player, std::string_view text) {
+            namespace play = wire::protocol::play;
+            wire::io::ByteBuffer body;
+            std::int32_t id = play::ChatMessagePacket::kId;
+            if (!text.empty() && text.front() == '/') {
+                id = play::ChatCommandPacket::kId;
+                play::ChatCommandPacket{std::string{text.substr(1)}}.write(body);
+            } else {
+                play::ChatMessagePacket packet;
+                packet.message = std::string{text.substr(0, play::ChatMessagePacket::kMaxLength)};
+                packet.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count();
+                packet.write(body);
+            }
+            return runtime->sendPacket(player, true,
+                                       static_cast<std::int32_t>(wire::protocol::packetNames::Phase::kPlay), id,
+                                       body.readable());
         };
         hooks.groupOf = [&permissions](std::string_view player) { return permissions.groupOf(player); };
         hooks.setGroup = [&permissions](std::string_view player, std::string_view group) {

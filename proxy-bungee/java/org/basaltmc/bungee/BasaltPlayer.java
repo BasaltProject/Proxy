@@ -181,7 +181,7 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public void chat(String message) {
-        throw new UnsupportedOperationException("a proxy cannot speak for a player yet");
+        Natives.spoofChat(name, message);
     }
 
     @Override
@@ -332,7 +332,7 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public Connection.Unsafe unsafe() {
-        throw new UnsupportedOperationException("raw packets are not available");
+        throw new UnsupportedOperationException("BungeeCord packet classes are not 26.3 packets; use packet.send from Lua");
     }
 
     @Override

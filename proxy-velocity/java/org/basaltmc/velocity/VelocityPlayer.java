@@ -282,7 +282,7 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void spoofChatInput(String input) {
-        throw missing("spoofing chat");
+        Natives.spoofChat(name, input);
     }
 
     @Override

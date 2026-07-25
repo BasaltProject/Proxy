@@ -284,7 +284,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 17> methodTable() {
+    static std::array<JNINativeMethod, 18> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              reinterpret_cast<void*>(nativeLog<Slot>)},
@@ -311,6 +311,8 @@ public:
              reinterpret_cast<void*>(nativeHud<Slot>)},
             {const_cast<char*>("permission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
              reinterpret_cast<void*>(nativePermission<Slot>)},
+            {const_cast<char*>("spoofChat"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
+             reinterpret_cast<void*>(nativeSpoofChat<Slot>)},
             {const_cast<char*>("group"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
              reinterpret_cast<void*>(nativeGroup<Slot>)},
             {const_cast<char*>("setGroup"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
@@ -482,6 +484,14 @@ private:
     static jboolean nativePermission(JNIEnv* env, jclass, jstring player, jstring node) {
         return gAdapters[Slot] != nullptr && gAdapters[Slot]->hooks_.hasPermission &&
                        gAdapters[Slot]->hooks_.hasPermission(text(env, player), text(env, node))
+                   ? JNI_TRUE
+                   : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jboolean nativeSpoofChat(JNIEnv* env, jclass, jstring player, jstring line) {
+        auto* self = gAdapters[Slot];
+        return self != nullptr && self->hooks_.spoofChat && self->hooks_.spoofChat(text(env, player), text(env, line))
                    ? JNI_TRUE
                    : JNI_FALSE;
     }
