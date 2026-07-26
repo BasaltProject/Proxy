@@ -38,6 +38,18 @@ std::optional<UiElement> elementOf(std::int32_t id) {
 
 } // namespace
 
+bool ClientSession::pluginOwns(wire::config::UiElement element) const {
+    switch (element) {
+    case UiElement::TabList:
+        return tabHeader_ || tabFooter_;
+    case UiElement::Scoreboard:
+        return sidebarShown_;
+    case UiElement::BossBar:
+        return false;
+    }
+    return false;
+}
+
 bool ClientSession::uiBackendPacket(std::int32_t id) {
     if (clientProtocol_ != 0 || rawNow() || !uiSource_.configs)
         return false;
@@ -68,6 +80,8 @@ bool ClientSession::uiBackendPacket(std::int32_t id) {
         enabled = configs->scoreboard.enabled;
         break;
     }
+    if (pluginOwns(*element) && priority == wire::config::UiPriority::Proxy)
+        return true;
     if (!enabled)
         return false;
     if (priority == wire::config::UiPriority::Proxy)

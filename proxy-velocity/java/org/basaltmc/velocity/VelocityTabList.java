@@ -12,9 +12,10 @@ import java.util.Optional;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 
-/** The header and footer of a player's tab list; entries stay with the backend. */
+/** The header and footer of a player's tab list, and the rows the proxy adds to it. */
 final class VelocityTabList implements TabList {
     private final String player;
+    private final java.util.Map<UUID, VelocityTabListEntry> entries = new java.util.concurrent.ConcurrentHashMap<>();
 
     VelocityTabList(String player) {
         this.player = player;
@@ -30,37 +31,53 @@ final class VelocityTabList implements TabList {
         setHeaderAndFooter(Component.empty(), Component.empty());
     }
 
+    String player() {
+        return player;
+    }
+
     @Override
     public void addEntry(TabListEntry entry) {
-        throw new UnsupportedOperationException("tab list entries belong to the backend");
+        VelocityTabListEntry mine = entry instanceof VelocityTabListEntry known ? known
+                : new VelocityTabListEntry(this, entry.getProfile(), entry.getDisplayNameComponent().orElse(null), entry.getLatency(),
+                        entry.getGameMode());
+        entries.put(entry.getProfile().getId(), mine);
+        mine.send();
     }
 
     @Override
     public Optional<TabListEntry> removeEntry(UUID uuid) {
-        return Optional.empty();
+        VelocityTabListEntry removed = entries.remove(uuid);
+        if (removed != null) {
+            Hud.send(player, Hud.TAB_ENTRY_REMOVE, uuid.toString(), null, 0, 0, 0, 0, null);
+        }
+        return Optional.ofNullable(removed);
     }
 
     @Override
     public boolean containsEntry(UUID uuid) {
-        return false;
+        return entries.containsKey(uuid);
     }
 
     @Override
     public Optional<TabListEntry> getEntry(UUID uuid) {
-        return Optional.empty();
+        return Optional.ofNullable(entries.get(uuid));
     }
 
     @Override
     public Collection<TabListEntry> getEntries() {
-        return List.of();
+        return List.copyOf(entries.values());
     }
 
     @Override
-    public void clearAll() {}
+    public void clearAll() {
+        for (UUID id : List.copyOf(entries.keySet())) {
+            removeEntry(id);
+        }
+    }
 
     @Override
     public TabListEntry buildEntry(GameProfile profile, Component displayName, int latency, int gameMode, ChatSession session,
             boolean listed, int listOrder, boolean showHat) {
-        throw new UnsupportedOperationException("tab list entries belong to the backend");
+        return new VelocityTabListEntry(this, profile, displayName, latency, gameMode);
     }
 }

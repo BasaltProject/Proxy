@@ -5,6 +5,7 @@
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/play/BorderPackets.hpp>
 #include <basalt/wire/protocol/play/HudPackets.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/UiPackets.hpp>
 
 #include <algorithm>
@@ -17,6 +18,7 @@ namespace play = wire::protocol::play;
 constexpr std::int32_t kPlayCookieRequestId = 0x15;
 constexpr std::int32_t kPlayCookieStoreId = 0x7a;
 constexpr std::size_t kMaxPluginCookieRequests = 8;
+constexpr std::size_t kMaxPluginTabEntries = 80;
 
 template <typename Packet>
 void frame(wire::io::ByteBuffer& out, std::int32_t id, const Packet& packet) {
@@ -77,6 +79,31 @@ bool ClientSession::applyHud(const PlayerHud& action) {
         frame(out, play::TabListPacket::kId,
               play::TabListPacket{tabHeader_.value_or(wire::text::Component::empty()),
                                   tabFooter_.value_or(wire::text::Component::empty())});
+        return send();
+    }
+    if (const auto* entry = std::get_if<HudTabEntry>(&action)) {
+        const auto uuid = wire::common::Uuid::offlinePlayer("tabentry:" + entry->id);
+        if (entry->remove) {
+            if (pluginTabEntries_.erase(entry->id) == 0)
+                return true;
+            frame(out, play::PlayerInfoRemovePacket::kId, play::PlayerInfoRemovePacket{{uuid}});
+            return send();
+        }
+        if (pluginTabEntries_.size() >= kMaxPluginTabEntries && !pluginTabEntries_.contains(entry->id))
+            return false;
+        play::PlayerInfoUpdatePacket packet;
+        packet.actions = play::PlayerInfoUpdatePacket::kAddPlayer | play::PlayerInfoUpdatePacket::kUpdateListed |
+                         play::PlayerInfoUpdatePacket::kUpdateLatency |
+                         play::PlayerInfoUpdatePacket::kUpdateDisplayName;
+        play::PlayerInfoEntry row;
+        row.uuid = uuid;
+        row.name = entry->name.substr(0, 16);
+        row.listed = true;
+        row.latencyMillis = entry->latencyMillis;
+        row.displayName = entry->text;
+        packet.entries.push_back(std::move(row));
+        pluginTabEntries_.insert(entry->id);
+        frame(out, play::PlayerInfoUpdatePacket::kId, packet);
         return send();
     }
     if (const auto* sidebar = std::get_if<HudSidebar>(&action)) {

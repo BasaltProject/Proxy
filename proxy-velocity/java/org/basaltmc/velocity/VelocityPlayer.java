@@ -37,6 +37,7 @@ final class VelocityPlayer implements Player {
     private volatile long ping;
     private final UUID session = UUID.randomUUID();
     private Locale locale = Locale.ENGLISH;
+    private final VelocityTabList tabList;
 
     VelocityPlayer(String name, String uuidText, String server, String address, int port, long ping) {
         this.name = name;
@@ -45,6 +46,7 @@ final class VelocityPlayer implements Player {
         this.address = address;
         this.port = port;
         this.ping = ping;
+        this.tabList = new VelocityTabList(name);
     }
 
     static String dashed(String text) {
@@ -272,7 +274,7 @@ final class VelocityPlayer implements Player {
 
     @Override
     public TabList getTabList() {
-        return new VelocityTabList(name);
+        return tabList;
     }
 
     @Override

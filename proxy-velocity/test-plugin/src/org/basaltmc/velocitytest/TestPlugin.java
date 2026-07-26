@@ -49,6 +49,9 @@ public final class TestPlugin {
             final net.kyori.adventure.bossbar.BossBar bar = net.kyori.adventure.bossbar.BossBar.bossBar(Component.text("vel boss"), 0.5f,
                     net.kyori.adventure.bossbar.BossBar.Color.GREEN, net.kyori.adventure.bossbar.BossBar.Overlay.PROGRESS);
             player.showBossBar(bar);
+            player.getTabList().addEntry(player.getTabList().buildEntry(
+                    new com.velocitypowered.api.util.GameProfile(java.util.UUID.nameUUIDFromBytes("row".getBytes()), "Row1", java.util.List.of()),
+                    Component.text("proxy row"), 42, 0));
             bar.progress(0.2f);
             player.storeCookie(net.kyori.adventure.key.Key.key("basalt", "velocity"), new byte[] {9, 8});
             logger.info("hud sent; permission " + player.hasPermission("basalt.velocity"));

@@ -22,6 +22,8 @@ final class Hud {
     static final int BOSS_STYLE = 8;
     static final int TRANSFER = 9;
     static final int STORE_COOKIE = 10;
+    static final int TAB_ENTRY = 13;
+    static final int TAB_ENTRY_REMOVE = 14;
 
     private static final long COOKIE_WAIT_MILLIS = 5000;
     private static final ScheduledExecutorService POLL = Executors.newSingleThreadScheduledExecutor(task -> {

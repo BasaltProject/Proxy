@@ -474,6 +474,22 @@ private:
             action = std::move(cookie);
             break;
         }
+        case 13:
+        case 14: {
+            runtime::HudTabEntry entry;
+            entry.id = text(env, first);
+            entry.remove = kind == 14;
+            if (!entry.remove) {
+                entry.text = component(second);
+                entry.latencyMillis = x;
+                const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
+                entry.name.resize(static_cast<std::size_t>(size));
+                if (size > 0)
+                    env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(entry.name.data()));
+            }
+            action = std::move(entry);
+            break;
+        }
         default:
             return JNI_FALSE;
         }

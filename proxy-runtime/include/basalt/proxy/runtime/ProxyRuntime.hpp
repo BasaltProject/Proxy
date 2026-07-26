@@ -98,7 +98,17 @@ struct HudSidebar {
     std::vector<wire::text::Component> lines;
 };
 
-using PlayerHud = std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar>;
+/// A row the proxy adds to the player's own tab list, named by the plugin; remove takes it away.
+struct HudTabEntry {
+    std::string id;
+    bool remove = false;
+    std::string name;
+    std::optional<wire::text::Component> text;
+    std::int32_t latencyMillis = 0;
+};
+
+using PlayerHud =
+    std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar, HudTabEntry>;
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
 struct PlayerCommandSpec {

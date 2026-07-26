@@ -170,6 +170,30 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
         return 1;
     });
     lua.setField("clear_sidebar");
+    wire::lua::pushHostFunction(lua, "tab_entry", [server, text, player](LuaArgs& args) {
+        const auto name = player(args, "tab_entry");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(id, name, text, latency)");
+        runtime::HudTabEntry entry;
+        entry.id = args.checkString(2).substr(0, kMaxBarId);
+        entry.name = args.checkString(3);
+        entry.text = text(args, 4);
+        entry.latencyMillis = static_cast<std::int32_t>(std::clamp<std::int64_t>(args.integerOr(5, 0), 0, 10000));
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(entry)));
+        return 1;
+    });
+    lua.setField("tab_entry");
+    wire::lua::pushHostFunction(lua, "remove_tab_entry", [server, player](LuaArgs& args) {
+        const auto name = player(args, "remove_tab_entry");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(id)");
+        runtime::HudTabEntry entry;
+        entry.id = args.checkString(2).substr(0, kMaxBarId);
+        entry.remove = true;
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(entry)));
+        return 1;
+    });
+    lua.setField("remove_tab_entry");
     wire::lua::pushHostFunction(lua, "chat", [server, player](LuaArgs& args) {
         const auto name = player(args, "chat");
         if (!name)
