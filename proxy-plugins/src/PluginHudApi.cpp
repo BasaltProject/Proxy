@@ -148,6 +148,28 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
         return 1;
     });
     lua.setField("transfer");
+    wire::lua::pushHostFunction(lua, "sidebar", [server, text, player](LuaArgs& args) {
+        const auto name = player(args, "sidebar");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(title, line, line, ...)");
+        runtime::HudSidebar sidebar;
+        sidebar.title = text(args, 2);
+        for (std::int32_t at = 3; at <= args.count() && sidebar.lines.size() < 15; ++at)
+            sidebar.lines.push_back(text(args, at));
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(sidebar)));
+        return 1;
+    });
+    lua.setField("sidebar");
+    wire::lua::pushHostFunction(lua, "clear_sidebar", [server, player](LuaArgs& args) {
+        const auto name = player(args, "clear_sidebar");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(...)");
+        runtime::HudSidebar sidebar;
+        sidebar.remove = true;
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(sidebar)));
+        return 1;
+    });
+    lua.setField("clear_sidebar");
     wire::lua::pushHostFunction(lua, "chat", [server, player](LuaArgs& args) {
         const auto name = player(args, "chat");
         if (!name)

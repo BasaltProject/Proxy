@@ -91,7 +91,14 @@ struct HudStoreCookie {
     std::vector<std::uint8_t> data;
 };
 
-using PlayerHud = std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie>;
+/// The proxy's own sidebar: a title and lines, top to bottom; remove takes it down.
+struct HudSidebar {
+    bool remove = false;
+    wire::text::Component title;
+    std::vector<wire::text::Component> lines;
+};
+
+using PlayerHud = std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar>;
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
 struct PlayerCommandSpec {

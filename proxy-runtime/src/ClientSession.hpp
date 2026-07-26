@@ -380,6 +380,8 @@ private:
     CookieCache cookieCache_;
     std::vector<std::pair<std::string, std::function<void(std::optional<std::vector<std::uint8_t>>)>>> pluginCookies_;
     std::optional<wire::text::Component> tabHeader_;
+    std::size_t sidebarLines_ = 0;
+    bool sidebarShown_ = false;
     std::optional<wire::text::Component> tabFooter_;
     ResourcePacks resourcePacks_;
     IdentityRegistry& identities_;

@@ -79,6 +79,55 @@ bool ClientSession::applyHud(const PlayerHud& action) {
                                   tabFooter_.value_or(wire::text::Component::empty())});
         return send();
     }
+    if (const auto* sidebar = std::get_if<HudSidebar>(&action)) {
+        constexpr std::string_view kObjective = "basalt_sidebar";
+        if (sidebar->remove) {
+            if (!sidebarShown_)
+                return true;
+            play::SetObjectivePacket gone;
+            gone.objectiveName = std::string{kObjective};
+            gone.method = play::SetObjectivePacket::kMethodRemove;
+            frame(out, play::SetObjectivePacket::kId, gone);
+            sidebarShown_ = false;
+            sidebarLines_ = 0;
+            return send();
+        }
+        play::SetObjectivePacket objective;
+        objective.objectiveName = std::string{kObjective};
+        objective.method =
+            sidebarShown_ ? play::SetObjectivePacket::kMethodChange : play::SetObjectivePacket::kMethodAdd;
+        objective.displayName = sidebar->title;
+        frame(out, play::SetObjectivePacket::kId, objective);
+        if (!send())
+            return false;
+        if (!sidebarShown_) {
+            frame(out, play::SetDisplayObjectivePacket::kId,
+                  play::SetDisplayObjectivePacket{play::DisplaySlot::Sidebar, std::string{kObjective}});
+            if (!send())
+                return false;
+        }
+        const std::size_t count = std::min<std::size_t>(sidebar->lines.size(), 15);
+        for (std::size_t line = 0; line < count; ++line) {
+            play::SetScorePacket score;
+            score.owner = "basalt_line_" + std::to_string(line);
+            score.objectiveName = std::string{kObjective};
+            score.score = static_cast<std::int32_t>(count - line);
+            score.display = sidebar->lines[line];
+            score.numberFormat = play::NumberFormat{play::NumberFormat::Blank{}};
+            frame(out, play::SetScorePacket::kId, score);
+            if (!send())
+                return false;
+        }
+        for (std::size_t line = count; line < sidebarLines_; ++line) {
+            frame(out, play::ResetScorePacket::kId,
+                  play::ResetScorePacket{"basalt_line_" + std::to_string(line), std::string{kObjective}});
+            if (!send())
+                return false;
+        }
+        sidebarShown_ = true;
+        sidebarLines_ = count;
+        return true;
+    }
     if (const auto* bar = std::get_if<HudBossBar>(&action)) {
         play::BossEventPacket packet;
         packet.id = barId(bar->id);
