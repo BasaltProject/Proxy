@@ -68,7 +68,7 @@ final class Hud {
         CompletableFuture<byte[]> future = new CompletableFuture<>();
         long token = Natives.cookieRequest(player, key);
         if (token == 0) {
-            future.completeExceptionally(new IllegalStateException("the player cannot be asked for a cookie now"));
+            future.completeExceptionally(new IllegalStateException("cookies need a native 26.3 client in play (translated and legacy clients have none)"));
             return future;
         }
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(COOKIE_WAIT_MILLIS);
