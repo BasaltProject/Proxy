@@ -86,6 +86,9 @@ struct PluginHooks {
     std::function<bool(std::string_view player, std::string_view node)> hasPermission;
     /// Makes the player say a line, or run it as a command when it starts with a slash, unsigned.
     std::function<bool(std::string_view player, std::string_view text)> spoofChat;
+    /// -1 when the player has no override of the node, otherwise 0 (denied) or 1 (granted).
+    std::function<int(std::string_view player, std::string_view node)> permissionOverride;
+    std::function<std::vector<std::string>(std::string_view player)> permissionList;
     std::function<std::string(std::string_view player)> groupOf;
     /// False when the player has never joined or the group does not exist; an empty group clears it.
     std::function<bool(std::string_view player, std::string_view group)> setGroup;

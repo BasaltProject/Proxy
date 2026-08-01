@@ -366,6 +366,6 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public Collection<String> getPermissions() {
-        return new ArrayList<>();
+        return new ArrayList<>(List.of(Natives.permissionList(name)));
     }
 }

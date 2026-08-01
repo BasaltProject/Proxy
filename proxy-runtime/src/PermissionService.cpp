@@ -2,6 +2,8 @@
 
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 
+#include <algorithm>
+
 namespace basalt::proxy::runtime::detail {
 namespace {
 using wire::common::placeholder::lowercaseAscii;
@@ -42,6 +44,44 @@ void PermissionService::setOverride(std::string_view name, std::string_view node
         nodes[std::string{node}] = *value;
     else if (const auto found = nodes.find(node); found != nodes.end())
         nodes.erase(found);
+}
+
+std::optional<bool> PermissionService::overrideOf(std::string_view name, std::string_view node) const {
+    const std::lock_guard lock{mutex_};
+    if (const auto player = overrides_.find(lowercaseAscii(name)); player != overrides_.end())
+        if (const auto found = player->second.find(node); found != player->second.end())
+            return found->second;
+    return std::nullopt;
+}
+
+std::vector<std::string> PermissionService::effective(std::string_view name) const {
+    std::vector<std::string> patterns;
+    const auto stored = storedGroup(name);
+    const auto groups = groups_.current();
+    std::optional<std::string> next = stored;
+    std::vector<std::string> visited;
+    for (std::size_t depth = 0; depth < 16; ++depth) {
+        const auto& group = groups->get(next ? std::optional<std::string_view>{*next} : std::nullopt);
+        if (std::ranges::find(visited, group.name) != visited.end())
+            break;
+        visited.push_back(group.name);
+        for (const auto& rule : group.rules)
+            if (rule.granted() && std::ranges::find(patterns, rule.pattern()) == patterns.end())
+                patterns.push_back(rule.pattern());
+        if (!group.inherits)
+            break;
+        next = group.inherits;
+    }
+    const std::lock_guard lock{mutex_};
+    if (const auto player = overrides_.find(lowercaseAscii(name)); player != overrides_.end())
+        for (const auto& [node, value] : player->second) {
+            const auto found = std::ranges::find(patterns, node);
+            if (value && found == patterns.end())
+                patterns.push_back(node);
+            else if (!value && found != patterns.end())
+                patterns.erase(found);
+        }
+    return patterns;
 }
 
 bool PermissionService::hasPlayer(std::string_view name, std::string_view node) const {

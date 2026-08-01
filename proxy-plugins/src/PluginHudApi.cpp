@@ -194,6 +194,48 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
         return 1;
     });
     lua.setField("remove_tab_entry");
+    wire::lua::pushHostFunction(lua, "set_permission", [server, player](LuaArgs& args) {
+        const auto name = player(args, "set_permission");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(node, granted)");
+        const std::string node = args.checkString(2);
+        const int value = args.isNil(3) ? -1 : (args.toBoolean(3) ? 1 : 0);
+        if (server->hooks_.setPermission)
+            server->hooks_.setPermission(*name, node, value);
+        return 0;
+    });
+    lua.setField("set_permission");
+    wire::lua::pushHostFunction(lua, "group", [server, player](LuaArgs& args) {
+        const auto name = player(args, "group");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method()");
+        args.pushString(server->hooks_.groupOf ? server->hooks_.groupOf(*name) : std::string{});
+        return 1;
+    });
+    lua.setField("group");
+    wire::lua::pushHostFunction(lua, "set_group", [server, player](LuaArgs& args) {
+        const auto name = player(args, "set_group");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method(group)");
+        const std::string group = args.isNil(2) ? std::string{} : args.checkString(2);
+        args.pushBoolean(server->hooks_.setGroup && server->hooks_.setGroup(*name, group));
+        return 1;
+    });
+    lua.setField("set_group");
+    wire::lua::pushHostFunction(lua, "permissions", [server, player](LuaArgs& args) {
+        const auto name = player(args, "permissions");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method()");
+        const auto nodes =
+            server->hooks_.permissionList ? server->hooks_.permissionList(*name) : std::vector<std::string>{};
+        args.pushTable();
+        for (std::size_t at = 0; at < nodes.size(); ++at) {
+            args.pushString(nodes[at]);
+            args.setIndex(static_cast<std::int64_t>(at + 1));
+        }
+        return 1;
+    });
+    lua.setField("permissions");
     wire::lua::pushHostFunction(lua, "chat", [server, player](LuaArgs& args) {
         const auto name = player(args, "chat");
         if (!name)

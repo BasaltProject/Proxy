@@ -284,7 +284,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 18> methodTable() {
+    static std::array<JNINativeMethod, 20> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              reinterpret_cast<void*>(nativeLog<Slot>)},
@@ -313,6 +313,10 @@ public:
              reinterpret_cast<void*>(nativePermission<Slot>)},
             {const_cast<char*>("spoofChat"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
              reinterpret_cast<void*>(nativeSpoofChat<Slot>)},
+            {const_cast<char*>("permissionOverride"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)I"),
+             reinterpret_cast<void*>(nativePermissionOverride<Slot>)},
+            {const_cast<char*>("permissionList"), const_cast<char*>("(Ljava/lang/String;)[Ljava/lang/String;"),
+             reinterpret_cast<void*>(nativePermissionList<Slot>)},
             {const_cast<char*>("group"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
              reinterpret_cast<void*>(nativeGroup<Slot>)},
             {const_cast<char*>("setGroup"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
@@ -510,6 +514,31 @@ private:
         return self != nullptr && self->hooks_.spoofChat && self->hooks_.spoofChat(text(env, player), text(env, line))
                    ? JNI_TRUE
                    : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jint nativePermissionOverride(JNIEnv* env, jclass, jstring player, jstring node) {
+        auto* self = gAdapters[Slot];
+        return self != nullptr && self->hooks_.permissionOverride
+                   ? self->hooks_.permissionOverride(text(env, player), text(env, node))
+                   : -1;
+    }
+
+    template <int Slot>
+    static jobjectArray nativePermissionList(JNIEnv* env, jclass, jstring player) {
+        auto* self = gAdapters[Slot];
+        const std::vector<std::string> nodes = self != nullptr && self->hooks_.permissionList
+                                                   ? self->hooks_.permissionList(text(env, player))
+                                                   : std::vector<std::string>{};
+        jclass type = env->FindClass("java/lang/String");
+        jobjectArray result = env->NewObjectArray(static_cast<jsize>(nodes.size()), type, nullptr);
+        for (std::size_t at = 0; at < nodes.size(); ++at) {
+            jstring node = env->NewStringUTF(nodes[at].c_str());
+            env->SetObjectArrayElement(result, static_cast<jsize>(at), node);
+            env->DeleteLocalRef(node);
+        }
+        env->DeleteLocalRef(type);
+        return result;
     }
 
     template <int Slot>

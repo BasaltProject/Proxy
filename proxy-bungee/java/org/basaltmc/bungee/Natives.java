@@ -25,6 +25,12 @@ final class Natives {
     /** Has the player say a line, or run it as a command when it starts with a slash. */
     static native boolean spoofChat(String player, String line);
 
+    /** -1 when the player has no override of the node, otherwise 0 (denied) or 1 (granted). */
+    static native int permissionOverride(String player, String node);
+
+    /** The permission patterns the player's groups and overrides grant. */
+    static native String[] permissionList(String player);
+
     /** The name of the proxy group the player is in. */
     static native String group(String player);
 

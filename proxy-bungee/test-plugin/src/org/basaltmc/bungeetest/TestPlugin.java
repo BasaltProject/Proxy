@@ -53,6 +53,15 @@ public final class TestPlugin extends Plugin implements Listener {
             player.setTabHeader(new TextComponent("bungee header"), new TextComponent("bungee footer"));
             player.storeCookie("basalt:bungee", new byte[] {1, 2, 3});
             getLogger().info("hud sent; permission " + player.hasPermission("basalt.bungee"));
+            final String node = "basalt.command.server";
+            getLogger().info("perm start groups=" + player.getGroups() + " perms=" + player.getPermissions() + " has=" + player.hasPermission(node));
+            player.setPermission("x.y", true);
+            player.setPermission(node, false);
+            getLogger().info("perm after set x.y=" + player.hasPermission("x.y") + " node=" + player.hasPermission(node) + " perms=" + player.getPermissions());
+            player.addGroups("operator");
+            getLogger().info("perm operator groups=" + player.getGroups() + " any=" + player.hasPermission("anything.at.all"));
+            player.removeGroups("operator");
+            getLogger().info("perm removed groups=" + player.getGroups() + " any=" + player.hasPermission("anything.at.all"));
         }, 2, java.util.concurrent.TimeUnit.SECONDS);
         getProxy().getScheduler().schedule(this, () -> player.retrieveCookie("basalt:bungee").whenComplete(
                 (data, error) -> getLogger().info("cookie " + (data == null ? "null" : data.length) + " " + error)), 4,

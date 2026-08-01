@@ -583,6 +583,11 @@ int run(const cliCommand::Run& command) {
                                        static_cast<std::int32_t>(wire::protocol::packetNames::Phase::kPlay), id,
                                        body.readable());
         };
+        hooks.permissionOverride = [&permissions](std::string_view player, std::string_view node) {
+            const auto value = permissions.overrideOf(player, node);
+            return value ? (*value ? 1 : 0) : -1;
+        };
+        hooks.permissionList = [&permissions](std::string_view player) { return permissions.effective(player); };
         hooks.groupOf = [&permissions](std::string_view player) { return permissions.groupOf(player); };
         hooks.setGroup = [&permissions](std::string_view player, std::string_view group) {
             if (group.empty())

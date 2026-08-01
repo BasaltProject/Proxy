@@ -31,6 +31,12 @@ public:
     /// A per-session override of one node for a player, kept until the proxy stops; nullopt removes it.
     void setOverride(std::string_view name, std::string_view node, std::optional<bool> value);
 
+    /// The session override for one node, if the player has one.
+    [[nodiscard]] std::optional<bool> overrideOf(std::string_view name, std::string_view node) const;
+
+    /// The patterns the player's group chain and session overrides grant.
+    [[nodiscard]] std::vector<std::string> effective(std::string_view name) const;
+
     [[nodiscard]] bool isOperator(std::string_view name) const;
 
     [[nodiscard]] std::string groupOf(std::string_view name) const;

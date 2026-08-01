@@ -56,6 +56,9 @@ public final class TestPlugin {
             player.storeCookie(net.kyori.adventure.key.Key.key("basalt", "velocity"), new byte[] {9, 8});
             logger.info("hud sent; permission " + player.hasPermission("basalt.velocity"));
         }).delay(2, java.util.concurrent.TimeUnit.SECONDS).schedule();
+        server.getScheduler().buildTask(this, () -> logger.info("velocity perm node={} other={}",
+                player.getPermissionValue("basalt.command.server"), player.getPermissionValue("not.granted")))
+                .delay(3, java.util.concurrent.TimeUnit.SECONDS).schedule();
         server.getScheduler().buildTask(this, () -> player.requestCookie(net.kyori.adventure.key.Key.key("basalt", "velocity")))
                 .delay(4, java.util.concurrent.TimeUnit.SECONDS).schedule();
     }

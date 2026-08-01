@@ -417,7 +417,10 @@ final class VelocityPlayer implements Player {
 
     @Override
     public Tristate getPermissionValue(String permission) {
-        return Natives.permission(name, permission) ? Tristate.TRUE : Tristate.UNDEFINED;
+        if (Natives.permission(name, permission)) {
+            return Tristate.TRUE;
+        }
+        return Natives.permissionOverride(name, permission) == 0 ? Tristate.FALSE : Tristate.UNDEFINED;
     }
 
     @Override
