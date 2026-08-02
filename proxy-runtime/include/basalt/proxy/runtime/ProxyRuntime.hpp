@@ -11,8 +11,8 @@
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
 
-#include <chrono>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -107,8 +107,24 @@ struct HudTabEntry {
     std::int32_t latencyMillis = 0;
 };
 
+/// A dialog shown to the player; a button runs its command as the player, and no buttons means a plain notice.
+struct HudDialog {
+    enum class Kind : std::uint8_t { kNotice, kConfirmation, kMultiAction, kClear };
+
+    struct Button {
+        wire::text::Component label;
+        std::string command;
+    };
+
+    Kind kind = Kind::kNotice;
+    wire::text::Component title;
+    std::vector<wire::text::Component> body;
+    std::vector<Button> buttons;
+    bool canCloseWithEscape = true;
+};
+
 using PlayerHud =
-    std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar, HudTabEntry>;
+    std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar, HudTabEntry, HudDialog>;
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
 struct PlayerCommandSpec {

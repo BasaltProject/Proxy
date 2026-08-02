@@ -262,9 +262,11 @@ final class BasaltPlayer implements ProxiedPlayer {
         return Map.of();
     }
 
+    private final Scoreboard scoreboard = new Scoreboard();
+
     @Override
     public Scoreboard getScoreboard() {
-        throw new UnsupportedOperationException("scoreboards are not available yet");
+        return scoreboard;
     }
 
     @Override
@@ -285,14 +287,6 @@ final class BasaltPlayer implements ProxiedPlayer {
     @Override
     public String getClientBrand() {
         return "vanilla";
-    }
-
-    @Override
-    public void clearDialog() {}
-
-    @Override
-    public void showDialog(net.md_5.bungee.api.dialog.Dialog dialog) {
-        throw new UnsupportedOperationException("dialogs are not available yet");
     }
 
     @Override
@@ -323,6 +317,49 @@ final class BasaltPlayer implements ProxiedPlayer {
     @Override
     public void disconnect(BaseComponent reason) {
         Natives.kick(name, ComponentSerializer.toString(reason));
+    }
+
+    @Override
+    public void showDialog(net.md_5.bungee.api.dialog.Dialog dialog) {
+        final net.md_5.bungee.api.dialog.DialogBase base = dialog.getBase();
+        final StringBuilder body = new StringBuilder();
+        for (net.md_5.bungee.api.dialog.body.DialogBody entry : base.body() == null ? List.<net.md_5.bungee.api.dialog.body.DialogBody>of() : base.body()) {
+            if (entry instanceof net.md_5.bungee.api.dialog.body.PlainMessageBody plain) {
+                body.append(Hud.json(plain.contents())).append('\n');
+            }
+        }
+        final List<net.md_5.bungee.api.dialog.action.ActionButton> buttons = new ArrayList<>();
+        int kind = 0;
+        if (dialog instanceof net.md_5.bungee.api.dialog.NoticeDialog notice) {
+            if (notice.action() != null) {
+                buttons.add(notice.action());
+            }
+        } else if (dialog instanceof net.md_5.bungee.api.dialog.ConfirmationDialog confirmation) {
+            kind = 1;
+            buttons.add(confirmation.yes());
+            buttons.add(confirmation.no());
+        } else if (dialog instanceof net.md_5.bungee.api.dialog.MultiActionDialog multi) {
+            kind = 2;
+            if (multi.actions() != null) {
+                buttons.addAll(multi.actions());
+            }
+        } else {
+            throw new UnsupportedOperationException("only notice, confirmation and multi action dialogs are available");
+        }
+        final StringBuilder rows = new StringBuilder();
+        for (net.md_5.bungee.api.dialog.action.ActionButton button : buttons) {
+            final String command = button.action() instanceof net.md_5.bungee.api.dialog.action.RunCommandAction run
+                    ? run.template() : "";
+            rows.append(Hud.json(button.label())).append('\t').append(command).append('\n');
+        }
+        final boolean closable = base.canCloseWithEscape() == null || base.canCloseWithEscape();
+        Hud.send(name, Hud.DIALOG, Hud.json(base.title()), body.toString(), kind, closable ? 1 : 0, 0, 0,
+                rows.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public void clearDialog() {
+        Hud.send(name, Hud.DIALOG, null, null, 3, 1, 0, 0, null);
     }
 
     @Override

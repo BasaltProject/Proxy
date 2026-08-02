@@ -526,8 +526,7 @@ bool ClientSession::authenticated(
     }
     if (result) {
         if (playerLogin_)
-            if (const auto turnedAway =
-                    playerLogin_(profile_->name, profile_->id.toString(), clientAddress()))
+            if (const auto turnedAway = playerLogin_(profile_->name, profile_->id.toString(), clientAddress()))
                 return refuseMiniMessage(*turnedAway);
         return afterLogin();
     }

@@ -236,6 +236,44 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
         return 1;
     });
     lua.setField("permissions");
+    wire::lua::pushHostFunction(lua, "dialog", [server, text, player](LuaArgs& args) {
+        const auto name = player(args, "dialog");
+        if (!name)
+            return args.fail(
+                "this is a player method: call it as player:dialog(kind, title, body, label, command, ...)");
+        const std::string kind = args.checkString(2);
+        runtime::HudDialog dialog;
+        if (kind == "notice")
+            dialog.kind = runtime::HudDialog::Kind::kNotice;
+        else if (kind == "confirmation")
+            dialog.kind = runtime::HudDialog::Kind::kConfirmation;
+        else if (kind == "multi_action")
+            dialog.kind = runtime::HudDialog::Kind::kMultiAction;
+        else
+            return args.fail("dialog kind must be notice, confirmation or multi_action");
+        dialog.title = text(args, 3);
+        if (!args.isNil(4))
+            dialog.body.push_back(text(args, 4));
+        for (std::int32_t at = 5; at + 1 <= args.count() && dialog.buttons.size() < 16; at += 2) {
+            runtime::HudDialog::Button button;
+            button.label = text(args, at);
+            button.command = args.checkString(at + 1).substr(0, 256);
+            dialog.buttons.push_back(std::move(button));
+        }
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(dialog)));
+        return 1;
+    });
+    lua.setField("dialog");
+    wire::lua::pushHostFunction(lua, "clear_dialog", [server, player](LuaArgs& args) {
+        const auto name = player(args, "clear_dialog");
+        if (!name)
+            return args.fail("this is a player method: call it as player:method()");
+        runtime::HudDialog dialog;
+        dialog.kind = runtime::HudDialog::Kind::kClear;
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(dialog)));
+        return 1;
+    });
+    lua.setField("clear_dialog");
     wire::lua::pushHostFunction(lua, "chat", [server, player](LuaArgs& args) {
         const auto name = player(args, "chat");
         if (!name)

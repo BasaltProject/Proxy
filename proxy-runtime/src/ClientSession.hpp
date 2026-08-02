@@ -426,6 +426,7 @@ private:
     bool startingConfiguration_ = false;
     /// The proxy-drawn tab list, boss bar and scoreboard; see ClientSessionUi.cpp.
     [[nodiscard]] bool uiBackendPacket(std::int32_t id);
+    [[nodiscard]] bool applyDialog(const HudDialog& dialog);
     [[nodiscard]] bool pluginOwns(wire::config::UiElement element) const;
     void uiTick(Clock::time_point now);
     void uiLeavePlay();

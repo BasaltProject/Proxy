@@ -1194,11 +1194,11 @@ std::expected<std::vector<SessionInfo>, std::string> ProxyRuntime::sessions(std:
         if (!destination->mailbox.push([destination, collected] {
                 std::vector<SessionInfo> mine;
                 for (const auto& [id, session] : destination->sessions)
-                    mine.push_back({std::string{session->playerName()}, session->playerUuid(),
-                                    std::string{session->activeBackendName()},
-                                    session->clientProtocol() == 0 ? buildInfo::kProtocolVersion
-                                                                   : session->clientProtocol(),
-                                    std::string{kPhases[session->phase()]}});
+                    mine.push_back(
+                        {std::string{session->playerName()}, session->playerUuid(),
+                         std::string{session->activeBackendName()},
+                         session->clientProtocol() == 0 ? buildInfo::kProtocolVersion : session->clientProtocol(),
+                         std::string{kPhases[session->phase()]}});
                 const std::lock_guard lock{collected->mutex};
                 std::ranges::move(mine, std::back_inserter(collected->sessions));
                 --collected->remaining;

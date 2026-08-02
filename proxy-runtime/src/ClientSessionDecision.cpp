@@ -73,8 +73,7 @@ bool ClientSession::routeInitial() {
 }
 
 bool ClientSession::queueStatus(const DecisionResult* changes) {
-    const std::vector<std::uint8_t> answer =
-        status_(statusProtocol_, virtualHost_, clientAddress(), changes);
+    const std::vector<std::uint8_t> answer = status_(statusProtocol_, virtualHost_, clientAddress(), changes);
     return !answer.empty() && queueOrdered(answer);
 }
 

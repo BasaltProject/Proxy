@@ -50,6 +50,11 @@ public final class TestPlugin extends Plugin implements Listener {
             player.sendTitle(getProxy().createTitle().title(new TextComponent("Bungee title")).subTitle(new TextComponent("sub"))
                     .fadeIn(5).stay(40).fadeOut(10));
             player.sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, new TextComponent("bungee action bar"));
+            player.showDialog(new net.md_5.bungee.api.dialog.ConfirmationDialog(
+                    new net.md_5.bungee.api.dialog.DialogBase(new TextComponent("Bungee dialog")),
+                    new net.md_5.bungee.api.dialog.action.ActionButton(new TextComponent("Yes"),
+                            new net.md_5.bungee.api.dialog.action.RunCommandAction("bungeetest yes")),
+                    new net.md_5.bungee.api.dialog.action.ActionButton(new TextComponent("No"), new net.md_5.bungee.api.dialog.action.RunCommandAction("bungeetest no"))));
             player.setTabHeader(new TextComponent("bungee header"), new TextComponent("bungee footer"));
             player.storeCookie("basalt:bungee", new byte[] {1, 2, 3});
             getLogger().info("hud sent; permission " + player.hasPermission("basalt.bungee"));

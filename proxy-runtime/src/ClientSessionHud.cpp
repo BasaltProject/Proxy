@@ -1,5 +1,6 @@
 #include "ClientSession.hpp"
 
+#include <basalt/wire/nbt/NbtTag.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
@@ -7,6 +8,7 @@
 #include <basalt/wire/protocol/play/HudPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/play/UiPackets.hpp>
+#include <basalt/wire/text/ComponentNbt.hpp>
 
 #include <algorithm>
 
@@ -19,6 +21,10 @@ constexpr std::int32_t kPlayCookieRequestId = 0x15;
 constexpr std::int32_t kPlayCookieStoreId = 0x7a;
 constexpr std::size_t kMaxPluginCookieRequests = 8;
 constexpr std::size_t kMaxPluginTabEntries = 80;
+constexpr std::int32_t kConfigClearDialogId = 0x12;
+constexpr std::int32_t kConfigShowDialogId = 0x13;
+constexpr std::int32_t kPlayClearDialogId = 0x8e;
+constexpr std::int32_t kPlayShowDialogId = 0x8f;
 
 template <typename Packet>
 void frame(wire::io::ByteBuffer& out, std::int32_t id, const Packet& packet) {
@@ -37,7 +43,67 @@ wire::common::Uuid barId(const std::string& name) { return wire::common::Uuid::o
 
 } // namespace
 
+bool ClientSession::applyDialog(const HudDialog& dialog) {
+    const bool configuring = state_ == State::kConfiguration;
+    if (closing_ || clientProtocol_ != 0 || legacyRaw_ || (!configuring && !inPlay()))
+        return false;
+    wire::io::ByteBuffer out;
+    wire::protocol::varInt::write(out, configuring ? kConfigClearDialogId : kPlayClearDialogId);
+    if (dialog.kind == HudDialog::Kind::kClear)
+        return queuePacket(out.readable());
+    const auto button = [](const HudDialog::Button& data) {
+        wire::nbt::NbtCompound result;
+        result.set("label", wire::text::componentNbt::serialize(data.label));
+        if (!data.command.empty()) {
+            wire::nbt::NbtCompound action;
+            action.putString("type", "minecraft:run_command");
+            action.putString("command", data.command);
+            result.set("action", wire::nbt::NbtTag::ofCompound(std::move(action)));
+        }
+        return wire::nbt::NbtTag::ofCompound(std::move(result));
+    };
+    wire::nbt::NbtCompound root;
+    const bool confirmation = dialog.kind == HudDialog::Kind::kConfirmation;
+    const bool multi = dialog.kind == HudDialog::Kind::kMultiAction;
+    root.putString("type",
+                   confirmation ? "minecraft:confirmation" : (multi ? "minecraft:multi_action" : "minecraft:notice"));
+    root.set("title", wire::text::componentNbt::serialize(dialog.title));
+    root.putBoolean("can_close_with_escape", dialog.canCloseWithEscape);
+    std::vector<wire::nbt::NbtTag> body;
+    for (const auto& line : dialog.body) {
+        wire::nbt::NbtCompound message;
+        message.putString("type", "minecraft:plain_message");
+        message.set("contents", wire::text::componentNbt::serialize(line));
+        body.push_back(wire::nbt::NbtTag::ofCompound(std::move(message)));
+    }
+    root.set("body", wire::nbt::NbtTag::ofList(wire::nbt::NbtList{wire::nbt::NbtType::Compound, std::move(body)}));
+    if (confirmation) {
+        if (dialog.buttons.size() != 2)
+            return false;
+        root.set("yes", button(dialog.buttons[0]));
+        root.set("no", button(dialog.buttons[1]));
+    } else if (multi) {
+        if (dialog.buttons.empty())
+            return false;
+        std::vector<wire::nbt::NbtTag> actions;
+        for (const auto& entry : dialog.buttons)
+            actions.push_back(button(entry));
+        root.set("actions",
+                 wire::nbt::NbtTag::ofList(wire::nbt::NbtList{wire::nbt::NbtType::Compound, std::move(actions)}));
+    } else if (!dialog.buttons.empty()) {
+        root.set("action", button(dialog.buttons[0]));
+    }
+    out.clear();
+    wire::protocol::varInt::write(out, configuring ? kConfigShowDialogId : kPlayShowDialogId);
+    if (!configuring)
+        wire::protocol::varInt::write(out, 0);
+    wire::protocol::writeAnonymousNbt(out, wire::nbt::NbtTag::ofCompound(std::move(root)));
+    return queuePacket(out.readable());
+}
+
 bool ClientSession::applyHud(const PlayerHud& action) {
+    if (const auto* dialog = std::get_if<HudDialog>(&action))
+        return applyDialog(*dialog);
     if (!inPlay() || closing_ || clientProtocol_ != 0 || legacyRaw_)
         return false;
     wire::io::ByteBuffer out;

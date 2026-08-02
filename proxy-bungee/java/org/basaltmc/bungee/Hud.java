@@ -16,6 +16,7 @@ final class Hud {
     static final int ACTION_BAR = 2;
     static final int TAB = 3;
     static final int TRANSFER = 9;
+    static final int DIALOG = 15;
     static final int STORE_COOKIE = 10;
 
     private static final long COOKIE_WAIT_MILLIS = 5000;

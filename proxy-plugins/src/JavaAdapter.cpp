@@ -478,6 +478,40 @@ private:
             action = std::move(cookie);
             break;
         }
+        case 15: {
+            runtime::HudDialog dialog;
+            dialog.kind = static_cast<runtime::HudDialog::Kind>(std::clamp(x, 0, 3));
+            dialog.canCloseWithEscape = y != 0;
+            if (auto title = component(first))
+                dialog.title = std::move(*title);
+            const auto lines = [](std::string_view joined, char separator) {
+                std::vector<std::string_view> parts;
+                for (std::size_t start = 0; start <= joined.size();) {
+                    const std::size_t end = std::min(joined.find(separator, start), joined.size());
+                    if (end > start)
+                        parts.push_back(joined.substr(start, end - start));
+                    start = end + 1;
+                }
+                return parts;
+            };
+            const std::string body = second == nullptr ? std::string{} : text(env, second);
+            for (const auto line : lines(body, '\n'))
+                if (auto parsed = componentOf(line); parsed && dialog.body.size() < 32)
+                    dialog.body.push_back(std::move(*parsed));
+            const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
+            std::string buttons(static_cast<std::size_t>(size), '\0');
+            if (size > 0)
+                env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(buttons.data()));
+            for (const auto row : lines(buttons, '\n')) {
+                const std::size_t split = row.find('\t');
+                if (split == std::string_view::npos || dialog.buttons.size() >= 16)
+                    continue;
+                if (auto label = componentOf(row.substr(0, split)))
+                    dialog.buttons.push_back({std::move(*label), std::string{row.substr(split + 1)}});
+            }
+            action = std::move(dialog);
+            break;
+        }
         case 13:
         case 14: {
             runtime::HudTabEntry entry;
@@ -590,8 +624,7 @@ private:
         return token;
     }
 
-    /// Null while waiting; otherwise one element, the cookie or null when the client has none. A negative token forgets
-    /// it.
+    /// Null while waiting, else the cookie or null when the client has none; a negative token forgets it.
     template <int Slot>
     static jobjectArray nativeCookiePoll(JNIEnv* env, jclass, jlong token) {
         auto* self = gAdapters[Slot];
