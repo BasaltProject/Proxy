@@ -102,10 +102,13 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
 
     const auto* admission = reader.child(proxy, "admission");
     reader.keys(admission,
-                {"global-rate", "global-burst", "origin-rate", "origin-burst", "max-origins", "origin-expiry-ms"},
+                {"global-rate", "global-burst", "origin-rate", "origin-burst", "max-origins", "origin-expiry-ms",
+                 "status-rate", "status-burst"},
                 "admission.");
     reader.integer(admission, "global-rate", result.admission.globalRate, 1, 1000000, "admission.");
     reader.integer(admission, "global-burst", result.admission.globalBurst, 1, 1000000, "admission.");
+    reader.integer(admission, "status-rate", result.admission.statusRate, 1, 1000000, "admission.");
+    reader.integer(admission, "status-burst", result.admission.statusBurst, 1, 1000000, "admission.");
     reader.integer(admission, "origin-rate", result.admission.originRate, 1, 1000000, "admission.");
     reader.integer(admission, "origin-burst", result.admission.originBurst, 1, 1000000, "admission.");
     reader.integer(admission, "max-origins", result.admission.maxOrigins, 1, 1000000, "admission.");

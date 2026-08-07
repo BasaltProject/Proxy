@@ -593,7 +593,8 @@ bool ClientSession::acceptOrigin(std::string_view address, std::uint16_t port) {
         originAddress_ = address;
         originPort_ = port;
     }
-    if (policy.admission.attempt(clientAddress(), Clock::now()) != AdmissionResult::Accepted)
+    if (policy.admission.attempt(clientAddress(), Clock::now(), policy.antibot.knownOrigin(origin(), Clock::now())) !=
+        AdmissionResult::Accepted)
         return false;
     if (policy.antibot.connection(origin(), Clock::now()).action == antibot::Action::kDeny)
         return false;

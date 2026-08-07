@@ -94,7 +94,7 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     const auto* reputation = reader.child(table, "reputation");
     reader.keys(reputation,
                 {"max-origins", "origin-expiry-seconds", "ban-score", "ban-seconds", "new-origin-score",
-                 "failed-login-score", "limbo-failure-score"},
+                 "failed-login-score", "limbo-failure-score", "captcha-before-ban"},
                 "reputation.");
     number(reader, reputation, "max-origins", result.maxOrigins, 16, 4000000, "reputation.");
     number(reader, reputation, "origin-expiry-seconds", result.originExpirySeconds, 10, 604800, "reputation.");
@@ -103,6 +103,7 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     number(reader, reputation, "new-origin-score", result.newOriginScore, 0, 1000000, "reputation.");
     number(reader, reputation, "failed-login-score", result.failedLoginScore, 0, 1000000, "reputation.");
     number(reader, reputation, "limbo-failure-score", result.limboFailureScore, 0, 1000000, "reputation.");
+    reader.scalar(reputation, "captcha-before-ban", result.captchaBeforeBan, "reputation.");
 
     const auto* handshake = reader.child(table, "handshake");
     reader.keys(handshake, {"allowed-hosts", "blocked-protocols", "max-host-length", "unknown-host-score"},
@@ -150,7 +151,8 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     const auto* attack = reader.child(table, "attack-mode");
     reader.keys(attack,
                 {"enabled", "connections-per-second", "hard-connections-per-second", "failed-logins-per-second",
-                 "new-origins-per-second", "confirm-seconds", "cooldown-seconds"},
+                 "new-origins-per-second", "confirm-seconds", "cooldown-seconds", "entries-per-second",
+                 "passthrough-after-seconds"},
                 "attack-mode.");
     reader.scalar(attack, "enabled", result.attackEnabled, "attack-mode.");
     number(reader, attack, "hard-connections-per-second", result.attackHardConnectionsPerSecond, 0, 100000000,
@@ -160,6 +162,8 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     number(reader, attack, "new-origins-per-second", result.attackNewOriginsPerSecond, 1, 10000000, "attack-mode.");
     number(reader, attack, "confirm-seconds", result.attackConfirmSeconds, 1, 3600, "attack-mode.");
     number(reader, attack, "cooldown-seconds", result.attackCooldownSeconds, 1, 86400, "attack-mode.");
+    number(reader, attack, "entries-per-second", result.attackEntriesPerSecond, 0, 1000000, "attack-mode.");
+    number(reader, attack, "passthrough-after-seconds", result.attackPassthroughAfterSeconds, 0, 86400, "attack-mode.");
 
     const auto* limbo = reader.child(table, "limbo");
     reader.keys(limbo,
@@ -369,12 +373,15 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     }
 
     const auto* bedrock = reader.child(table, "bedrock");
-    reader.keys(bedrock, {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack", "connect-score"},
-                "bedrock.");
+    reader.keys(
+        bedrock,
+        {"enabled", "packets-per-second", "login-seconds", "xbox-in-attack", "connect-score", "half-open-per-second"},
+        "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrockEnabled, "bedrock.");
     reader.scalar(bedrock, "xbox-in-attack", result.bedrockXboxInAttack, "bedrock.");
     number(reader, bedrock, "packets-per-second", result.bedrockPacketsPerSecond, 0, 1000000, "bedrock.");
     number(reader, bedrock, "connect-score", result.bedrockConnectScore, 0, 1000, "bedrock.");
+    number(reader, bedrock, "half-open-per-second", result.bedrockHalfOpenPerSecond, 0, 1000000, "bedrock.");
     number(reader, bedrock, "login-seconds", result.bedrockLoginSeconds, 1, 600, "bedrock.");
 
     const auto* exploits = reader.child(table, "exploits");

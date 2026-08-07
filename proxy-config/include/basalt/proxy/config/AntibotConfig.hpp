@@ -59,6 +59,7 @@ struct AntibotConfig {
     std::int32_t newOriginScore = 5;
     std::int32_t failedLoginScore = 20;
     std::int32_t limboFailureScore = 35;
+    bool captchaBeforeBan = true;
 
     bool attackEnabled = true;
     std::int32_t attackConnectionsPerSecond = 40;
@@ -67,6 +68,8 @@ struct AntibotConfig {
     std::int32_t attackHardConnectionsPerSecond = 0;
     std::uint32_t attackConfirmSeconds = 2;
     std::uint32_t attackCooldownSeconds = 60;
+    std::int32_t attackEntriesPerSecond = 30;
+    std::uint32_t attackPassthroughAfterSeconds = 5;
 
     LimboMode limboMode = LimboMode::kAttack;
     std::int32_t limboScore = 40;
@@ -132,6 +135,7 @@ struct AntibotConfig {
     std::int32_t bedrockLoginSeconds = 15;
     bool bedrockXboxInAttack = true;
     std::int32_t bedrockConnectScore = 2;
+    std::int32_t bedrockHalfOpenPerSecond = 200;
     std::int32_t maxNbtDepth = 24;
     std::int32_t maxNbtKeys = 512;
     std::int32_t maxNbtBytes = 32768;

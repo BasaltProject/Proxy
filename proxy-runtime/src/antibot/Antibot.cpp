@@ -201,6 +201,7 @@ struct Record {
     std::uint16_t statusCount = 0;
     std::uint16_t limbo = 0;
     std::uint8_t nameCount = 0;
+    bool crossed = false;
     std::array<std::uint64_t, kNameMemory> names{};
     std::array<std::uint64_t, kNameMemory> skeletons{};
 
@@ -247,6 +248,10 @@ struct Antibot::Impl {
 
     std::atomic<std::int64_t> second{-1};
     std::atomic<bool> attack{false};
+    std::atomic<std::int64_t> attackStart{-1};
+    std::atomic<std::int64_t> entrySecond{-1};
+    std::atomic<std::int32_t> entryCount{0};
+    std::unordered_map<std::uint64_t, Clock::time_point> knownOrigins;
     std::atomic<int> manual{0};
     std::atomic<bool> hard{false};
 
@@ -319,6 +324,57 @@ struct Antibot::Impl {
         return record;
     }
 
+    bool passthroughReturned(std::uint64_t key, Clock::time_point now, const config::AntibotConfig& c) {
+        const std::lock_guard lock{passthroughMutex};
+        const auto found = passthroughPending.find(key);
+        if (found == passthroughPending.end())
+            return false;
+        const bool inWindow = now - found->second <= std::chrono::seconds{c.passthroughWindowSeconds};
+        passthroughPending.erase(found);
+        return inWindow;
+    }
+
+    void passthroughSend(std::uint64_t key, Clock::time_point now, const config::AntibotConfig& c) {
+        const std::lock_guard lock{passthroughMutex};
+        if (passthroughPending.size() >= c.verifiedMax)
+            passthroughPending.clear();
+        passthroughPending[key] = now;
+    }
+
+    [[nodiscard]] bool passthroughOn(const config::AntibotConfig& c, bool attackOn, Clock::time_point now) const {
+        if (c.passthroughEnabled && (c.passthroughAlways || attackOn))
+            return true;
+        if (!attackOn || c.attackPassthroughAfterSeconds == 0)
+            return false;
+        const auto start = attackStart.load(std::memory_order_relaxed);
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now - epoch).count();
+        return start >= 0 && seconds - start >= static_cast<std::int64_t>(c.attackPassthroughAfterSeconds);
+    }
+
+    void markAttackStart(Clock::time_point now) {
+        attackStart.store(std::chrono::duration_cast<std::chrono::seconds>(now - epoch).count(),
+                          std::memory_order_relaxed);
+    }
+
+    void surge(const Settings& settings, Clock::time_point now) {
+        const auto& c = settings.config;
+        if (!c.attackEnabled || attack.load(std::memory_order_relaxed))
+            return;
+        const auto conn = static_cast<std::int64_t>(perSecondConnections.load(std::memory_order_relaxed));
+        const auto fresh = static_cast<std::int64_t>(perSecondFresh.load(std::memory_order_relaxed));
+        if (conn < 2 * c.attackConnectionsPerSecond && fresh < 2 * c.attackNewOriginsPerSecond)
+            return;
+        {
+            const std::lock_guard lock{attackMutex};
+            if (attack.exchange(true, std::memory_order_relaxed))
+                return;
+            calmFor = 0;
+            markAttackStart(now);
+            attacks.fetch_add(1, std::memory_order_relaxed);
+        }
+        emit(Event::Kind::kAttackStarted, OriginKey{}, {}, Verdict{});
+    }
+
     void advance(const Settings& settings, Clock::time_point now) {
         const auto now_s = std::chrono::duration_cast<std::chrono::seconds>(now - epoch).count();
         if (now_s == second.load(std::memory_order_relaxed))
@@ -356,6 +412,7 @@ struct Antibot::Impl {
                 if (overFor >= c.attackConfirmSeconds) {
                     attack.store(true, std::memory_order_relaxed);
                     calmFor = 0;
+                    markAttackStart(now);
                     started = true;
                     attacks.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -456,6 +513,7 @@ Verdict Antibot::connection(const OriginKey& origin, Clock::time_point now) {
     impl_->connections.fetch_add(1, std::memory_order_relaxed);
     impl_->advance(*settings, now);
     impl_->perSecondConnections.fetch_add(1, std::memory_order_relaxed);
+    impl_->surge(*settings, now);
     if (Settings::within(settings->trusted, origin))
         return {Action::kAllow, Reason::kTrusted, 0};
     if (Settings::within(settings->blocked, origin)) {
@@ -576,6 +634,7 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
     std::int32_t score = 0;
     bool banned = false;
     bool newBan = false;
+    bool captchaFirst = false;
     bool pinged = false;
     {
         const std::lock_guard lock{shard.mutex};
@@ -603,9 +662,15 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
             record.add(c.noPingScore, now);
         score = record.effective(now);
         if (record.bannedUntil <= now && score >= c.banScore && !verified) {
-            record.bannedUntil = now + std::chrono::seconds{c.banSeconds};
-            banned = true;
-            newBan = true;
+            if (c.captchaBeforeBan && c.captchaEnabled && c.limboMode != config::LimboMode::kOff && !record.crossed &&
+                !impl_->attackNow()) {
+                record.crossed = true;
+                captchaFirst = true;
+            } else {
+                record.bannedUntil = now + std::chrono::seconds{c.banSeconds};
+                banned = true;
+                newBan = true;
+            }
         }
         banned = banned || (record.bannedUntil > now && !verified);
     }
@@ -618,6 +683,11 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
     const bool attack = impl_->attackNow();
     if (attack && c.requirePingInAttack && !pinged)
         return deny(Reason::kNoPing, score);
+    const bool passthrough = impl_->passthroughOn(c, attack, now);
+    if (passthrough && impl_->passthroughReturned(Impl::verifiedKey(name, origin), now, c)) {
+        verify(name, origin, now);
+        return {Action::kAllow, Reason::kVerified, score};
+    }
 
     bool limbo = false;
     Reason why = Reason::kNone;
@@ -637,31 +707,18 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
         why = attack ? Reason::kAttack : Reason::kScore;
         break;
     }
+    if (captchaFirst) {
+        limbo = true;
+        why = Reason::kScore;
+    }
     if (!limbo && c.limboMode != config::LimboMode::kOff && c.captchaEnabled &&
         c.captchaMode == config::CaptchaMode::kSuspicious && score >= c.captchaScore) {
         limbo = true;
         why = Reason::kScore;
     }
-    if (!limbo && c.passthroughEnabled && (c.passthroughAlways || attack)) {
-        const auto key = Impl::verifiedKey(name, origin);
-        bool returned = false;
-        {
-            const std::lock_guard lock{impl_->passthroughMutex};
-            const auto found = impl_->passthroughPending.find(key);
-            returned = found != impl_->passthroughPending.end() &&
-                       now - found->second <= std::chrono::seconds{c.passthroughWindowSeconds};
-            if (found != impl_->passthroughPending.end())
-                impl_->passthroughPending.erase(found);
-            if (!returned) {
-                if (impl_->passthroughPending.size() >= c.verifiedMax)
-                    impl_->passthroughPending.clear();
-                impl_->passthroughPending[key] = now;
-            }
-        }
-        if (!returned)
-            return {Action::kDeny, Reason::kPassthrough, score};
-        verify(name, origin, now);
-        return {Action::kAllow, Reason::kVerified, score};
+    if (!limbo && passthrough) {
+        impl_->passthroughSend(Impl::verifiedKey(name, origin), now, c);
+        return {Action::kDeny, Reason::kPassthrough, score};
     }
     if (!limbo)
         return {Action::kAllow, Reason::kNone, score};
@@ -672,7 +729,7 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
     }
     const bool captcha =
         c.captchaEnabled &&
-        (impl_->hard.load(std::memory_order_relaxed) || c.captchaMode == config::CaptchaMode::kAlways ||
+        (captchaFirst || impl_->hard.load(std::memory_order_relaxed) || c.captchaMode == config::CaptchaMode::kAlways ||
          (c.captchaMode == config::CaptchaMode::kAttack && attack) ||
          (c.captchaMode == config::CaptchaMode::kSuspicious && score >= c.captchaScore));
     const Verdict verdict{captcha ? Action::kCaptcha : Action::kLimbo, why, score};
@@ -726,10 +783,17 @@ void Antibot::leaveLimbo(const OriginKey& origin, const std::string& name) {
     impl_->limboNow.fetch_sub(1, std::memory_order_relaxed);
 }
 
-void Antibot::limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
+bool Antibot::limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
     impl_->limboPassed.fetch_add(1, std::memory_order_relaxed);
+    const auto settings = impl_->snapshot();
+    const auto& c = settings->config;
+    if (impl_->passthroughOn(c, impl_->attackNow(), now)) {
+        impl_->passthroughSend(Impl::verifiedKey(name, origin), now, c);
+        return true;
+    }
     verify(name, origin, now);
     impl_->emit(Event::Kind::kVerified, origin, name, Verdict{Action::kAllow, Reason::kVerified, 0});
+    return false;
 }
 
 void Antibot::limboFailed(const OriginKey& origin, std::string_view name, Reason reason, Clock::time_point now) {
@@ -762,11 +826,35 @@ void Antibot::verify(std::string_view name, const std::optional<OriginKey>& orig
     }
     const auto expiry = now + std::chrono::hours{settings->config.verifiedTtlHours};
     impl_->verified[Impl::verifiedKey(name, origin)] = expiry;
+    if (origin) {
+        if (impl_->knownOrigins.size() >= settings->config.verifiedMax)
+            impl_->knownOrigins.clear();
+        impl_->knownOrigins[hashOf(*origin)] = expiry;
+    }
     if (impl_->store.save)
         impl_->store.save(name, origin ? printable(*origin) : std::string{},
                           std::chrono::duration_cast<std::chrono::seconds>(
                               std::chrono::system_clock::now().time_since_epoch() + (expiry - now))
                               .count());
+}
+
+bool Antibot::knownOrigin(const OriginKey& origin, Clock::time_point now) const {
+    const std::lock_guard lock{impl_->verifiedMutex};
+    const auto found = impl_->knownOrigins.find(hashOf(origin));
+    return found != impl_->knownOrigins.end() && found->second > now;
+}
+
+bool Antibot::entryAllowed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
+    const auto settings = impl_->snapshot();
+    const auto& c = settings->config;
+    if (!c.enabled || c.attackEntriesPerSecond <= 0 || !impl_->attackNow())
+        return true;
+    if (Settings::within(settings->trusted, origin) || impl_->verifiedNow(*settings, name, origin, now))
+        return true;
+    const auto second = std::chrono::duration_cast<std::chrono::seconds>(now - impl_->epoch).count();
+    if (impl_->entrySecond.exchange(second, std::memory_order_relaxed) != second)
+        impl_->entryCount.store(0, std::memory_order_relaxed);
+    return impl_->entryCount.fetch_add(1, std::memory_order_relaxed) < c.attackEntriesPerSecond;
 }
 
 bool Antibot::exploitText(std::string_view text) const {

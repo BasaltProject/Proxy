@@ -360,7 +360,10 @@ struct ProxyRuntime::Impl {
                                             settings->trustsUpstream(connection->remoteAddress()),
                                             runtime.services.isOperator};
                 if (!origin.awaitHeader) {
-                    if (runtime.admission.attempt(connection->remoteAddress(), now) != AdmissionResult::Accepted) {
+                    if (runtime.admission.attempt(
+                            connection->remoteAddress(), now,
+                            runtime.access.antibot.knownOrigin(antibot::originOf(connection->remoteAddress()), now)) !=
+                        AdmissionResult::Accepted) {
                         runtime.rejected.fetch_add(1, std::memory_order_relaxed);
                         continue;
                     }
@@ -476,6 +479,8 @@ struct ProxyRuntime::Impl {
     config::ProxyConfig config;
     SnapshotCell topology;
     Admission admission;
+    std::atomic<std::int64_t> bedrockSecond{-1};
+    std::atomic<std::uint32_t> bedrockOpened{0};
     detail::AccessPolicy access;
     std::unique_ptr<antibot::AttackReport> report;
     ResourceBudget slots;
@@ -1006,6 +1011,14 @@ bool ProxyRuntime::bedrockOffline(std::string_view address, bool connecting) {
     const auto verdict = engine.connection(origin, now);
     if (verdict.action == antibot::Action::kDeny)
         return false;
+    if (config->bedrockHalfOpenPerSecond > 0 && engine.attackActive(now)) {
+        const auto second = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+        if (impl_->bedrockSecond.exchange(second, std::memory_order_relaxed) != second)
+            impl_->bedrockOpened.store(0, std::memory_order_relaxed);
+        if (impl_->bedrockOpened.fetch_add(1, std::memory_order_relaxed) >=
+            static_cast<std::uint32_t>(config->bedrockHalfOpenPerSecond))
+            return false;
+    }
     if (verdict.score >= config->banScore) {
         engine.ban(origin, now);
         return false;

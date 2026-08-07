@@ -26,6 +26,11 @@ public:
         return true;
     }
 
+    void give(Clock::time_point now) {
+        refill(now);
+        credit_ = std::min(capacity_, credit_ + kUnit);
+    }
+
     bool full(Clock::time_point now) {
         refill(now);
         return credit_ == capacity_;
@@ -72,13 +77,15 @@ struct Admission::Impl {
 
     config::AdmissionConfig config;
     Bucket global;
+    Bucket status;
     Clock::time_point latest;
     mutable std::mutex mutex;
     std::unordered_map<std::string, Origin> origins;
     decltype(origins)::iterator sweep;
 
     Impl(const config::AdmissionConfig& settings, Clock::time_point start)
-        : config(settings), global(settings.globalRate, settings.globalBurst, start), latest(start) {
+        : config(settings), global(settings.globalRate, settings.globalBurst, start),
+          status(settings.statusRate, settings.statusBurst, start), latest(start) {
         if (settings.globalRate == 0 || settings.globalBurst == 0 || settings.originRate == 0 ||
             settings.originBurst == 0 || settings.maxOrigins == 0 || settings.maxOrigins > 1000000 ||
             settings.originExpiryMs == 0)
@@ -105,7 +112,7 @@ Admission::Admission(const config::AdmissionConfig& config, Clock::time_point st
 
 Admission::~Admission() = default;
 
-AdmissionResult Admission::attempt(std::string_view literalOrigin, Clock::time_point now) {
+AdmissionResult Admission::attempt(std::string_view literalOrigin, Clock::time_point now, bool known) {
     auto key = originKey(literalOrigin);
     if (key.empty())
         return AdmissionResult::InvalidOrigin;
@@ -113,9 +120,6 @@ AdmissionResult Admission::attempt(std::string_view literalOrigin, Clock::time_p
     now = std::max(now, impl_->latest);
     impl_->latest = now;
     impl_->expire(now);
-    // All attempts spend global credit, including those denied by a per-origin limit.
-    if (!impl_->global.take(now))
-        return AdmissionResult::GlobalRate;
     auto found = impl_->origins.find(key);
     if (found == impl_->origins.end()) {
         if (impl_->origins.size() == impl_->config.maxOrigins)
@@ -126,7 +130,20 @@ AdmissionResult Admission::attempt(std::string_view literalOrigin, Clock::time_p
                     .first;
     }
     found->second.seen = now;
-    return found->second.bucket.take(now) ? AdmissionResult::Accepted : AdmissionResult::OriginRate;
+    // An origin over its own limit must not drain the credit every other origin shares.
+    if (!found->second.bucket.take(now))
+        return AdmissionResult::OriginRate;
+    if (known)
+        return AdmissionResult::Accepted;
+    return impl_->global.take(now) ? AdmissionResult::Accepted : AdmissionResult::GlobalRate;
+}
+
+bool Admission::reclassifyAsStatus(Clock::time_point now) {
+    std::lock_guard lock{impl_->mutex};
+    now = std::max(now, impl_->latest);
+    impl_->latest = now;
+    impl_->global.give(now);
+    return impl_->status.take(now);
 }
 
 std::size_t Admission::trackedOrigins() const {

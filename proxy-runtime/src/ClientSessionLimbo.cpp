@@ -270,10 +270,8 @@ bool ClientSession::limboSendCaptcha() {
     return true;
 }
 
-bool ClientSession::limboFailed(antibot::Reason reason) {
+bool ClientSession::limboLeave(std::string_view key) {
     namespace protocol = wire::protocol;
-    const auto key = reason == antibot::Reason::kTimeout ? "antibot-timeout" : "antibot-failed";
-    access_.policy->antibot.limboFailed(origin(), name_, reason, Clock::now());
     limboRun_.reset();
     limboSlot_.reset();
     closing_ = true;
@@ -292,8 +290,17 @@ bool ClientSession::limboFailed(antibot::Reason reason) {
     return queuePacket(frame_.readable());
 }
 
+bool ClientSession::limboFailed(antibot::Reason reason) {
+    const auto key = reason == antibot::Reason::kTimeout ? "antibot-timeout" : "antibot-failed";
+    access_.policy->antibot.limboFailed(origin(), name_, reason, Clock::now());
+    return limboLeave(key);
+}
+
 bool ClientSession::limboPassed() {
-    access_.policy->antibot.limboPassed(origin(), name_, Clock::now());
+    if (!access_.policy->antibot.entryAllowed(origin(), name_, Clock::now()))
+        return limboLeave("antibot-retry");
+    if (access_.policy->antibot.limboPassed(origin(), name_, Clock::now()))
+        return limboLeave("antibot-rejoin");
     limboRun_.reset();
     limboSlot_.reset();
     limboPackets_.reset();

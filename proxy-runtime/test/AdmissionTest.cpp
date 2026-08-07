@@ -26,9 +26,10 @@ TEST_CASE("origin and global buckets retain fractional monotonic credit") {
     CHECK(gate.attempt("192.0.2.1", start + 250ms) == AdmissionResult::OriginRate);
     CHECK(gate.attempt("192.0.2.1", start + 500ms) == AdmissionResult::Accepted);
     CHECK(gate.attempt("192.0.2.2", start + 500ms) == AdmissionResult::Accepted);
-    CHECK(gate.attempt("192.0.2.3", start + 500ms) == AdmissionResult::GlobalRate);
-    CHECK(gate.attempt("192.0.2.3", start) == AdmissionResult::GlobalRate);
-    CHECK(gate.attempt("192.0.2.3", start + 1s) == AdmissionResult::Accepted);
+    CHECK(gate.attempt("192.0.2.3", start + 500ms) == AdmissionResult::Accepted);
+    CHECK(gate.attempt("192.0.2.4", start + 500ms) == AdmissionResult::GlobalRate);
+    CHECK(gate.attempt("192.0.2.4", start) == AdmissionResult::OriginRate);
+    CHECK(gate.attempt("192.0.2.4", start + 1s) == AdmissionResult::Accepted);
 }
 
 TEST_CASE("origin capacity fails closed and expiry cannot reset an exhausted bucket") {

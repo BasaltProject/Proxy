@@ -84,8 +84,11 @@ update-checker = true
 
 [admission]
 # Token buckets: sustained attempts per second and burst capacity, globally and per origin IP.
-global-rate = 200
-global-burst = 400
+global-rate = 5000
+global-burst = 10000
+# Server list requests count here, not against the global bucket, so a status flood cannot keep players out.
+status-rate = 2000
+status-burst = 4000
 origin-rate = 10
 origin-burst = 20
 # An origin table at capacity rejects new origins until idle entries expire.

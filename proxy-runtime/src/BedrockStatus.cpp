@@ -159,7 +159,8 @@ bool BedrockStatus::start() {
 
 void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire::io::UdpEndpoint& peer,
                           std::shared_ptr<wire::bedrock::NetherNetLink> link) {
-    if (admission_.attempt(originOf(peer)) != AdmissionResult::Accepted) {
+    if (admission_.attempt(originOf(peer)) != AdmissionResult::Accepted ||
+        (link && guard_.offline && !guard_.offline(originOf(peer), true))) {
         if (link)
             link->close();
         else if (server_)
@@ -262,6 +263,13 @@ bool BedrockStatus::startNetherNet() {
     nether_->onStatus([this] {
         const std::lock_guard guard{netherStatusLock_};
         return netherStatus_;
+    });
+    nether_->onSignal([this](std::string_view address, bool connecting) {
+        return !guard_.offline || guard_.offline(address, connecting);
+    });
+    nether_->onAbandon([this](std::string_view address) {
+        if (guard_.failed)
+            guard_.failed(address);
     });
     nether_->onConnect(
         [this](const std::shared_ptr<wire::bedrock::NetherNetLink>& link) { adopt(*link, link->peer(), link); });

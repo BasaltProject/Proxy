@@ -66,6 +66,9 @@ antibot-legacy = "<red>Please connect with a newer game version while the server
 # Antibot: a verified origin has to join again.
 antibot-rejoin = "<red>Please join again to connect.</red>"
 
+# Antibot: the server is too busy to let a verified player in right now.
+antibot-retry = "<red>The server is busy right now. Please try again in a moment.</red>"
+
 # Antibot: a chat message that matched an exploit pattern.
 antibot-exploit = "<red>Your message was refused.</red>"
 

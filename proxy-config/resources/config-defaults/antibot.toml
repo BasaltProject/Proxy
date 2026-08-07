@@ -34,6 +34,9 @@ ban-seconds = 600
 new-origin-score = 5
 failed-login-score = 20
 limbo-failure-score = 35
+# The first time an origin with no ban or attack behind it crosses ban-score, send it to the captcha instead of banning it;
+# failing the captcha or crossing the score again bans. Needs [captcha] enabled. In a confirmed attack the ban is immediate.
+captcha-before-ban = true
 
 [handshake]
 # Host names a client may put in its handshake (the address it typed), compared without case. Empty accepts any.
@@ -90,6 +93,11 @@ new-origins-per-second = 25
 confirm-seconds = 2
 # Seconds everything must stay under half of the thresholds before attack mode stops.
 cooldown-seconds = 60
+# During an attack, most unverified clients that finish the limbo and may enter a backend each second; the rest are told to
+# try again. Verified and trusted players are never counted. 0 turns the budget off.
+entries-per-second = 30
+# Seconds an attack must last before passthrough applies by itself even when [passthrough] is off. 0 never does.
+passthrough-after-seconds = 5
 
 [limbo]
 # Where a login is held, in a small empty world on the proxy, before a backend sees it. A client that cannot behave
@@ -236,6 +244,8 @@ packets-per-second = 1500
 login-seconds = 15
 # Score added to an address each time it opens a new Bedrock session, so a flood from one address gets banned.
 connect-score = 2
+# While attack mode is on, new Bedrock sessions per second accepted from all addresses together; 0 turns the limit off.
+half-open-per-second = 200
 # While attack mode is on, only let in Bedrock players whose identity Xbox Live signed.
 xbox-in-attack = true
 

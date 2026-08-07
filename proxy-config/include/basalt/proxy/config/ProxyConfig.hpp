@@ -103,8 +103,10 @@ struct RuntimeConfig {
 };
 
 struct AdmissionConfig {
-    std::uint32_t globalRate = 200;
-    std::uint32_t globalBurst = 400;
+    std::uint32_t globalRate = 5000;
+    std::uint32_t globalBurst = 10000;
+    std::uint32_t statusRate = 2000;
+    std::uint32_t statusBurst = 4000;
     std::uint32_t originRate = 10;
     std::uint32_t originBurst = 20;
     std::size_t maxOrigins = 65536;

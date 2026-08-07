@@ -157,7 +157,11 @@ public:
 
     [[nodiscard]] std::optional<LimboSlot> enterLimbo(const OriginKey& origin, std::string_view name,
                                                       Clock::time_point now);
-    void limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now);
+    /// True when passthrough applies: the client must be sent away and rejoin instead of continuing.
+    [[nodiscard]] bool limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now);
+    [[nodiscard]] bool knownOrigin(const OriginKey& origin, Clock::time_point now) const;
+    /// Counts one more client entering a backend during an attack; false once the per-second budget is spent.
+    [[nodiscard]] bool entryAllowed(const OriginKey& origin, std::string_view name, Clock::time_point now);
     void limboFailed(const OriginKey& origin, std::string_view name, Reason reason, Clock::time_point now);
 
     /// Trusts `name` from `origin`, or from anywhere when `origin` is empty, until the verified lifetime ends.

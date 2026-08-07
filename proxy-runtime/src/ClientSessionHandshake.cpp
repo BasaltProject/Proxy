@@ -55,6 +55,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                 antibot::Action::kDeny)
             return false;
         if (hello->intent == protocol::handshake::ClientIntent::Status) {
+            if (access_.policy && !access_.policy->admission.reclassifyAsStatus(Clock::now()))
+                return false;
             virtualHost_ = hello->hostName;
             statusProtocol_ = hello->protocolVersion;
             state_ = State::StatusRequest;
