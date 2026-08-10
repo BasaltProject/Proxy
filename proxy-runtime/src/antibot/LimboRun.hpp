@@ -58,11 +58,17 @@ public:
 
     [[nodiscard]] bool degraded() const noexcept { return degraded_; }
 
+    /// Requires a typed command (the register or login command) instead of a code; called once before play.
+    void armChatCheck();
+
+    [[nodiscard]] bool chatCheck() const noexcept { return chat_; }
+
 private:
     [[nodiscard]] Step fail(Reason reason);
     [[nodiscard]] Step soften();
     [[nodiscard]] Step movement(double x, double y, double z, std::uint8_t flags, Clock::time_point now);
     [[nodiscard]] Step finished();
+    [[nodiscard]] Step typedCommand(std::string_view text);
 
     config::AntibotConfig config_;
     Phase phase_ = Phase::kLoginAck;
@@ -98,6 +104,7 @@ private:
     double spawnY_ = 0;
     std::string answer_;
     bool solved_ = true;
+    bool chat_ = false;
     std::int32_t attemptsLeft_ = 0;
     Clock::time_point captchaDeadline_;
 };

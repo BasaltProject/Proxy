@@ -178,6 +178,12 @@ struct DecisionResult {
     std::optional<std::int32_t> online;
 };
 
+struct VerifiedRecord {
+    std::string name;
+    std::string origin;
+    std::int64_t expiresUnixSeconds = 0;
+};
+
 struct RuntimeServices {
     wire::auth::AuthenticationFetch authentication;
     std::function<std::expected<std::vector<wire::io::TcpAddress>, wire::io::DnsError>(std::string_view, std::uint16_t,
@@ -198,6 +204,13 @@ struct RuntimeServices {
         playerLogin = {};
     /// The text of one of the proxy's own refusals by its messages.toml key; empty keeps the built-in English one.
     std::function<std::string(std::string_view key)> kickText = {};
+    /// Where the antibot keeps verified players across restarts. The writers run under an antibot lock and must only
+    /// queue their work.
+    std::function<std::vector<VerifiedRecord>(std::size_t limit)> verifiedLoad = {};
+    std::function<void(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds)> verifiedSave =
+        {};
+    std::function<void(std::string_view name)> verifiedErase = {};
+    std::function<void(std::int64_t nowUnixSeconds, std::int32_t batch, std::size_t keep)> verifiedPurge = {};
     /// Whether a player is in the operator group; operators are exempt from the spam kick.
     std::function<bool(std::string_view player)> isOperator = {};
     /// Those commands for one player, added to every command tree the proxy relays so clients know them.

@@ -275,6 +275,21 @@ int run(const cliCommand::Run& command) {
         return dispatcher.suggest(source, line);
     };
     services.isOperator = [&permissions](std::string_view player) { return permissions.isOperator(player); };
+    services.verifiedLoad = [&players](std::size_t limit) {
+        std::vector<VerifiedRecord> records;
+        const auto now =
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+        for (auto& row : (*players)->loadVerified(now.count(), static_cast<std::int32_t>(limit)))
+            records.push_back({std::move(row.name), std::move(row.origin), row.expiresAtEpochSeconds});
+        return records;
+    };
+    services.verifiedSave = [&players](std::string_view name, std::string_view origin, std::int64_t expires) {
+        (*players)->saveVerified(std::string{name}, std::string{origin}, expires);
+    };
+    services.verifiedErase = [&players](std::string_view name) { (*players)->eraseVerified(std::string{name}); };
+    services.verifiedPurge = [&players](std::int64_t now, std::int32_t batch, std::size_t keep) {
+        (*players)->purgeVerified(now, batch, keep);
+    };
     services.kickText = [&messages](std::string_view key) { return messages.kick(key); };
     services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))

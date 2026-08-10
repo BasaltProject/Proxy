@@ -245,6 +245,7 @@ private:
     [[nodiscard]] bool limboKeepAlive(Clock::time_point now);
     [[nodiscard]] bool limboPassed();
     [[nodiscard]] bool limboLeave(std::string_view key);
+    bool limboTransfer();
     [[nodiscard]] bool limboFailed(antibot::Reason reason);
     [[nodiscard]] bool limboSendCaptcha();
     [[nodiscard]] bool completeLimboHandover();

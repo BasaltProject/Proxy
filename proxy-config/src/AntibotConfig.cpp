@@ -52,8 +52,8 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     Reader reader{std::string{directory} + "/antibot.toml", {}};
     reader.keys(&table,
                 {"general", "lists", "reputation", "handshake", "names", "status", "attack-mode", "limbo", "captcha",
-                 "passthrough", "notifications", "tcp", "kernel-block", "exploits", "bedrock", "anti-vpn", "geo",
-                 "verified"},
+                 "passthrough", "chat-check", "notifications", "tcp", "kernel-block", "exploits", "bedrock", "anti-vpn",
+                 "geo", "verified"},
                 "");
 
     const auto* general = reader.child(table, "general");
@@ -266,7 +266,13 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     number(reader, captcha, "timeout-seconds", result.captchaTimeoutSeconds, 5, 600, "captcha.");
 
     const auto* passthrough = reader.child(table, "passthrough");
-    reader.keys(passthrough, {"enabled", "mode", "window-seconds"}, "passthrough.");
+    reader.keys(passthrough, {"enabled", "mode", "window-seconds", "transfer", "transfer-host", "transfer-port"},
+                "passthrough.");
+    reader.scalar(passthrough, "transfer", result.passthroughTransfer, "passthrough.");
+    reader.scalar(passthrough, "transfer-host", result.passthroughTransferHost, "passthrough.");
+    number(reader, passthrough, "transfer-port", result.passthroughTransferPort, 0, 65535, "passthrough.");
+    if (result.passthroughTransferHost.size() > 255)
+        reader.fail("passthrough.transfer-host", "is longer than 255 characters");
     reader.scalar(passthrough, "enabled", result.passthroughEnabled, "passthrough.");
     std::string passthroughMode = "attack";
     reader.scalar(passthrough, "mode", passthroughMode, "passthrough.");
@@ -275,12 +281,48 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     result.passthroughAlways = passthroughMode == "always";
     number(reader, passthrough, "window-seconds", result.passthroughWindowSeconds, 5, 86400, "passthrough.");
 
+    const auto* chatCheck = reader.child(table, "chat-check");
+    reader.keys(chatCheck,
+                {"enabled", "mode", "register-command", "login-command", "min-length", "attempts", "timeout-seconds"},
+                "chat-check.");
+    reader.scalar(chatCheck, "enabled", result.chatCheckEnabled, "chat-check.");
+    std::string chatMode = "attack";
+    reader.scalar(chatCheck, "mode", chatMode, "chat-check.");
+    if (chatMode == "attack")
+        result.chatCheckMode = CaptchaMode::kAttack;
+    else if (chatMode == "suspicious")
+        result.chatCheckMode = CaptchaMode::kSuspicious;
+    else if (chatMode == "always")
+        result.chatCheckMode = CaptchaMode::kAlways;
+    else
+        reader.fail("chat-check.mode", "must be attack, suspicious or always");
+    reader.scalar(chatCheck, "register-command", result.chatCheckRegisterCommand, "chat-check.");
+    reader.scalar(chatCheck, "login-command", result.chatCheckLoginCommand, "chat-check.");
+    for (const auto* command : {&result.chatCheckRegisterCommand, &result.chatCheckLoginCommand})
+        if (command->empty() || command->size() > 32 ||
+            !std::ranges::all_of(*command, [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; }))
+            reader.fail("chat-check.register-command", "and login-command are letters, digits and _ only");
+    number(reader, chatCheck, "min-length", result.chatCheckMinLength, 1, 64, "chat-check.");
+    number(reader, chatCheck, "attempts", result.chatCheckAttempts, 1, 20, "chat-check.");
+    number(reader, chatCheck, "timeout-seconds", result.chatCheckTimeoutSeconds, 5, 600, "chat-check.");
+
     const auto* notifications = reader.child(table, "notifications");
-    reader.keys(notifications, {"quiet-logs-in-attack", "webhook-url"}, "notifications.");
+    reader.keys(notifications, {"quiet-logs-in-attack", "webhook-url", "webhook-trust-file"}, "notifications.");
     reader.scalar(notifications, "quiet-logs-in-attack", result.quietLogsInAttack, "notifications.");
     reader.scalar(notifications, "webhook-url", result.webhookUrl, "notifications.");
     if (!result.webhookUrl.empty() && !result.webhookUrl.starts_with("https://"))
         reader.fail("notifications.webhook-url", "must be empty or an https:// address");
+    std::string trustFile;
+    reader.scalar(notifications, "webhook-trust-file", trustFile, "notifications.");
+    if (!trustFile.empty()) {
+        const auto path = std::filesystem::path{trustFile}.is_absolute() ? std::filesystem::path{trustFile}
+                                                                         : std::filesystem::path{directory} / trustFile;
+        std::ifstream file{path, std::ios::binary};
+        if (!file)
+            reader.fail("notifications.webhook-trust-file", "cannot read " + path.string());
+        else
+            result.webhookTrustPem.assign(std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{});
+    }
 
     const auto* tcp = reader.child(table, "tcp");
     reader.keys(tcp, {"enabled", "min-mss", "max-retransmits", "max-rtt-ms", "score"}, "tcp.");
@@ -409,7 +451,21 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
             reader.fail("exploits.patterns", "an entry needs at least one character besides *");
 
     const auto* verified = reader.child(table, "verified");
-    reader.keys(verified, {"ttl-hours", "max-entries"}, "verified.");
+    reader.keys(verified,
+                {"ttl-hours", "max-entries", "persist", "purge-seconds", "purge-batch", "sync-directory",
+                 "sync-seconds", "sync-id"},
+                "verified.");
+    reader.scalar(verified, "persist", result.verifiedPersist, "verified.");
+    number(reader, verified, "purge-seconds", result.verifiedPurgeSeconds, 10, 86400, "verified.");
+    number(reader, verified, "purge-batch", result.verifiedPurgeBatch, 1, 100000, "verified.");
+    reader.scalar(verified, "sync-directory", result.verifiedSyncDirectory, "verified.");
+    number(reader, verified, "sync-seconds", result.verifiedSyncSeconds, 5, 3600, "verified.");
+    reader.scalar(verified, "sync-id", result.verifiedSyncId, "verified.");
+    if (!result.verifiedSyncId.empty() &&
+        (result.verifiedSyncId.size() > 64 || !std::ranges::all_of(result.verifiedSyncId, [](unsigned char c) {
+             return std::isalnum(c) != 0 || c == '_' || c == '-';
+         })))
+        reader.fail("verified.sync-id", "is letters, digits, - and _ only, up to 64 characters");
     number(reader, verified, "ttl-hours", result.verifiedTtlHours, 0, 87600, "verified.");
     number(reader, verified, "max-entries", result.verifiedMax, 16, 10000000, "verified.");
 

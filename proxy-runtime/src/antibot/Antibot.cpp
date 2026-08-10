@@ -2,6 +2,7 @@
 
 #include "AddressFeeds.hpp"
 #include "TextScan.hpp"
+#include "VerifiedKeeper.hpp"
 
 #include <basalt/proxy/config/AddressRange.hpp>
 
@@ -52,6 +53,22 @@ constexpr std::size_t kNameMemory = 8;
     std::string result{text};
     std::ranges::transform(result, result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
+}
+
+[[nodiscard]] bool isV4(const OriginKey& key) {
+    const auto& b = key.bytes;
+    return std::all_of(b.begin(), b.begin() + 10, [](auto v) { return v == 0; }) && b[10] == 0xff && b[11] == 0xff;
+}
+
+[[nodiscard]] std::string storable(const OriginKey& key) {
+    char text[64];
+    const auto& b = key.bytes;
+    if (isV4(key))
+        std::snprintf(text, sizeof text, "%u.%u.%u.%u", b[12], b[13], b[14], b[15]);
+    else
+        std::snprintf(text, sizeof text, "%x:%x:%x:%x::", b[0] << 8 | b[1], b[2] << 8 | b[3], b[4] << 8 | b[5],
+                      b[6] << 8 | b[7]);
+    return text;
 }
 
 [[nodiscard]] std::string printable(const OriginKey& key) {
@@ -143,6 +160,8 @@ std::string_view actionName(Action action) noexcept {
         return "captcha";
     case Action::kDeny:
         return "deny";
+    case Action::kChatCheck:
+        return "chat-check";
     }
     return "allow";
 }
@@ -238,13 +257,15 @@ struct Antibot::Impl {
     std::unique_ptr<AddressFeeds> feeds;
 
     std::mutex verifiedMutex;
-    std::unordered_map<std::uint64_t, Clock::time_point> verified;
+    std::unordered_map<std::uint64_t, VerifiedEntry> verified;
     VerifiedStore store;
+    std::unique_ptr<VerifiedKeeper> keeper;
     std::atomic<std::uint64_t> exploitsRefused{0};
     std::mutex limboNamesMutex;
     std::unordered_set<std::string> limboNames;
     std::mutex passthroughMutex;
     std::unordered_map<std::uint64_t, Clock::time_point> passthroughPending;
+    std::unordered_map<std::uint64_t, Clock::time_point> transfers;
 
     std::atomic<std::int64_t> second{-1};
     std::atomic<bool> attack{false};
@@ -277,6 +298,8 @@ struct Antibot::Impl {
     std::atomic<std::uint32_t> verdictSkipped{0};
 
     void emit(Event::Kind kind, const OriginKey& origin, std::string_view player, Verdict verdict) {
+        if (kind == Event::Kind::kAttackStarted && keeper)
+            keeper->poke();
         std::uint32_t skipped = 0;
         if (kind == Event::Kind::kVerdict) {
             const auto now = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - epoch).count();
@@ -445,7 +468,7 @@ struct Antibot::Impl {
             const auto found = verified.find(key);
             if (found == verified.end())
                 continue;
-            if (found->second > now)
+            if (found->second.expiry > now)
                 return true;
             verified.erase(found);
         }
@@ -475,11 +498,16 @@ Antibot::Antibot(const config::AntibotConfig& config, Clock::time_point start) {
         settings = Settings::make(config::AntibotConfig{});
     impl_ = std::make_unique<Impl>(std::move(*settings), start);
     impl_->feeds = std::make_unique<AddressFeeds>([this] { return this->config(); });
+    impl_->keeper = std::make_unique<VerifiedKeeper>(*this);
 }
 
+bool Antibot::attackOn() const { return impl_->attackNow(); }
+
 Antibot::~Antibot() {
-    if (impl_)
+    if (impl_) {
+        impl_->keeper.reset();
         impl_->feeds.reset();
+    }
 }
 
 std::expected<void, std::string> Antibot::apply(const config::AntibotConfig& config) {
@@ -716,6 +744,15 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
         limbo = true;
         why = Reason::kScore;
     }
+    const auto chatWanted = [&] {
+        return c.chatCheckEnabled && (c.chatCheckMode == config::CaptchaMode::kAlways ||
+                                      (c.chatCheckMode == config::CaptchaMode::kAttack && attack) ||
+                                      (c.chatCheckMode == config::CaptchaMode::kSuspicious && score >= c.captchaScore));
+    };
+    if (!limbo && c.limboMode != config::LimboMode::kOff && chatWanted()) {
+        limbo = true;
+        why = Reason::kScore;
+    }
     if (!limbo && passthrough) {
         impl_->passthroughSend(Impl::verifiedKey(name, origin), now, c);
         return {Action::kDeny, Reason::kPassthrough, score};
@@ -732,7 +769,11 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
         (captchaFirst || impl_->hard.load(std::memory_order_relaxed) || c.captchaMode == config::CaptchaMode::kAlways ||
          (c.captchaMode == config::CaptchaMode::kAttack && attack) ||
          (c.captchaMode == config::CaptchaMode::kSuspicious && score >= c.captchaScore));
-    const Verdict verdict{captcha ? Action::kCaptcha : Action::kLimbo, why, score};
+    const bool forcedCaptcha = captchaFirst || impl_->hard.load(std::memory_order_relaxed);
+    const Action chosen = captcha && (forcedCaptcha || !chatWanted()) ? Action::kCaptcha
+                          : chatWanted()                              ? Action::kChatCheck
+                                                                      : Action::kLimbo;
+    const Verdict verdict{chosen, why, score};
     impl_->emit(Event::Kind::kVerdict, origin, name, verdict);
     return verdict;
 }
@@ -801,6 +842,7 @@ void Antibot::limboFailed(const OriginKey& origin, std::string_view name, Reason
     impl_->perSecondFailures.fetch_add(1, std::memory_order_relaxed);
     const auto settings = impl_->snapshot();
     std::int32_t score = 0;
+    bool newBan = false;
     {
         auto& shard = impl_->shardOf(origin);
         const std::lock_guard lock{shard.mutex};
@@ -808,10 +850,14 @@ void Antibot::limboFailed(const OriginKey& origin, std::string_view name, Reason
         auto& record = impl_->recordOf(shard, origin, *settings, now, fresh);
         record.add(settings->config.limboFailureScore, now);
         score = record.effective(now);
-        if (score >= settings->config.banScore)
+        if (score >= settings->config.banScore) {
+            newBan = record.bannedUntil <= now;
             record.bannedUntil = now + std::chrono::seconds{settings->config.banSeconds};
+        }
     }
     impl_->emit(Event::Kind::kLimboFailed, origin, name, Verdict{Action::kDeny, reason, score});
+    if (newBan)
+        impl_->emit(Event::Kind::kBanned, origin, name, Verdict{Action::kDeny, Reason::kBanned, score});
 }
 
 void Antibot::verify(std::string_view name, const std::optional<OriginKey>& origin, Clock::time_point now) {
@@ -820,22 +866,38 @@ void Antibot::verify(std::string_view name, const std::optional<OriginKey>& orig
         return;
     const std::lock_guard lock{impl_->verifiedMutex};
     if (impl_->verified.size() >= settings->config.verifiedMax) {
-        std::erase_if(impl_->verified, [&](const auto& entry) { return entry.second <= now; });
+        std::erase_if(impl_->verified, [&](const auto& entry) { return entry.second.expiry <= now; });
         if (impl_->verified.size() >= settings->config.verifiedMax)
             impl_->verified.erase(impl_->verified.begin());
     }
     const auto expiry = now + std::chrono::hours{settings->config.verifiedTtlHours};
-    impl_->verified[Impl::verifiedKey(name, origin)] = expiry;
+    impl_->verified[Impl::verifiedKey(name, origin)] =
+        VerifiedEntry{expiry, lowered(name), origin ? storable(*origin) : std::string{}, false};
     if (origin) {
         if (impl_->knownOrigins.size() >= settings->config.verifiedMax)
             impl_->knownOrigins.clear();
         impl_->knownOrigins[hashOf(*origin)] = expiry;
     }
-    if (impl_->store.save)
-        impl_->store.save(name, origin ? printable(*origin) : std::string{},
+    if (impl_->store.save && settings->config.verifiedPersist)
+        impl_->store.save(lowered(name), origin ? storable(*origin) : std::string{},
                           std::chrono::duration_cast<std::chrono::seconds>(
                               std::chrono::system_clock::now().time_since_epoch() + (expiry - now))
                               .count());
+}
+
+void Antibot::transferIssued(const OriginKey& origin, Clock::time_point now) {
+    const auto settings = impl_->snapshot();
+    const std::lock_guard lock{impl_->passthroughMutex};
+    if (impl_->transfers.size() >= settings->config.verifiedMax)
+        impl_->transfers.clear();
+    impl_->transfers[hashOf(origin)] = now;
+}
+
+bool Antibot::transferExpected(const OriginKey& origin, Clock::time_point now) {
+    const auto window = std::chrono::seconds{impl_->snapshot()->config.passthroughWindowSeconds};
+    const std::lock_guard lock{impl_->passthroughMutex};
+    const auto found = impl_->transfers.find(hashOf(origin));
+    return found != impl_->transfers.end() && now - found->second <= window;
 }
 
 bool Antibot::knownOrigin(const OriginKey& origin, Clock::time_point now) const {
@@ -884,26 +946,91 @@ void Antibot::exploitRefused(const OriginKey& origin, Clock::time_point now) {
 }
 
 void Antibot::persistVerified(VerifiedStore store) {
-    const std::lock_guard lock{impl_->verifiedMutex};
-    impl_->store = std::move(store);
+    {
+        const std::lock_guard lock{impl_->verifiedMutex};
+        impl_->store = store;
+    }
+    impl_->keeper->usePurge(std::move(store.purge));
 }
 
-void Antibot::restoreVerified(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds) {
+std::vector<VerifiedInfo> Antibot::verifiedList(std::size_t limit) const {
+    const auto now = Clock::now();
+    const auto unixNow =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
+    std::vector<VerifiedInfo> list;
+    {
+        const std::lock_guard lock{impl_->verifiedMutex};
+        for (const auto& [key, entry] : impl_->verified)
+            if (entry.expiry > now)
+                list.push_back(
+                    {entry.name, entry.origin,
+                     unixNow.count() + std::chrono::duration_cast<std::chrono::seconds>(entry.expiry - now).count(),
+                     entry.remote});
+    }
+    std::ranges::sort(list, [](const auto& a, const auto& b) { return a.expiresUnixSeconds > b.expiresUnixSeconds; });
+    if (list.size() > limit)
+        list.resize(limit);
+    return list;
+}
+
+std::vector<OriginInfo> Antibot::originList(std::size_t limit, Clock::time_point now) {
+    std::vector<OriginInfo> list;
+    for (auto& shard : impl_->shards) {
+        const std::lock_guard lock{shard.mutex};
+        for (const auto& [key, record] : shard.records) {
+            const auto score = record.effective(now);
+            const bool banned = record.bannedUntil > now;
+            if (score <= 0 && !banned)
+                continue;
+            list.push_back(
+                {printable(key), score,
+                 banned ? std::chrono::duration_cast<std::chrono::seconds>(record.bannedUntil - now).count() : 0,
+                 record.limbo});
+        }
+    }
+    std::ranges::sort(list, [](const auto& a, const auto& b) {
+        return a.banSecondsLeft != b.banSecondsLeft ? a.banSecondsLeft > b.banSecondsLeft : a.score > b.score;
+    });
+    if (list.size() > limit)
+        list.resize(limit);
+    return list;
+}
+
+void Antibot::restoreVerified(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds,
+                              bool remote) {
+    const auto settings = impl_->snapshot();
+    if (settings->config.verifiedTtlHours == 0)
+        return;
     const auto remaining =
         expiresUnixSeconds -
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     if (remaining <= 0)
         return;
+    std::optional<OriginKey> key;
+    if (!origin.empty()) {
+        if (!config::AddressRange::parseAddress(origin))
+            return;
+        key = originOf(origin);
+    }
+    const auto expiry = Clock::now() + std::chrono::seconds{remaining};
     const std::lock_guard lock{impl_->verifiedMutex};
-    impl_->verified[Impl::verifiedKey(name, origin.empty() ? std::optional<OriginKey>{} : originOf(origin))] =
-        Clock::now() + std::chrono::seconds{remaining};
+    if (impl_->verified.size() >= settings->config.verifiedMax)
+        return;
+    auto& entry = impl_->verified[Impl::verifiedKey(name, key)];
+    if (remote && !entry.name.empty() && !entry.remote && entry.expiry >= expiry)
+        return;
+    entry = VerifiedEntry{expiry, lowered(name), key ? storable(*key) : std::string{}, remote};
+    if (key)
+        impl_->knownOrigins[hashOf(*key)] = expiry;
 }
 
 void Antibot::unverify(std::string_view name) {
+    const auto persist = impl_->snapshot()->config.verifiedPersist;
     const std::lock_guard lock{impl_->verifiedMutex};
-    impl_->verified.erase(Impl::verifiedKey(name, std::nullopt));
-    if (impl_->store.erase)
-        impl_->store.erase(name);
+    const auto lower = lowered(name);
+    std::erase_if(impl_->verified, [&](const auto& entry) { return entry.second.name == lower; });
+    if (impl_->store.erase && persist)
+        impl_->store.erase(lower);
 }
 
 bool Antibot::isVerified(std::string_view name, const std::optional<OriginKey>& origin, Clock::time_point now) const {
@@ -911,7 +1038,7 @@ bool Antibot::isVerified(std::string_view name, const std::optional<OriginKey>& 
     return origin ? impl_->verifiedNow(*settings, name, *origin, now) : [&] {
         const std::lock_guard lock{impl_->verifiedMutex};
         const auto found = impl_->verified.find(Impl::verifiedKey(name, std::nullopt));
-        return found != impl_->verified.end() && found->second > now;
+        return found != impl_->verified.end() && found->second.expiry > now;
     }();
 }
 
@@ -919,11 +1046,19 @@ void Antibot::forceAttack(int mode) { impl_->manual.store(mode, std::memory_orde
 
 void Antibot::ban(const OriginKey& origin, Clock::time_point now) {
     const auto settings = impl_->snapshot();
-    auto& shard = impl_->shardOf(origin);
-    const std::lock_guard lock{shard.mutex};
-    bool fresh = false;
-    auto& record = impl_->recordOf(shard, origin, *settings, now, fresh);
-    record.bannedUntil = now + std::chrono::seconds{settings->config.banSeconds};
+    bool wasBanned = false;
+    std::int32_t score = 0;
+    {
+        auto& shard = impl_->shardOf(origin);
+        const std::lock_guard lock{shard.mutex};
+        bool fresh = false;
+        auto& record = impl_->recordOf(shard, origin, *settings, now, fresh);
+        wasBanned = record.bannedUntil > now;
+        record.bannedUntil = now + std::chrono::seconds{settings->config.banSeconds};
+        score = record.effective(now);
+    }
+    if (!wasBanned)
+        impl_->emit(Event::Kind::kBanned, origin, {}, Verdict{Action::kDeny, Reason::kBanned, score});
 }
 
 bool Antibot::unban(const OriginKey& origin) {

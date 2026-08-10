@@ -61,7 +61,9 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             statusProtocol_ = hello->protocolVersion;
             state_ = State::StatusRequest;
         } else if ((hello->intent == protocol::handshake::ClientIntent::Login ||
-                    (acceptTransfers_ && hello->intent == protocol::handshake::ClientIntent::Transfer)) &&
+                    (hello->intent == protocol::handshake::ClientIntent::Transfer &&
+                     (acceptTransfers_ ||
+                      (access_.policy && access_.policy->antibot.transferExpected(origin(), Clock::now()))))) &&
                    (hello->protocolVersion == buildInfo::kProtocolVersion ||
                     translatedClientVerified(hello->protocolVersion) || backendVerified(hello->protocolVersion))) {
             const auto candidates = routes_.select(hello->hostName);

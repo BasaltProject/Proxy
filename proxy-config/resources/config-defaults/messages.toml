@@ -81,6 +81,17 @@ antibot-captcha = "<yellow>Hold the map and type the number shown in chat.</yell
 # Antibot captcha: a wrong answer.
 antibot-wrong-code = "<red>That is not the code. Try again.</red>"
 
+# Antibot chat check: what to type. {register} and {login} are the command names from antibot.toml.
+antibot-chat-prompt = "<yellow>To continue, type <white>/{register} [password] [password]</white> or <white>/{login} [password]</white> in chat.</yellow>"
+
+# Antibot chat check: a command that did not fit.
+antibot-chat-wrong = "<red>That is not right. Use /{register} [password] [password] or /{login} [password].</red>"
+
+# Antibot, Bedrock players: the login could not be checked, too many attempts, and a sign-in to Xbox Live is needed.
+antibot-bedrock-unverified = "<red>Your login could not be verified.</red>"
+antibot-bedrock-throttled = "<red>Too many connection attempts, try again later.</red>"
+antibot-bedrock-xbox = "<red>Sign in to Xbox Live to play here.</red>"
+
 [command]
 # The reason used when /kick, /ban give none.
 default-reason = "No reason given"

@@ -26,6 +26,7 @@
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 #include <basalt/wire/text/Component.hpp>
 #include <basalt/wire/text/MiniMessage.hpp>
+#include <basalt/wire/text/Serializers.hpp>
 
 #include <algorithm>
 #include <array>
@@ -602,6 +603,13 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                             event.origin});
                 });
         }
+        if (impl->services.verifiedSave) {
+            impl->access.antibot.persistVerified(
+                {impl->services.verifiedSave, impl->services.verifiedErase, impl->services.verifiedPurge});
+            if (impl->services.verifiedLoad)
+                for (const auto& row : impl->services.verifiedLoad(impl->access.antibot.config()->verifiedMax))
+                    impl->access.antibot.restoreVerified(row.name, row.origin, row.expiresUnixSeconds);
+        }
         impl->relay = std::make_unique<detail::StatusRelay>(
             impl->config.statusRelay,
             [state = impl.get()](const std::string& name) -> std::optional<detail::ProbeTarget> {
@@ -927,6 +935,46 @@ void ProxyRuntime::notifyOperators(std::string_view text) {
             static_cast<void>(tellPlayer(name, text));
 }
 
+namespace {
+constexpr std::size_t kListRows = 25;
+
+std::string antibotListing(antibot::Antibot& engine, std::string_view part, antibot::Clock::time_point now) {
+    std::string out;
+    if (part.empty() || part == "bans" || part == "reputation") {
+        const auto origins = engine.originList(1000, now);
+        std::size_t banned = 0, shown = 0;
+        std::string rows;
+        for (const auto& origin : origins) {
+            const bool isBan = origin.banSecondsLeft > 0;
+            banned += isBan ? 1 : 0;
+            if ((part == "bans" && !isBan) || (part == "reputation" && isBan) || shown >= kListRows)
+                continue;
+            ++shown;
+            rows += "\n  " + origin.origin + "  score " + std::to_string(origin.score) +
+                    (isBan ? "  banned for " + std::to_string(origin.banSecondsLeft) + " s" : std::string{}) +
+                    (origin.limbo > 0 ? "  in limbo " + std::to_string(origin.limbo) : std::string{});
+        }
+        out += "Origins (" + std::to_string(origins.size()) + " scored or banned, " + std::to_string(banned) +
+               " banned):" + (rows.empty() ? std::string{" none"} : rows);
+    }
+    if (part.empty() || part == "verified") {
+        const auto verified = engine.verifiedList(kListRows);
+        const auto unixNow =
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count();
+        out += std::string{out.empty() ? "" : "\n"} + "Verified (" + std::to_string(engine.stats(now).verified) +
+               " in all, newest " + std::to_string(verified.size()) + "):";
+        if (verified.empty())
+            out += " none";
+        for (const auto& entry : verified)
+            out += "\n  " + entry.name + "  from " + (entry.origin.empty() ? std::string{"anywhere"} : entry.origin) +
+                   "  expires in " + std::to_string(entry.expiresUnixSeconds - unixNow) + " s" +
+                   (entry.remote ? "  (synced)" : std::string{});
+    }
+    return out;
+}
+} // namespace
+
 std::string ProxyRuntime::antibotCommand(std::span<const std::string_view> words) {
     auto& engine = impl_->access.antibot;
     const auto now = antibot::Clock::now();
@@ -943,6 +991,9 @@ std::string ProxyRuntime::antibotCommand(std::span<const std::string_view> words
                "; origins tracked: " + std::to_string(stats.origins) + "; verified: " + std::to_string(stats.verified) +
                ".";
     }
+    if (verb == "list" &&
+        (argument.empty() || argument == "bans" || argument == "reputation" || argument == "verified"))
+        return antibotListing(engine, argument, now);
     if (verb == "attack" && (argument == "on" || argument == "off" || argument == "auto")) {
         engine.forceAttack(argument == "on" ? 1 : argument == "off" ? -1 : 0);
         return "Attack mode is now " + std::string{argument == "auto" ? "automatic" : argument} + ".";
@@ -966,7 +1017,8 @@ std::string ProxyRuntime::antibotCommand(std::span<const std::string_view> words
             return std::string{argument} + (antibotVerified(argument) ? " is verified." : " is not verified.");
         return "Done.";
     }
-    return "Usage: antibot status | attack on|off|auto | ban <ip> | unban <ip> | verify|unverify|verified <name>.";
+    return "Usage: antibot status | list [bans|reputation|verified] | attack on|off|auto | ban <ip> | unban <ip> | "
+           "verify|unverify|verified <name>.";
 }
 
 void ProxyRuntime::antibotVerify(std::string_view player) {
@@ -1038,21 +1090,25 @@ std::optional<std::string> ProxyRuntime::bedrockLogin(std::string_view address, 
         bedrockName(name) &&
         (!authenticated || (!xuid.empty() && xuid.size() <= 20 &&
                             std::ranges::all_of(xuid, [](unsigned char c) { return std::isdigit(c) != 0; })));
+    const auto say = [this](std::string_view key, std::string_view fallback) {
+        const std::string text = impl_->services.kickText ? impl_->services.kickText(key) : std::string{};
+        return text.empty() ? std::string{fallback} : wire::text::toPlainText(wire::text::miniMessage::parse(text));
+    };
     if (!shape) {
         engine.loginFailed(origin, now);
-        return std::string{"Your login could not be verified."};
+        return say("antibot-bedrock-unverified", "Your login could not be verified.");
     }
     std::string javaLike{name};
     std::ranges::replace(javaLike, ' ', '_');
     const auto verdict = engine.login(origin, javaLike, false, now);
     if (verdict.action == antibot::Action::kDeny) {
         engine.loginFailed(origin, now);
-        return std::string{"Too many connection attempts, try again later."};
+        return say("antibot-bedrock-throttled", "Too many connection attempts, try again later.");
     }
     const bool strict =
         verdict.action != antibot::Action::kAllow || (config->bedrockXboxInAttack && engine.attackActive(now));
     if (strict && !authenticated)
-        return std::string{"Sign in to Xbox Live to play here."};
+        return say("antibot-bedrock-xbox", "Sign in to Xbox Live to play here.");
     return std::nullopt;
 }
 

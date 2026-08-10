@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace basalt::proxy::runtime::antibot {
 
@@ -32,7 +33,7 @@ struct OriginHash {
 
 [[nodiscard]] OriginKey originOf(std::string_view literal);
 
-enum class Action : std::uint8_t { kAllow, kLimbo, kCaptcha, kDeny };
+enum class Action : std::uint8_t { kAllow, kLimbo, kCaptcha, kDeny, kChatCheck };
 
 enum class Reason : std::uint8_t {
     kNone,
@@ -116,10 +117,36 @@ private:
 };
 
 /// Where verified players are kept across restarts; the shared players database plugs in here.
+/// Every callback runs with an antibot lock held and must return at once (queue the work, do not do it).
 struct VerifiedStore {
     std::function<void(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds)> save;
     std::function<void(std::string_view name)> erase;
+    /// Delete at most `batch` expired rows and any beyond the `keep` latest ones.
+    std::function<void(std::int64_t nowUnixSeconds, std::int32_t batch, std::size_t keep)> purge;
 };
+
+struct VerifiedEntry {
+    Clock::time_point expiry;
+    std::string name;
+    std::string origin;
+    bool remote = false;
+};
+
+struct VerifiedInfo {
+    std::string name;
+    std::string origin;
+    std::int64_t expiresUnixSeconds = 0;
+    bool remote = false;
+};
+
+struct OriginInfo {
+    std::string origin;
+    std::int32_t score = 0;
+    std::int64_t banSecondsLeft = 0;
+    std::uint32_t limbo = 0;
+};
+
+class VerifiedKeeper;
 
 /// Everything antibot decides, shared by every session owner. Safe to call from any thread.
 class Antibot {
@@ -140,7 +167,13 @@ public:
     void penalize(const OriginKey& origin, std::int32_t points, Clock::time_point now);
     void exploitRefused(const OriginKey& origin, Clock::time_point now);
     /// Loads a stored verified entry; an empty origin trusts the name from anywhere.
-    void restoreVerified(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds);
+    /// `remote` marks an entry learned from another proxy: it is never exported again.
+    void restoreVerified(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds,
+                         bool remote = false);
+    /// Up to `limit` live verified entries, latest expiry first.
+    [[nodiscard]] std::vector<VerifiedInfo> verifiedList(std::size_t limit) const;
+    /// Up to `limit` tracked origins with a score or a ban, worst first.
+    [[nodiscard]] std::vector<OriginInfo> originList(std::size_t limit, Clock::time_point now);
 
     [[nodiscard]] std::shared_ptr<const Settings> settings() const;
     [[nodiscard]] std::shared_ptr<const config::AntibotConfig> config() const;
@@ -159,6 +192,10 @@ public:
                                                       Clock::time_point now);
     /// True when passthrough applies: the client must be sent away and rejoin instead of continuing.
     [[nodiscard]] bool limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now);
+    /// Remembers that this origin was sent a transfer packet back to the proxy, for the passthrough window.
+    void transferIssued(const OriginKey& origin, Clock::time_point now);
+    /// True when a transfer handshake from this origin is the return of a transfer issued a moment ago.
+    [[nodiscard]] bool transferExpected(const OriginKey& origin, Clock::time_point now);
     [[nodiscard]] bool knownOrigin(const OriginKey& origin, Clock::time_point now) const;
     /// Counts one more client entering a backend during an attack; false once the per-second budget is spent.
     [[nodiscard]] bool entryAllowed(const OriginKey& origin, std::string_view name, Clock::time_point now);
@@ -171,6 +208,8 @@ public:
                                   Clock::time_point now) const;
 
     [[nodiscard]] bool attackActive(Clock::time_point now);
+    /// The current attack state without advancing the clock of the detector.
+    [[nodiscard]] bool attackOn() const;
     /// 1 forces attack mode on, -1 forces it off, 0 returns to the automatic decision.
     void forceAttack(int mode);
     void ban(const OriginKey& origin, Clock::time_point now);

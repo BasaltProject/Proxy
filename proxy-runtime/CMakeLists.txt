@@ -41,6 +41,7 @@ basalt_module(proxy-runtime-core
         src/antibot/AttackReport.cpp
         src/antibot/TcpProbe.cpp
         src/antibot/AddressFeeds.cpp
+        src/antibot/VerifiedKeeper.cpp
         src/antibot/NbtShape.cpp
         src/antibot/TextScan.cpp
         src/antibot/Antibot.cpp

@@ -179,6 +179,27 @@ enabled = false
 mode = "attack"
 # Seconds an origin has to come back after being sent away.
 window-seconds = 120
+# Send a client that speaks the proxy's own protocol (1.20.5 and newer, translated clients excluded) a transfer packet back
+# to this proxy instead of a disconnect, so it rejoins by itself. A client that cannot take it gets the rejoin message.
+# The host and port are taken from what the client connected to; set them when a load balancer sits in front.
+transfer = true
+transfer-host = ""
+transfer-port = 0
+
+[chat-check]
+# An alternative to the captcha: the player types a command in chat, as on servers with /register and /login. It is only a
+# check that something reads the prompt and answers it: NOTHING is stored and the password is never used, so it is not an
+# account system. It replaces the captcha where both would apply (a forced captcha still wins).
+enabled = false
+# When to ask, like [captcha] mode: "attack", "suspicious" (the origin's score reaches captcha.score) or "always".
+mode = "attack"
+# "/<register-command> <word> <word>" with the two words equal, or "/<login-command> <word>". Letters, digits and _ only.
+register-command = "register"
+login-command = "login"
+# Shortest word accepted, wrong answers allowed, and seconds to answer.
+min-length = 4
+attempts = 3
+timeout-seconds = 45
 
 [notifications]
 # While attack mode is on, do not log each refused connection; one summary with the attack's numbers is logged when
@@ -186,6 +207,9 @@ window-seconds = 120
 quiet-logs-in-attack = true
 # An https:// address that gets a JSON POST when attack mode starts and ends. Empty sends nothing.
 webhook-url = ""
+# A PEM file with the certificate authority that signed the receiver's certificate, for a receiver of your own with a private
+# CA. Empty trusts the system roots. Certificates are always verified. Read from the config directory unless absolute.
+webhook-trust-file = ""
 
 [tcp]
 # Linux only (ignored elsewhere): read the kernel's view of each new connection (TCP_INFO) and score the origin when it
@@ -206,8 +230,20 @@ score = 50
 enabled = false
 # Only for bans that happen while attack mode is on.
 only-in-attack = true
-# The command and its arguments, run without a shell. {ip} is the address and {seconds} the ban length. For example:
-# ["nft", "add", "element", "inet", "filter", "basalt_banned", "{", "{ip}", "timeout", "{seconds}s", "}"]
+# The command and its arguments, run without a shell. {ip} is the origin (an IPv4 address, or an IPv6 /64 as
+# "2001:db8:0:0::/64"), {family} is 4 or 6 and {seconds} the ban length. One command serves both families when the sets
+# are named after {family}. Set up once, as root (nft -f), with interval sets because IPv6 origins are /64 ranges:
+#   table inet basalt {
+#     set banned4 { type ipv4_addr; flags timeout; }
+#     set banned6 { type ipv6_addr; flags interval, timeout; }
+#     chain input {
+#       type filter hook input priority -10; policy accept;
+#       ip saddr @banned4 drop
+#       ip6 saddr @banned6 drop
+#     }
+#   }
+# and then:
+# command = ["nft", "add", "element", "inet", "basalt", "banned{family}", "{", "{ip}", "timeout", "{seconds}s", "}"]
 command = []
 
 [anti-vpn]
@@ -280,3 +316,16 @@ score = 100
 # 0 verifies nobody. A Lua plugin can add players to and remove them from this list.
 ttl-hours = 24
 max-entries = 100000
+# Keep the list in players.db so it survives a restart. Expired rows are deleted in batches of purge-batch every
+# purge-seconds, and the table never holds more than max-entries rows.
+persist = true
+purge-seconds = 300
+purge-batch = 500
+# Share the list between proxies through a directory both can read and write (a mounted volume, rsync or Syncthing).
+# Each proxy writes only the entries it verified itself to <sync-id>.verified there, atomically, and reads the files of the
+# others every sync-seconds. Entries learned this way are never written back out, never outlive ttl-hours and are not
+# removed by an unverify elsewhere. Whoever can write that directory can verify any name, so protect it like a key.
+# Empty turns it off. sync-id defaults to this machine's host name and must differ between proxies on one machine.
+sync-directory = ""
+sync-seconds = 30
+sync-id = ""

@@ -38,6 +38,7 @@ void AttackReport::kernelBlock(const Event& event) {
     std::vector<std::string> words;
     for (std::string word : config->kernelBlockCommand) {
         for (const auto& [token, value] : {std::pair<std::string_view, std::string>{"{ip}", event.origin},
+                                           {"{family}", event.origin.find(':') != std::string::npos ? "6" : "4"},
                                            {"{seconds}", std::to_string(config->banSeconds)}})
             for (auto at = word.find(token); at != std::string::npos; at = word.find(token, at + value.size()))
                 word.replace(at, token.size(), value);
@@ -66,13 +67,15 @@ void AttackReport::post(std::string_view kind, const std::string& text) {
         posting_.fetch_sub(1);
         return;
     }
-    std::thread{[this, url = config->webhookUrl,
+    std::thread{[this, url = config->webhookUrl, trust = config->webhookTrustPem,
                  body = "{\"event\":" + quoted(kind) + ",\"content\":" + quoted(text) + "}"] {
         const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t*>(body.data()), body.size()};
-        const auto sent = wire::auth::httpsPost(url, bytes, "Content-Type: application/json\r\n");
+        const auto sent = wire::auth::httpsPost(url, bytes, "Content-Type: application/json\r\n", {.trustPem = trust});
         if (!sent || !sent->ok())
-            wire::common::Logger{"Antibot"}.warn(
-                [] { return std::string{"The attack webhook could not be delivered."}; });
+            wire::common::Logger{"Antibot"}.warn([&sent] {
+                return "The attack webhook could not be delivered: " +
+                       (sent ? "status " + std::to_string(sent->status) : sent.error().message) + ".";
+            });
         posting_.fetch_sub(1);
     }}.detach();
 }

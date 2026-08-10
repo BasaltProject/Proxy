@@ -10,6 +10,7 @@
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/configuration/ConfigurationPackets.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
+#include <basalt/wire/protocol/play/BorderPackets.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/protocol/play/ItemIds.hpp>
 #include <basalt/wire/protocol/play/MapPackets.hpp>
@@ -27,6 +28,7 @@ namespace {
 constexpr std::int32_t kCaptchaMapId = 0x5eed;
 constexpr std::int16_t kFirstHotbarSlot = 36;
 constexpr std::size_t kBrandFrameLimit = 256;
+constexpr std::int32_t kConfigurationTransferId = 0x0c;
 } // namespace
 
 antibot::OriginKey ClientSession::origin() const { return antibot::originOf(clientAddress()); }
@@ -71,6 +73,8 @@ bool ClientSession::startLimbo() {
         }
     }
     limboRun_ = std::make_unique<antibot::LimboRun>(config, now, std::move(answer));
+    if (action == antibot::Action::kChatCheck)
+        limboRun_->armChatCheck();
     limboRun_->expectEcho(config.checkEcho && protocol >= kFirstPingProtocol);
     if (!translation_ && clientProtocol_ != 0) {
         translation_ = wire::multiversion::java::javaTranslators::chainFor(clientProtocol_);
@@ -126,7 +130,7 @@ bool ClientSession::limboPacket(std::int32_t id, std::span<const std::uint8_t> r
             state_ = State::kLimboPlay;
             if (!queueFramed(limboPackets_->playIntro))
                 return false;
-            if ((captcha_ || blockCaptcha_) && !limboSendCaptcha())
+            if ((captcha_ || blockCaptcha_ || limboRun_->chatCheck()) && !limboSendCaptcha())
                 return false;
             if (!limboKeepAlive(now))
                 return false;
@@ -176,7 +180,8 @@ bool ClientSession::limboStep(const antibot::LimboRun::Step& step) {
         if (!limboSendCaptcha())
             return false;
     }
-    if (step.signal == Signal::kWrongCode && !limboSystemChat("antibot-wrong-code"))
+    if (step.signal == Signal::kWrongCode &&
+        !limboSystemChat(limboRun_->chatCheck() ? "antibot-chat-wrong" : "antibot-wrong-code"))
         return false;
     readDeadline_ = limboRun_->nextWake();
     return true;
@@ -193,7 +198,15 @@ bool ClientSession::limboTimer(Clock::time_point now) {
 }
 
 wire::text::Component ClientSession::antibotText(std::string_view key) const {
-    const std::string text = kickText_ ? kickText_(key) : std::string{};
+    std::string text = kickText_ ? kickText_(key) : std::string{};
+    if (limboRun_ && limboRun_->chatCheck()) {
+        const auto config = access_.policy->antibot.config();
+        for (const auto& [token, value] :
+             {std::pair<std::string_view, const std::string&>{"{register}", config->chatCheckRegisterCommand},
+              {"{login}", config->chatCheckLoginCommand}})
+            for (auto at = text.find(token); at != std::string::npos; at = text.find(token, at + value.size()))
+                text.replace(at, token.size(), value);
+    }
     return wire::text::miniMessage::parse(text.empty() ? std::string_view{key} : std::string_view{text});
 }
 
@@ -214,6 +227,12 @@ bool ClientSession::limboSystemChat(std::string_view key) {
 
 bool ClientSession::limboSendCaptcha() {
     namespace play = wire::protocol::play;
+    if (limboRun_->chatCheck()) {
+        if (!limboSystemChat("antibot-chat-prompt"))
+            return false;
+        limboRun_->captchaShown(Clock::now());
+        return true;
+    }
     if (blockCaptcha_) {
         std::map<std::tuple<std::int32_t, std::int32_t, std::int32_t>, play::SectionBlocksUpdatePacket> sections;
         for (const auto& block : blockCaptcha_->blocks) {
@@ -290,6 +309,23 @@ bool ClientSession::limboLeave(std::string_view key) {
     return queuePacket(frame_.readable());
 }
 
+bool ClientSession::limboTransfer() {
+    namespace protocol = wire::protocol;
+    const auto config = access_.policy->antibot.config();
+    const std::string host = config->passthroughTransferHost.empty() ? virtualHost_ : config->passthroughTransferHost;
+    const std::int32_t port = config->passthroughTransferPort != 0 ? config->passthroughTransferPort : virtualPort_;
+    if (!config->passthroughTransfer || translation_ || host.empty() || host.size() > 255 || port < 1 || port > 65535)
+        return false;
+    access_.policy->antibot.transferIssued(origin(), Clock::now());
+    limboRun_.reset();
+    limboSlot_.reset();
+    closing_ = true;
+    frame_.clear();
+    protocol::varInt::write(frame_, kConfigurationTransferId);
+    protocol::play::TransferPacket{host, port}.write(frame_);
+    return queuePacket(frame_.readable());
+}
+
 bool ClientSession::limboFailed(antibot::Reason reason) {
     const auto key = reason == antibot::Reason::kTimeout ? "antibot-timeout" : "antibot-failed";
     access_.policy->antibot.limboFailed(origin(), name_, reason, Clock::now());
@@ -297,10 +333,14 @@ bool ClientSession::limboFailed(antibot::Reason reason) {
 }
 
 bool ClientSession::limboPassed() {
-    if (!access_.policy->antibot.entryAllowed(origin(), name_, Clock::now()))
+    if (!access_.policy->antibot.entryAllowed(origin(), name_, Clock::now())) {
+        state_ = State::kLimboConfiguration;
         return limboLeave("antibot-retry");
-    if (access_.policy->antibot.limboPassed(origin(), name_, Clock::now()))
-        return limboLeave("antibot-rejoin");
+    }
+    if (access_.policy->antibot.limboPassed(origin(), name_, Clock::now())) {
+        state_ = State::kLimboConfiguration;
+        return limboTransfer() || limboLeave("antibot-rejoin");
+    }
     limboRun_.reset();
     limboSlot_.reset();
     limboPackets_.reset();

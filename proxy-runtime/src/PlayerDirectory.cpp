@@ -8,8 +8,8 @@ namespace basalt::proxy::runtime::detail {
 
 std::expected<std::unique_ptr<PlayerDirectory>, std::string> PlayerDirectory::open(const std::string& path) {
     namespace schema = wire::storage::schema;
-    const std::string ddl =
-        std::string{schema::identityDdl()} + std::string{schema::accessDdl()} + std::string{schema::pluginDdl()};
+    const std::string ddl = std::string{schema::identityDdl()} + std::string{schema::accessDdl()} +
+                            std::string{schema::pluginDdl()} + std::string{schema::antibotDdl()};
     auto database = wire::storage::openPlayerDatabase(path, ddl);
     if (!database)
         return std::unexpected(database.error());
@@ -53,6 +53,34 @@ void PlayerDirectory::recordLogin(std::string_view uuid, std::string_view name,
     players_.recordLogin(uuid, name, now.count());
     if (address)
         players_.setLastIp(uuid, std::string{*address});
+}
+
+void PlayerDirectory::saveVerified(std::string name, std::string origin, std::int64_t expiresUnixSeconds) {
+    post([this, name = std::move(name), origin = std::move(origin), expiresUnixSeconds] {
+        const std::lock_guard lock{mutex_};
+        verified_.upsert(name, origin, expiresUnixSeconds);
+    });
+}
+
+void PlayerDirectory::eraseVerified(std::string name) {
+    post([this, name = std::move(name)] {
+        const std::lock_guard lock{mutex_};
+        verified_.remove(name);
+    });
+}
+
+void PlayerDirectory::purgeVerified(std::int64_t nowUnixSeconds, std::int32_t batch, std::size_t keep) {
+    post([this, nowUnixSeconds, batch, keep] {
+        const std::lock_guard lock{mutex_};
+        verified_.purgeExpired(nowUnixSeconds, batch);
+        if (verified_.count() > static_cast<std::int64_t>(keep))
+            verified_.trimTo(static_cast<std::int32_t>(keep));
+    });
+}
+
+std::vector<wire::storage::VerifiedRow> PlayerDirectory::loadVerified(std::int64_t nowUnixSeconds, std::int32_t limit) {
+    const std::lock_guard lock{mutex_};
+    return verified_.live(nowUnixSeconds, limit);
 }
 
 std::optional<std::string> PlayerDirectory::nameByAddress(std::string_view address) {

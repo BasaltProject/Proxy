@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <random>
+#include <vector>
 
 namespace basalt::proxy::runtime::antibot {
 namespace {
@@ -191,6 +192,41 @@ LimboRun::Step LimboRun::soften() {
     return {Outcome::kContinue, Reason::kNone, Signal::kNeedCaptcha};
 }
 
+void LimboRun::armChatCheck() {
+    chat_ = true;
+    canCaptcha_ = false;
+    solved_ = false;
+    attemptsLeft_ = config_.chatCheckAttempts;
+}
+
+LimboRun::Step LimboRun::typedCommand(std::string_view text) {
+    std::vector<std::string_view> words;
+    for (std::size_t at = 0; at < text.size();) {
+        const auto end = std::min(text.find(' ', at), text.size());
+        if (end > at)
+            words.push_back(text.substr(at, end - at));
+        at = end + 1;
+    }
+    const auto same = [](std::string_view a, std::string_view b) {
+        return a.size() == b.size() && std::ranges::equal(a, b, [](unsigned char x, unsigned char y) {
+                   return std::tolower(x) == std::tolower(y);
+               });
+    };
+    const auto longEnough = [&](std::string_view word) {
+        return word.size() >= static_cast<std::size_t>(config_.chatCheckMinLength);
+    };
+    const bool registered = words.size() == 3 && same(words[0], config_.chatCheckRegisterCommand) &&
+                            longEnough(words[1]) && words[1] == words[2];
+    const bool loggedIn = words.size() == 2 && same(words[0], config_.chatCheckLoginCommand) && longEnough(words[1]);
+    if (registered || loggedIn) {
+        solved_ = true;
+        return finished();
+    }
+    if (--attemptsLeft_ <= 0)
+        return fail(Reason::kCaptchaFailed);
+    return {Outcome::kContinue, Reason::kNone, Signal::kWrongCode};
+}
+
 void LimboRun::armCaptcha(std::string answer) {
     answer_ = std::move(answer);
     solved_ = false;
@@ -263,6 +299,12 @@ LimboRun::Step LimboRun::play(std::int32_t id, wire::io::ByteBuffer& body, Clock
                    ? fail(Reason::kLimboFailed)
                    : Step{};
     }
+    case 0x07: {
+        if (!chat_ || solved_)
+            return {};
+        const auto text = wire::protocol::readString(body, 256);
+        return body.failed() ? fail(Reason::kLimboFailed) : typedCommand(text);
+    }
     case 0x09: {
         if (answer_.empty() || solved_)
             return {};
@@ -305,7 +347,8 @@ std::optional<std::int32_t> LimboRun::pingDue(Clock::time_point now) {
 }
 
 void LimboRun::captchaShown(Clock::time_point now) {
-    captchaDeadline_ = now + std::chrono::seconds{config_.captchaTimeoutSeconds};
+    captchaDeadline_ =
+        now + std::chrono::seconds{chat_ ? config_.chatCheckTimeoutSeconds : config_.captchaTimeoutSeconds};
 }
 
 LimboRun::Step LimboRun::tick(Clock::time_point now) {

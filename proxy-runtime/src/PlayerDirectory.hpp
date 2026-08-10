@@ -2,6 +2,7 @@
 
 #include <basalt/wire/sql/Sqlite.hpp>
 #include <basalt/wire/storage/AccessRepository.hpp>
+#include <basalt/wire/storage/AntibotVerifiedRepository.hpp>
 #include <basalt/wire/storage/PlayerIdentityRepository.hpp>
 #include <basalt/wire/storage/PluginDataRepository.hpp>
 
@@ -15,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace basalt::proxy::runtime::detail {
 
@@ -32,6 +34,12 @@ public:
 
     [[nodiscard]] std::optional<std::string> nameByAddress(std::string_view address);
 
+    /// Queues the write; the antibot calls these with its own lock held.
+    void saveVerified(std::string name, std::string origin, std::int64_t expiresUnixSeconds);
+    void eraseVerified(std::string name);
+    void purgeVerified(std::int64_t nowUnixSeconds, std::int32_t batch, std::size_t keep);
+    [[nodiscard]] std::vector<wire::storage::VerifiedRow> loadVerified(std::int64_t nowUnixSeconds, std::int32_t limit);
+
     /// Runs `work(players, access)` with the database lock held.
     template <typename Work>
     decltype(auto) locked(Work&& work) {
@@ -42,7 +50,7 @@ public:
 private:
     explicit PlayerDirectory(std::unique_ptr<wire::sql::Database> database)
         : database_(std::move(database)), players_(*database_), access_(*database_), pluginData_(*database_),
-          writer_([this](std::stop_token stop) { drain(stop); }) {}
+          verified_(*database_), writer_([this](std::stop_token stop) { drain(stop); }) {}
 
     void drain(std::stop_token stop);
 
@@ -54,6 +62,7 @@ private:
     wire::storage::PlayerIdentityRepository players_;
     wire::storage::AccessRepository access_;
     wire::storage::PluginDataRepository pluginData_;
+    wire::storage::AntibotVerifiedRepository verified_;
     std::jthread writer_;
 };
 

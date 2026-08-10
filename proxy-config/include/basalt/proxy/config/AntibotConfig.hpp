@@ -108,9 +108,21 @@ struct AntibotConfig {
     bool passthroughEnabled = false;
     bool passthroughAlways = false;
     std::uint32_t passthroughWindowSeconds = 120;
+    bool passthroughTransfer = true;
+    std::string passthroughTransferHost;
+    std::int32_t passthroughTransferPort = 0;
+
+    bool chatCheckEnabled = false;
+    CaptchaMode chatCheckMode = CaptchaMode::kAttack;
+    std::string chatCheckRegisterCommand = "register";
+    std::string chatCheckLoginCommand = "login";
+    std::int32_t chatCheckMinLength = 4;
+    std::int32_t chatCheckAttempts = 3;
+    std::uint32_t chatCheckTimeoutSeconds = 45;
 
     bool quietLogsInAttack = true;
     std::string webhookUrl;
+    std::string webhookTrustPem;
 
     bool tcpEnabled = false;
     std::int32_t tcpMinMss = 536;
@@ -145,6 +157,12 @@ struct AntibotConfig {
 
     std::uint32_t verifiedTtlHours = 24;
     std::size_t verifiedMax = 100000;
+    bool verifiedPersist = true;
+    std::uint32_t verifiedPurgeSeconds = 300;
+    std::int32_t verifiedPurgeBatch = 500;
+    std::string verifiedSyncDirectory;
+    std::uint32_t verifiedSyncSeconds = 30;
+    std::string verifiedSyncId;
 
     friend bool operator==(const AntibotConfig&, const AntibotConfig&) = default;
 };
