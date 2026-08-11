@@ -333,12 +333,11 @@ bool ClientSession::limboFailed(antibot::Reason reason) {
 }
 
 bool ClientSession::limboPassed() {
-    if (!access_.policy->antibot.entryAllowed(origin(), name_, Clock::now())) {
+    const auto exit = access_.policy->antibot.limboPassed(origin(), name_, Clock::now());
+    if (exit != antibot::Antibot::LimboExit::kEnter) {
         state_ = State::kLimboConfiguration;
-        return limboLeave("antibot-retry");
-    }
-    if (access_.policy->antibot.limboPassed(origin(), name_, Clock::now())) {
-        state_ = State::kLimboConfiguration;
+        if (exit == antibot::Antibot::LimboExit::kBusy)
+            return limboLeave("antibot-retry");
         return limboTransfer() || limboLeave("antibot-rejoin");
     }
     limboRun_.reset();

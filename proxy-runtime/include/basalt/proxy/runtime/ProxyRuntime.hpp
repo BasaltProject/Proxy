@@ -204,8 +204,7 @@ struct RuntimeServices {
         playerLogin = {};
     /// The text of one of the proxy's own refusals by its messages.toml key; empty keeps the built-in English one.
     std::function<std::string(std::string_view key)> kickText = {};
-    /// Where the antibot keeps verified players across restarts. The writers run under an antibot lock and must only
-    /// queue their work.
+    /// Where the antibot keeps verified players; the writers run under a lock and must only queue their work.
     std::function<std::vector<VerifiedRecord>(std::size_t limit)> verifiedLoad = {};
     std::function<void(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds)> verifiedSave =
         {};

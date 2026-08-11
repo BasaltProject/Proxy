@@ -54,7 +54,8 @@ enum class Reason : std::uint8_t {
     kPassthrough,
     kProtocol,
     kProxy,
-    kExploit
+    kExploit,
+    kBusy
 };
 
 [[nodiscard]] std::string_view reasonName(Reason reason) noexcept;
@@ -116,8 +117,7 @@ private:
     std::string name_;
 };
 
-/// Where verified players are kept across restarts; the shared players database plugs in here.
-/// Every callback runs with an antibot lock held and must return at once (queue the work, do not do it).
+/// Where verified players are kept across restarts; every callback runs under an antibot lock and must return at once.
 struct VerifiedStore {
     std::function<void(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds)> save;
     std::function<void(std::string_view name)> erase;
@@ -166,8 +166,7 @@ public:
     [[nodiscard]] bool exploitText(std::string_view text) const;
     void penalize(const OriginKey& origin, std::int32_t points, Clock::time_point now);
     void exploitRefused(const OriginKey& origin, Clock::time_point now);
-    /// Loads a stored verified entry; an empty origin trusts the name from anywhere.
-    /// `remote` marks an entry learned from another proxy: it is never exported again.
+    /// Loads a stored verified entry; an empty origin trusts the name anywhere, `remote` ones are never exported.
     void restoreVerified(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds,
                          bool remote = false);
     /// Up to `limit` live verified entries, latest expiry first.
@@ -190,15 +189,14 @@ public:
 
     [[nodiscard]] std::optional<LimboSlot> enterLimbo(const OriginKey& origin, std::string_view name,
                                                       Clock::time_point now);
-    /// True when passthrough applies: the client must be sent away and rejoin instead of continuing.
-    [[nodiscard]] bool limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now);
+    enum class LimboExit : std::uint8_t { kEnter, kSendAway, kBusy };
+    /// What happens to a client that finished the limbo: enter, be sent away to rejoin (passthrough) or wait (budget).
+    [[nodiscard]] LimboExit limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now);
     /// Remembers that this origin was sent a transfer packet back to the proxy, for the passthrough window.
     void transferIssued(const OriginKey& origin, Clock::time_point now);
     /// True when a transfer handshake from this origin is the return of a transfer issued a moment ago.
     [[nodiscard]] bool transferExpected(const OriginKey& origin, Clock::time_point now);
     [[nodiscard]] bool knownOrigin(const OriginKey& origin, Clock::time_point now) const;
-    /// Counts one more client entering a backend during an attack; false once the per-second budget is spent.
-    [[nodiscard]] bool entryAllowed(const OriginKey& origin, std::string_view name, Clock::time_point now);
     void limboFailed(const OriginKey& origin, std::string_view name, Reason reason, Clock::time_point now);
 
     /// Trusts `name` from `origin`, or from anywhere when `origin` is empty, until the verified lifetime ends.

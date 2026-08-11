@@ -144,6 +144,8 @@ std::string_view reasonName(Reason reason) noexcept {
         return "proxy";
     case Reason::kExploit:
         return "exploit";
+    case Reason::kBusy:
+        return "busy";
     case Reason::kTimeout:
         return "timeout";
     }
@@ -347,14 +349,24 @@ struct Antibot::Impl {
         return record;
     }
 
-    bool passthroughReturned(std::uint64_t key, Clock::time_point now, const config::AntibotConfig& c) {
+    bool passthroughReturned(std::uint64_t key, Clock::time_point now, const config::AntibotConfig& c, bool consume) {
         const std::lock_guard lock{passthroughMutex};
         const auto found = passthroughPending.find(key);
         if (found == passthroughPending.end())
             return false;
         const bool inWindow = now - found->second <= std::chrono::seconds{c.passthroughWindowSeconds};
-        passthroughPending.erase(found);
+        if (consume || !inWindow)
+            passthroughPending.erase(found);
         return inWindow;
+    }
+
+    [[nodiscard]] bool takeEntry(const config::AntibotConfig& c, Clock::time_point now) {
+        if (c.attackEntriesPerSecond <= 0 || !attackNow())
+            return true;
+        const auto secondNow = std::chrono::duration_cast<std::chrono::seconds>(now - epoch).count();
+        if (entrySecond.exchange(secondNow, std::memory_order_relaxed) != secondNow)
+            entryCount.store(0, std::memory_order_relaxed);
+        return entryCount.fetch_add(1, std::memory_order_relaxed) < c.attackEntriesPerSecond;
     }
 
     void passthroughSend(std::uint64_t key, Clock::time_point now, const config::AntibotConfig& c) {
@@ -712,7 +724,14 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
     if (attack && c.requirePingInAttack && !pinged)
         return deny(Reason::kNoPing, score);
     const bool passthrough = impl_->passthroughOn(c, attack, now);
-    if (passthrough && impl_->passthroughReturned(Impl::verifiedKey(name, origin), now, c)) {
+    if (passthrough && impl_->passthroughReturned(Impl::verifiedKey(name, origin), now, c, false)) {
+        if (!impl_->takeEntry(c, now)) {
+            impl_->denied.fetch_add(1, std::memory_order_relaxed);
+            const Verdict busy{Action::kDeny, Reason::kBusy, score};
+            impl_->emit(Event::Kind::kVerdict, origin, name, busy);
+            return busy;
+        }
+        impl_->passthroughReturned(Impl::verifiedKey(name, origin), now, c, true);
         verify(name, origin, now);
         return {Action::kAllow, Reason::kVerified, score};
     }
@@ -824,17 +843,20 @@ void Antibot::leaveLimbo(const OriginKey& origin, const std::string& name) {
     impl_->limboNow.fetch_sub(1, std::memory_order_relaxed);
 }
 
-bool Antibot::limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
+Antibot::LimboExit Antibot::limboPassed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
     impl_->limboPassed.fetch_add(1, std::memory_order_relaxed);
     const auto settings = impl_->snapshot();
     const auto& c = settings->config;
     if (impl_->passthroughOn(c, impl_->attackNow(), now)) {
         impl_->passthroughSend(Impl::verifiedKey(name, origin), now, c);
-        return true;
+        return LimboExit::kSendAway;
     }
+    if (!Settings::within(settings->trusted, origin) && !impl_->verifiedNow(*settings, name, origin, now) &&
+        !impl_->takeEntry(c, now))
+        return LimboExit::kBusy;
     verify(name, origin, now);
     impl_->emit(Event::Kind::kVerified, origin, name, Verdict{Action::kAllow, Reason::kVerified, 0});
-    return false;
+    return LimboExit::kEnter;
 }
 
 void Antibot::limboFailed(const OriginKey& origin, std::string_view name, Reason reason, Clock::time_point now) {
@@ -904,19 +926,6 @@ bool Antibot::knownOrigin(const OriginKey& origin, Clock::time_point now) const 
     const std::lock_guard lock{impl_->verifiedMutex};
     const auto found = impl_->knownOrigins.find(hashOf(origin));
     return found != impl_->knownOrigins.end() && found->second > now;
-}
-
-bool Antibot::entryAllowed(const OriginKey& origin, std::string_view name, Clock::time_point now) {
-    const auto settings = impl_->snapshot();
-    const auto& c = settings->config;
-    if (!c.enabled || c.attackEntriesPerSecond <= 0 || !impl_->attackNow())
-        return true;
-    if (Settings::within(settings->trusted, origin) || impl_->verifiedNow(*settings, name, origin, now))
-        return true;
-    const auto second = std::chrono::duration_cast<std::chrono::seconds>(now - impl_->epoch).count();
-    if (impl_->entrySecond.exchange(second, std::memory_order_relaxed) != second)
-        impl_->entryCount.store(0, std::memory_order_relaxed);
-    return impl_->entryCount.fetch_add(1, std::memory_order_relaxed) < c.attackEntriesPerSecond;
 }
 
 bool Antibot::exploitText(std::string_view text) const {

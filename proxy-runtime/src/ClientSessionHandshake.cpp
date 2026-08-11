@@ -145,6 +145,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                 return refuseAntibot(verdict.reason == antibot::Reason::kBanned        ? "antibot-banned"
                                      : verdict.reason == antibot::Reason::kLegacy      ? "antibot-legacy"
                                      : verdict.reason == antibot::Reason::kPassthrough ? "antibot-rejoin"
+                                     : verdict.reason == antibot::Reason::kBusy        ? "antibot-retry"
                                                                                        : "antibot-denied");
             pendingLimbo_ = verdict.action;
         }
