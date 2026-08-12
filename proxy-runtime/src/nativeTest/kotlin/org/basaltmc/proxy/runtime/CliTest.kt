@@ -1,4 +1,4 @@
-package org.basaltmc.proxy
+package org.basaltmc.proxy.runtime
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

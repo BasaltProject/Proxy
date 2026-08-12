@@ -137,10 +137,10 @@ one you are building for.
 
 ```bash
 # Native binary for the current host
-./gradlew :basalt-proxy:linkReleaseExecutableMacosArm64
+./gradlew :proxy-runtime:linkReleaseExecutableMacosArm64
 
 # Debug build and run
-./gradlew :basalt-proxy:runDebugExecutableMacosArm64
+./gradlew :proxy-runtime:runDebugExecutableMacosArm64
 ```
 
 Supported targets: `macosArm64`, `macosX64`, `linuxX64`, `linuxArm64`,
@@ -153,7 +153,7 @@ Supported targets: `macosArm64`, `macosX64`, `linuxX64`, `linuxArm64`,
 ./gradlew build
 
 # A single module
-./gradlew :basalt-proxy:macosArm64Test
+./gradlew :proxy-runtime:macosArm64Test
 ```
 
 Native tests only run on their matching host.

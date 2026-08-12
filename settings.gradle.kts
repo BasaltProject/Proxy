@@ -1,4 +1,4 @@
-rootProject.name = "basalt-proxy"
+rootProject.name = "proxy-runtime"
 
 pluginManagement {
     // Wire owns every build convention, this repository included: see its build-logic for why
@@ -23,28 +23,28 @@ dependencyResolutionManagement {
 }
 
 include(
-    ":basalt-common",
-    ":basalt-nbt",
-    ":basalt-text",
-    ":basalt-io",
-    ":basalt-protocol",
-    ":basalt-auth",
-    ":basalt-multiversion",
-    ":basalt-bedrock",
-    ":basalt-proxy",
+    ":wire-common",
+    ":wire-nbt",
+    ":wire-text",
+    ":wire-io",
+    ":wire-protocol",
+    ":wire-auth",
+    ":wire-multiversion",
+    ":wire-bedrock",
+    ":proxy-runtime",
 )
 
 // The network layer is shared with the server and lives in the Wire submodule. It is composed in
 // rather than depended on as a published artifact: both repositories move together for now.
 for (name in listOf(
-    "basalt-common",
-    "basalt-nbt",
-    "basalt-text",
-    "basalt-io",
-    "basalt-protocol",
-    "basalt-auth",
-    "basalt-multiversion",
-    "basalt-bedrock",
+    "wire-common",
+    "wire-nbt",
+    "wire-text",
+    "wire-io",
+    "wire-protocol",
+    "wire-auth",
+    "wire-multiversion",
+    "wire-bedrock",
 )) {
     project(":$name").projectDir = file("wire/$name")
 }
