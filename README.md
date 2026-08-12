@@ -42,7 +42,7 @@ protocol, used by both sides.
 | Target version | Minecraft 26.2 (protocol 776) |
 | Distribution | Native binaries per platform |
 | Backends | Any Minecraft server, Basalt or not |
-| Plugin API | BPMod: Lua, `.bpmod` packages. Velocity and BungeeCord plugins optionally, see below |
+| Plugin API | Lua, `.bppkg` packages. Velocity and BungeeCord plugins optionally, see below |
 | Message model | Adventure-style immutable components; no legacy `§` formatting |
 | License | GPL-3.0 |
 
@@ -84,10 +84,10 @@ not a constraint.
 
 ## Plugins
 
-### BPMod
+### Basalt plugins
 
-BPMod is the proxy's own plugin API. Plugins are written in Lua and packaged as
-`.bpmod` files, the same shape as the server's `.bsmod`, and run in a sandbox
+The proxy has its own plugin API. Plugins are written in Lua and packaged as
+`.bppkg` files, the same shape as the server's `.bspkg`, and run in a sandbox
 with a per-tick instruction budget, so a broken plugin cannot take the proxy
 down.
 
@@ -182,7 +182,7 @@ Use the included wrapper rather than a system Gradle installation.
 | Configuration files | Not started |
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |
-| BPMod plugins and the Lua runtime | Not started |
+| Plugins and the Lua runtime | Not started |
 | Velocity and BungeeCord plugin support | Not started |
 
 What that adds up to today: a binary that parses its command line and exits.
