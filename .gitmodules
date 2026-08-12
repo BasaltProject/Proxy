@@ -1,0 +1,3 @@
+[submodule "wire"]
+	path = wire
+	url = https://github.com/BasaltProject/Wire.git
