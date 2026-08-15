@@ -33,6 +33,7 @@ inline constexpr float kMaxFood = 20.0F;
 inline constexpr float kMaxLevel = 24791.0F;
 inline constexpr float kWalkSpeed = 0.1F;
 inline constexpr std::size_t kCarriedSlots = 36;
+inline constexpr std::size_t kSkinFetchesInFlight = 4;
 inline constexpr std::size_t kCookerSlotCount = 3;
 inline constexpr std::int32_t kOutsideWindow = -999;
 inline constexpr std::size_t kJavaPlayerSlots = 46;

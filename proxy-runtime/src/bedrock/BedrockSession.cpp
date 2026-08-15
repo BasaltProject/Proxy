@@ -161,6 +161,8 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
         sendBedrock(BedrockPacket::RemoveObjective, gone);
     }
     names_.clear();
+    textures_.clear();
+    skins_ = std::make_shared<bedrock::SkinCache>();
     bossBars_.clear();
     objectives_.clear();
     sidebar_.clear();

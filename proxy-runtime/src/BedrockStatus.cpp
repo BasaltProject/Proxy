@@ -1,5 +1,6 @@
 #include "BedrockStatus.hpp"
 
+#include <basalt/wire/bedrock/BedrockAdvertisement.hpp>
 #include <basalt/wire/bedrock/BedrockPacketIds.hpp>
 #include <basalt/wire/bedrock/NetherNetIdentityStore.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
@@ -55,17 +56,15 @@ BedrockStatus::BedrockStatus(const config::BedrockConfig& options, std::function
 BedrockStatus::~BedrockStatus() { stop(); }
 
 std::string BedrockStatus::advertisement() const {
-    std::string line = "MCPE;" + (motd_ ? motd_() : std::string{"Basalt Proxy"}) + ";";
-    line += std::to_string(wire::bedrock::kNativeBedrockProtocol) + ";";
-    line += std::string{kGameVersion} + ";";
     const auto playing = static_cast<std::size_t>(
         std::ranges::count_if(clients_, [](const auto& entry) { return entry.second.session != nullptr; }));
-    line += std::to_string((online_ ? online_() : 0) + playing) + ";";
-    line += std::to_string(max_) + ";";
-    line += std::to_string(server_ ? server_->guid() : 0) + ";";
-    line += subMotd_ + ";Survival;1;";
-    line += std::to_string(port()) + ";" + std::to_string(port()) + ";";
-    return line;
+    return wire::bedrock::advertisementLine({.motd = motd_ ? motd_() : std::string{"Basalt Proxy"},
+                                             .subMotd = subMotd_,
+                                             .gameVersion = std::string{kGameVersion},
+                                             .online = (online_ ? online_() : 0) + playing,
+                                             .max = max_,
+                                             .guid = server_ ? server_->guid() : 0,
+                                             .port = port()});
 }
 
 bool BedrockStatus::start() {

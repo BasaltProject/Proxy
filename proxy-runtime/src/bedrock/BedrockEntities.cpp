@@ -55,8 +55,13 @@ void BedrockSession::listed(std::span<const std::uint8_t> body) {
     const auto packet = play::PlayerInfoUpdatePacket::read(in);
     if (!packet || (packet->actions & play::PlayerInfoUpdatePacket::kAddPlayer) == 0)
         return;
-    for (const auto& entry : packet->entries)
+    for (const auto& entry : packet->entries) {
         names_[entry.uuid.toString()] = entry.name;
+        if (std::ranges::none_of(entry.properties, [](const auto& property) { return property.name == "textures"; }))
+            continue;
+        textures_[entry.uuid.toString()] = entry.properties;
+        bedrock::SkinCache::fetchJava(skins_, entry.uuid, entry.properties, kSkinFetchesInFlight);
+    }
 }
 
 void BedrockSession::unlisted(std::span<const std::uint8_t> body) {
@@ -65,8 +70,11 @@ void BedrockSession::unlisted(std::span<const std::uint8_t> body) {
     const auto packet = play::PlayerInfoRemovePacket::read(in);
     if (!packet)
         return;
-    for (const auto& uuid : packet->players)
+    for (const auto& uuid : packet->players) {
         names_.erase(uuid.toString());
+        textures_.erase(uuid.toString());
+        skins_->forget(uuid);
+    }
 }
 
 void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
@@ -105,6 +113,11 @@ void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
     entry.entityId = static_cast<std::int64_t>(runtimeId(packet->entityId));
     entry.name = name;
     entry.skin = bedrock::flatSkin(name);
+    if (const auto textures = textures_.find(packet->uuid.toString()); textures != textures_.end()) {
+        bedrock::SkinCache::fetchJava(skins_, packet->uuid, textures->second, kSkinFetchesInFlight);
+        if (auto theirs = skins_->of(packet->uuid))
+            entry.skin = std::move(*theirs);
+    }
     wire::io::ByteBuffer out;
     bedrock::writePlayerListAdd(out, std::span{&entry, 1}, protocol);
     sendBedrock(BedrockPacket::PlayerList, out);

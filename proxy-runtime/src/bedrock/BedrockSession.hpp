@@ -5,6 +5,7 @@
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
+#include <basalt/wire/bedrock/BedrockJavaSkin.hpp>
 #include <basalt/wire/protocol/play/EntityData.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
@@ -166,6 +167,8 @@ private:
     std::unique_ptr<JavaLink> link_;
     std::vector<std::string> biomeKeys_;
     std::unordered_map<std::string, std::string> names_;
+    std::unordered_map<std::string, std::vector<wire::protocol::login::GameProfileProperty>> textures_;
+    std::shared_ptr<wire::bedrock::SkinCache> skins_ = std::make_shared<wire::bedrock::SkinCache>();
     std::unordered_set<std::int32_t> mobs_;
     std::unordered_set<std::int32_t> effects_;
 
