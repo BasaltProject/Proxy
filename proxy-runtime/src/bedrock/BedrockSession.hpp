@@ -73,6 +73,8 @@ private:
     void listed(std::span<const std::uint8_t> body);
     void unlisted(std::span<const std::uint8_t> body);
     void spawnEntity(std::span<const std::uint8_t> body);
+    void addEntity(const wire::protocol::play::SpawnEntityPacket& spawn);
+    void flushPendingSpawns();
     void entityData(std::span<const std::uint8_t> body);
     [[nodiscard]] static std::uint64_t sharedFlags(std::uint8_t java);
     void nameTagged(const wire::protocol::play::SetEntityDataPacket& packet);
@@ -199,6 +201,13 @@ private:
     std::string sidebar_;
     std::int64_t nextLine_ = 0;
     std::unordered_map<std::int32_t, std::array<float, 3>> waitingItems_;
+
+    struct PendingSpawn {
+        wire::protocol::play::SpawnEntityPacket spawn;
+        std::vector<std::vector<std::uint8_t>> data;
+    };
+
+    std::vector<PendingSpawn> pendingSpawns_;
     std::unordered_map<std::int32_t, std::pair<std::uint64_t, std::uint64_t>> others_;
     std::int32_t sections_ = 24;
     std::int32_t minSection_ = -4;

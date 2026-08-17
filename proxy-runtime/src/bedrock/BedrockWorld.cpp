@@ -238,6 +238,7 @@ void BedrockSession::spawn() {
     wire::io::ByteBuffer out;
     bedrock::writePlayStatus(out, bedrock::PlayStatus::PlayerSpawn);
     sendBedrock(BedrockPacket::PlayStatus, out);
+    flushPendingSpawns();
 }
 
 } // namespace basalt::proxy::runtime::detail

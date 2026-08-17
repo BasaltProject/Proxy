@@ -80,9 +80,19 @@ void BedrockSession::unlisted(std::span<const std::uint8_t> body) {
 void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
-    const auto packet = play::SpawnEntityPacket::read(in);
-    if (!packet || !spawned_)
+    const auto read = play::SpawnEntityPacket::read(in);
+    if (!read)
         return;
+    if (!spawned_) {
+        if (pendingSpawns_.size() < kMaxPendingSpawns)
+            pendingSpawns_.push_back({*read, {}});
+        return;
+    }
+    addEntity(*read);
+}
+
+void BedrockSession::addEntity(const play::SpawnEntityPacket& spawn) {
+    const auto* packet = &spawn;
     if (packet->entityType == play::SpawnEntityPacket::kItemEntityType) {
         waitingItems_[packet->entityId] = {static_cast<float>(packet->x), static_cast<float>(packet->y),
                                            static_cast<float>(packet->z)};
@@ -138,7 +148,29 @@ void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
     others_[packet->entityId] = {entry.uuidHigh, entry.uuidLow};
 }
 
+void BedrockSession::flushPendingSpawns() {
+    std::vector<PendingSpawn> pending;
+    pending.swap(pendingSpawns_);
+    for (const PendingSpawn& entry : pending) {
+        addEntity(entry.spawn);
+        for (const auto& data : entry.data)
+            entityData(data);
+    }
+}
+
 void BedrockSession::moveEntity(std::int32_t id, double x, double y, double z, float yaw, float pitch, bool onGround) {
+    if (!spawned_) {
+        const auto pending =
+            std::ranges::find(pendingSpawns_, id, [](const PendingSpawn& p) { return p.spawn.entityId; });
+        if (pending != pendingSpawns_.end()) {
+            pending->spawn.x = x;
+            pending->spawn.y = y;
+            pending->spawn.z = z;
+            pending->spawn.yaw = yaw;
+            pending->spawn.pitch = pitch;
+        }
+        return;
+    }
     const bool mob = mobs_.contains(id);
     if (!mob && !others_.contains(id))
         return;
@@ -155,6 +187,13 @@ void BedrockSession::entityData(std::span<const std::uint8_t> body) {
     const auto packet = play::SetEntityDataPacket::read(in);
     if (!packet)
         return;
+    if (!spawned_) {
+        const auto pending =
+            std::ranges::find(pendingSpawns_, packet->entityId, [](const PendingSpawn& p) { return p.spawn.entityId; });
+        if (pending != pendingSpawns_.end() && pending->data.size() < kMaxPendingData)
+            pending->data.emplace_back(body.begin(), body.end());
+        return;
+    }
     if (mobs_.contains(packet->entityId))
         nameTagged(*packet);
     const auto waiting = waitingItems_.find(packet->entityId);
@@ -257,6 +296,7 @@ void BedrockSession::removeEntities(std::span<const std::uint8_t> body) {
     if (!packet)
         return;
     for (const std::int32_t id : packet->entityIds) {
+        std::erase_if(pendingSpawns_, [id](const PendingSpawn& p) { return p.spawn.entityId == id; });
         waitingItems_.erase(id);
         nameTags_.erase(id);
         if (mobs_.erase(id) != 0) {

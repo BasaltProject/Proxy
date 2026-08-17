@@ -170,6 +170,7 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     inventory_ = {};
     chunks_ = 0;
     spawned_ = false;
+    pendingSpawns_.clear();
     teleported_ = false;
     acceptedTeleport_ = -1;
     sneaking_ = false;
