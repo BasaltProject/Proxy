@@ -220,6 +220,7 @@ private:
     std::unique_ptr<wire::multiversion::java::JavaChain> translation_;
     std::unique_ptr<IdRenumbering> ids_;
     std::unique_ptr<wire::multiversion::java::JavaChain> upward_;
+    std::int32_t upwardProtocol_ = 0;
     [[nodiscard]] bool upgrades(std::int32_t backendProtocol) const;
     [[nodiscard]] bool upgradeFrame(std::span<const std::uint8_t> frame);
     [[nodiscard]] bool downgradeFrame(BackendLogin& target, std::span<const std::uint8_t> frame);

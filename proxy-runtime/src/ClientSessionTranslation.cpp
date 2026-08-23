@@ -87,8 +87,9 @@ bool ClientSession::upgrades(std::int32_t backendProtocol) const {
 
 bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame) {
     namespace protocol = wire::protocol;
-    if (!upward_) {
-        upward_ = wire::multiversion::java::javaTranslators::upChainFor(backend()->protocol());
+    if (!upward_ || upwardProtocol_ != backend()->protocol()) {
+        upwardProtocol_ = backend()->protocol();
+        upward_ = wire::multiversion::java::javaTranslators::upChainFor(upwardProtocol_);
         if (!upward_)
             return false;
     }
@@ -113,8 +114,9 @@ bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame) {
 
 bool ClientSession::downgradeFrame(BackendLogin& target, std::span<const std::uint8_t> frame) {
     namespace protocol = wire::protocol;
-    if (!upward_) {
-        upward_ = wire::multiversion::java::javaTranslators::upChainFor(target.protocol());
+    if (!upward_ || upwardProtocol_ != target.protocol()) {
+        upwardProtocol_ = target.protocol();
+        upward_ = wire::multiversion::java::javaTranslators::upChainFor(upwardProtocol_);
         if (!upward_)
             return false;
     }
