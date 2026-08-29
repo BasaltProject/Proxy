@@ -244,11 +244,17 @@ bool ClientSession::packet() {
         if (id != protocol::login::kLoginAcknowledgedId || frame_.readableBytes() != 0 ||
             (output_.readableBytes() != 0 && !synthesizing_) || !backend())
             return false;
-        if (!toBackend(*backend(), raw))
+        const bool bridged = bridges(backend()->protocol());
+        if (!bridged && !toBackend(*backend(), raw))
             return false;
         backpressure();
         if (!backend()->acknowledgeLogin())
             return false;
+        if (bridged) {
+            if (!backend()->finishConfiguration())
+                return false;
+            bridgeWait_ = true;
+        }
         state_ = State::kConfiguration;
         readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         backend()->expectReadUntil(readDeadline_);
@@ -263,6 +269,8 @@ bool ClientSession::packet() {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend() || id < 0 || (state_ == State::kConfiguration && id == kConfigurationAcknowledgedId))
             return false;
+        if (state_ == State::kConfiguration && (bridgeWait_ || bridgeHold_))
+            return bridgedConfiguration(id, raw);
         if (access_.policy && limiter_.active())
             if (const auto handled = limited(id))
                 return *handled;

@@ -47,7 +47,7 @@ bool ClientSession::answerKnownPacks() {
 
 bool ClientSession::relayBuffered() const {
     return (state_ == State::kPlay || state_ == State::kConfiguration) && backend() && !backendPaused_ &&
-           !startingConfiguration_ && !closing_ && backend()->hasBufferedFrame();
+           !startingConfiguration_ && !bridgeHold_ && !closing_ && backend()->hasBufferedFrame();
 }
 
 bool ClientSession::backendReady(const wire::io::IoReady& event) {
@@ -85,7 +85,7 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
         backend()->cancelCookieRequest();
         sourceEvent.writable = false;
     }
-    const bool readBackend = closingCookie || (!backendPaused_ && !startingConfiguration_ &&
+    const bool readBackend = closingCookie || (!backendPaused_ && !startingConfiguration_ && !bridgeHold_ &&
                                                state_ != State::kLoginAck && state_ != State::kCookieResponse);
     auto packet = backend()->ready(sourceEvent, readBackend);
     backpressure();
@@ -115,6 +115,8 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
             return false;
         bytes = idIn_.readable();
     }
+    if (relay && bridgeWait_ && state_ == State::kConfiguration)
+        return bridgeBackendLogin(bytes);
     if (relay && upgrades(backend()->protocol()))
         return upgradeFrame(bytes);
     return backendFrame(bytes);

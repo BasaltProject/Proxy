@@ -222,7 +222,14 @@ private:
     std::unique_ptr<wire::multiversion::java::JavaChain> upward_;
     std::int32_t upwardProtocol_ = 0;
     [[nodiscard]] bool upgrades(std::int32_t backendProtocol) const;
-    [[nodiscard]] bool upgradeFrame(std::span<const std::uint8_t> frame);
+    [[nodiscard]] bool upgradeFrame(std::span<const std::uint8_t> frame, std::size_t skipLinks = 0,
+                                    std::optional<wire::protocol::ProtocolState> forced = std::nullopt);
+    [[nodiscard]] bool bridges(std::int32_t backendProtocol) const;
+    [[nodiscard]] bool bridgeBackendLogin(std::span<const std::uint8_t> frame);
+    [[nodiscard]] bool bridgedConfiguration(std::int32_t id, std::span<const std::uint8_t> raw);
+    bool bridgeWait_ = false;
+    bool bridgeHold_ = false;
+    std::vector<std::uint8_t> bridgeLogin_;
     [[nodiscard]] bool downgradeFrame(BackendLogin& target, std::span<const std::uint8_t> frame);
     [[nodiscard]] bool toBackend(BackendLogin& target, std::span<const std::uint8_t> frame);
     [[nodiscard]] bool numbered(wire::protocol::ProtocolState state) const;

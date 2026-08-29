@@ -85,7 +85,8 @@ bool ClientSession::upgrades(std::int32_t backendProtocol) const {
     return clientProtocol_ == 0 && !translation_ && upwardVerified(backendProtocol);
 }
 
-bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame) {
+bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, std::size_t skipLinks,
+                                 std::optional<wire::protocol::ProtocolState> forced) {
     namespace protocol = wire::protocol;
     if (!upward_ || upwardProtocol_ != backend()->protocol()) {
         upwardProtocol_ = backend()->protocol();
@@ -100,15 +101,19 @@ bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame) {
         return false;
     const std::vector<std::uint8_t> body{view.readable().begin(), view.readable().end()};
     bool ok = true;
-    upward_->chain().clientbound(protocolState(), id, body,
-                                 [&](std::int32_t upId, std::span<const std::uint8_t> bytes) {
-                                     if (!ok)
-                                         return;
-                                     wire::io::ByteBuffer whole;
-                                     protocol::varInt::write(whole, upId);
-                                     whole.writeBytes(bytes);
-                                     ok = backendFrame(whole.readable());
-                                 });
+    const auto emit = [&](std::int32_t upId, std::span<const std::uint8_t> bytes) {
+        if (!ok)
+            return;
+        wire::io::ByteBuffer whole;
+        protocol::varInt::write(whole, upId);
+        whole.writeBytes(bytes);
+        ok = backendFrame(whole.readable());
+    };
+    const auto state = forced ? *forced : protocolState();
+    if (skipLinks != 0)
+        upward_->chain().clientboundFrom(skipLinks, state, id, body, emit);
+    else
+        upward_->chain().clientbound(state, id, body, emit);
     return ok;
 }
 

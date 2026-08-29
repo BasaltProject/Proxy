@@ -50,6 +50,7 @@ basalt_module(proxy-runtime-core
         src/antibot/LimboRegistries.cpp
         src/antibot/LimboRun.cpp
         src/ClientSessionRouting.cpp
+        src/ClientSessionBridge.cpp
         src/ClientSessionTranslation.cpp
         src/ChatIntegrity.cpp
         src/ClientSessionChat.cpp

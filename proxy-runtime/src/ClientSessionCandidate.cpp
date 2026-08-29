@@ -106,9 +106,14 @@ bool ClientSession::acknowledgePreparedChange() {
         (output_.readableBytes() != 0 && !synthesizing_))
         return false;
     constexpr std::array<std::uint8_t, 1> ack{wire::protocol::login::kLoginAcknowledgedId};
-    if (!toBackend(*candidateBackend_, ack) || !candidateBackend_->acknowledgeLogin() ||
-        (clientSettings_.readableBytes() != 0 && !toBackend(*candidateBackend_, clientSettings_.readable())))
+    const bool bridged = bridges(candidateBackend_->protocol());
+    if (bridged) {
+        if (!candidateBackend_->acknowledgeLogin() || !candidateBackend_->finishConfiguration())
+            return false;
+    } else if (!toBackend(*candidateBackend_, ack) || !candidateBackend_->acknowledgeLogin() ||
+               (clientSettings_.readableBytes() != 0 && !toBackend(*candidateBackend_, clientSettings_.readable()))) {
         return false;
+    }
     state_ = State::kConfiguration;
     constexpr std::array<std::uint8_t, 2> removePacks{0x08, 0};
     constexpr std::array<std::uint8_t, 2> clearReportDetails{0x10, 0};
@@ -148,6 +153,7 @@ bool ClientSession::acknowledgePreparedChange() {
         recoveryVisited_.reset();
     recovering_ = false;
     finishingConfiguration_ = false;
+    bridgeWait_ = bridged;
     frontendPaused_ = false;
     backendPaused_ = false;
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
