@@ -85,8 +85,7 @@ bool ClientSession::upgrades(std::int32_t backendProtocol) const {
     return clientProtocol_ == 0 && !translation_ && upwardVerified(backendProtocol);
 }
 
-bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, std::size_t skipLinks,
-                                 std::optional<wire::protocol::ProtocolState> forced) {
+bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, bool synthetic) {
     namespace protocol = wire::protocol;
     if (!upward_ || upwardProtocol_ != backend()->protocol()) {
         upwardProtocol_ = backend()->protocol();
@@ -109,11 +108,11 @@ bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, std::size_
         whole.writeBytes(bytes);
         ok = backendFrame(whole.readable());
     };
-    const auto state = forced ? *forced : protocolState();
-    if (skipLinks != 0)
-        upward_->chain().clientboundFrom(skipLinks, state, id, body, emit);
+    if (synthetic)
+        upward_->chain().clientboundFrom(upward_->chain().linksUpTo(wire::multiversion::protocolVersions::kV1_20_2),
+                                         protocol::ProtocolState::Configuration, id, body, emit);
     else
-        upward_->chain().clientbound(state, id, body, emit);
+        upward_->chain().clientbound(protocolState(), id, body, emit);
     return ok;
 }
 

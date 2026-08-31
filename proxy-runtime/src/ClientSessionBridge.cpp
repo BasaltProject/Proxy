@@ -61,7 +61,7 @@ bool ClientSession::bridgeBackendLogin(std::span<const std::uint8_t> frame) {
         wire::io::ByteBuffer whole;
         protocol::varInt::write(whole, id);
         whole.writeBytes(body);
-        return upgradeFrame(whole.readable(), 1, protocol::ProtocolState::Configuration);
+        return upgradeFrame(whole.readable(), true);
     };
     if (!send(kFeatureFlagsId, flags.readable()))
         return false;
