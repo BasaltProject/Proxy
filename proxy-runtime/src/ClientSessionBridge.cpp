@@ -4,6 +4,7 @@
 #include "RouteVersions.hpp"
 
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
+#include <basalt/wire/multiversion/java/LoginCodec.hpp>
 #include <basalt/wire/nbt/NbtIO.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -12,12 +13,31 @@
 namespace basalt::proxy::runtime::detail {
 namespace {
 
-constexpr std::int32_t kBackendLoginId = 40;
 constexpr std::int32_t kRegistryDataId = 5;
 constexpr std::int32_t kFeatureFlagsId = 7;
 constexpr std::int32_t kFinishConfiguration764 = 2;
 constexpr std::int32_t kPlaySettingsId = 0x0e;
 constexpr std::int32_t kConfigSettingsId = 0x00;
+
+std::int32_t backendLoginId(std::int32_t protocol) {
+    switch (protocol) {
+    case 761:
+        return 36;
+    case 760:
+        return 37;
+    case 759:
+        return 35;
+    case 758:
+    case 757:
+        return 38;
+    case 754:
+        return 36;
+    case 340:
+        return 35;
+    default:
+        return 40;
+    }
+}
 
 } // namespace
 
@@ -29,7 +49,7 @@ bool ClientSession::bridgeBackendLogin(std::span<const std::uint8_t> frame) {
     namespace protocol = wire::protocol;
     wire::io::ByteBuffer view;
     view.writeBytes(frame);
-    if (protocol::varInt::read(view) != kBackendLoginId)
+    if (protocol::varInt::read(view) != backendLoginId(backend()->protocol()))
         return false;
     bridgeLogin_.assign(frame.begin(), frame.end());
     (void)view.readInt();
@@ -49,11 +69,13 @@ bool ClientSession::bridgeBackendLogin(std::span<const std::uint8_t> frame) {
         return false;
     std::vector<std::uint8_t> window{codec.begin() + 2 + static_cast<std::ptrdiff_t>(nameLength), codec.end()};
     window[0] = 0x0a;
-    const auto parsed = wire::nbt::nbtIO::readAnonymous(window);
+    auto parsed = wire::nbt::nbtIO::readAnonymous(window);
     if (!parsed)
         return false;
+    if (auto* registries = parsed->tag.get<wire::nbt::NbtCompound>())
+        wire::multiversion::java::completeLoginCodec(backend()->protocol(), *registries);
     wire::io::ByteBuffer registry;
-    registry.writeBytes(std::span<const std::uint8_t>{window}.first(parsed->bytesConsumed));
+    registry.writeBytes(wire::nbt::nbtIO::writeAnonymous(parsed->tag));
     wire::io::ByteBuffer flags;
     protocol::varInt::write(flags, 1);
     protocol::writeString(flags, "minecraft:vanilla");
