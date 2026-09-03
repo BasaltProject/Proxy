@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, cpp]
   pull_request:
 
 concurrency:
@@ -21,22 +21,57 @@ jobs:
         with:
           submodules: true
 
-      - uses: actions/setup-java@v4
+      - name: Install the toolchain
+        uses: lukka/get-cmake@latest
+
+      - name: Install ccache
+        uses: hendrikmuhs/ccache-action@v1
         with:
-          distribution: temurin
-          java-version: "25"
+          key: ${{ matrix.os }}
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Configure
+        run: cmake --preset release
 
-      - name: Build and test
-        # A local build only makes this machine's binary; the matrix is what covers the five.
+      - name: Build
         # The run number is the build half of the version: 26.2.<build>.
-        run: ./gradlew build --stacktrace -Pbasalt.targets=all -Pbasalt.build=${{ github.run_number }}
+        run: cmake --build build/release -- -k 0
 
-      - name: Upload test reports
-        if: failure()
+      - name: Test
+        run: ctest --test-dir build/release --output-on-failure
+
+      - name: Upload the binary
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-${{ matrix.os }}
-          path: "**/build/reports/tests/"
-          retention-days: 7
+          name: basalt-proxy-${{ matrix.os }}
+          path: build/release/bin/
+
+  sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: lukka/get-cmake@latest
+
+      - name: Configure with the address and undefined sanitizers
+        run: cmake --preset asan
+
+      - name: Build
+        run: cmake --build build/asan
+
+      - name: Test
+        run: ctest --test-dir build/asan --output-on-failure
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Check formatting
+        run: |
+          find proxy-runtime wire/wire-* -name '*.hpp' -o -name '*.cpp' \
+            | grep -v third_party \
+            | xargs clang-format --dry-run --Werror
