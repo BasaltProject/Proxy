@@ -216,7 +216,7 @@ std::array<ClientSession::BackendWatch, 3> ClientSession::backendWatches() const
         const bool preparing = activeBackend_ && endpoint == candidateBackend_.get() && state_ == State::kPlay;
         const bool read = (selected || (preparing && endpoint->phase() == BackendLogin::Phase::kLogin)) &&
                           !backendPaused_ && !endpoint->hasCookieRequest() && state_ != State::kLoginAck &&
-                          state_ != State::kCookieResponse && !startingConfiguration_;
+                          state_ != State::kCookieResponse && !startingConfiguration_ && !bridgeHold_;
         const auto interest = endpoint->interest(read);
         if ((selected && !backendPaused_) || preparing || interest.readable || interest.writable)
             result[i + 1] = {endpoint->handle(), interest};
