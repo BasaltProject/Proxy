@@ -84,7 +84,10 @@ void JavaLink::pump() {
         login_->useOrigin(1, originId_);
         if (identity_)
             login_->delegateBedrock(*identity_, bedrockProtocol_);
-        if (!login_->start(backend_, profile_, backend_.host, backend_.port, clientAddress_, clientPort_, native_)) {
+        const std::int32_t speaks =
+            backend_.protocol == config::BackendConfig::kClientProtocol ? buildInfo::kProtocolVersion : 0;
+        if (!login_->start(backend_, profile_, backend_.host, backend_.port, clientAddress_, clientPort_, native_,
+                           speaks)) {
             close("the backend login could not start");
             return;
         }
