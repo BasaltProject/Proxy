@@ -1203,6 +1203,22 @@ std::vector<std::string> ProxyRuntime::backendNames() const {
     return names;
 }
 
+std::optional<config::BackendConfig> ProxyRuntime::backendConfig(std::string_view name) const {
+    const auto topology = impl_->topology.load();
+    const auto found = std::ranges::find(topology->backends, name, &config::BackendConfig::name);
+    if (found == topology->backends.end())
+        return std::nullopt;
+    return *found;
+}
+
+std::optional<config::BackendConfig> ProxyRuntime::defaultBackend() const {
+    const auto topology = impl_->topology.load();
+    const auto defaults = topology->routes.select("bedrock.invalid");
+    if (defaults.empty())
+        return std::nullopt;
+    return topology->backends[defaults.front()];
+}
+
 std::vector<BackendInfo> ProxyRuntime::backends() const {
     std::vector<BackendInfo> result;
     const auto topology = impl_->topology.load();

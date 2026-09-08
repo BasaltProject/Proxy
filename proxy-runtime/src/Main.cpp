@@ -734,39 +734,16 @@ int run(const cliCommand::Run& command) {
         bedrock = std::make_unique<detail::BedrockStatus>(
             configuration->bedrock, [&serverList] { return (*serverList)->bedrockMotd(); },
             [&runtime] { return runtime->sessionCount(); }, configuration->runtime.maxSessions,
-            [&configuration]() -> std::optional<proxy::config::BackendConfig> {
-                const auto routes = detail::BackendRoutes::create(*configuration);
-                if (!routes)
-                    return std::nullopt;
-                const auto defaults = routes->select("bedrock.invalid");
-                if (defaults.empty())
-                    return std::nullopt;
-                return configuration->backends[defaults.front()];
-            },
+            [&runtime]() { return runtime->defaultBackend(); },
             [&pluginHost, &roster](PlayerEvent event) {
                 roster.apply(event);
                 if (auto* host = pluginHost.load(std::memory_order_acquire))
                     host->post(std::move(event));
             },
-            *language,
-            [&configuration](std::string_view name) -> std::optional<proxy::config::BackendConfig> {
-                const auto found =
-                    std::ranges::find(configuration->backends, name, &proxy::config::BackendConfig::name);
-                if (found == configuration->backends.end())
-                    return std::nullopt;
-                return *found;
-            },
-            nativeForwarding, configuration->network.onlineMode, configuration->admission,
-            detail::BedrockSession::Commands{playerCommand,
-                                             playerCommandSpecs,
-                                             {},
-                                             [&configuration] {
-                                                 std::vector<std::string> names;
-                                                 for (const auto& backend : configuration->backends)
-                                                     names.push_back(backend.name);
-                                                 return names;
-                                             },
-                                             loginGate});
+            *language, [&runtime](std::string_view name) { return runtime->backendConfig(name); }, nativeForwarding,
+            configuration->network.onlineMode, configuration->admission,
+            detail::BedrockSession::Commands{
+                playerCommand, playerCommandSpecs, {}, [&runtime] { return runtime->backendNames(); }, loginGate});
         bedrock->guard(
             {[&runtime](std::string_view address, bool connecting) {
                  return runtime->bedrockOffline(address, connecting);

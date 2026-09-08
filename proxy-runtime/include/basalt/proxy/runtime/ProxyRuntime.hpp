@@ -28,8 +28,9 @@
 #include <vector>
 
 namespace basalt::proxy::config {
+struct BackendConfig;
 struct ProxyConfig;
-}
+} // namespace basalt::proxy::config
 
 namespace basalt::proxy::runtime {
 
@@ -291,6 +292,10 @@ public:
     /// Thread-safe. Validates first, then swaps backends and routes atomically; fixed settings need a restart.
     [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
     [[nodiscard]] std::vector<std::string> backendNames() const;
+    /// Thread-safe. The current server of that name, as the last reload left it.
+    [[nodiscard]] std::optional<config::BackendConfig> backendConfig(std::string_view name) const;
+    /// Thread-safe. The first server a player with no forced host would be sent to.
+    [[nodiscard]] std::optional<config::BackendConfig> defaultBackend() const;
     /// Thread-safe. The players who have finished joining, in the order they did.
     [[nodiscard]] std::vector<std::string> playerNames() const;
     [[nodiscard]] std::vector<BackendInfo> backends() const;
