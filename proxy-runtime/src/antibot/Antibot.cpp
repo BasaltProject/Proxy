@@ -233,7 +233,8 @@ struct Record {
     }
 
     void add(std::int32_t points, Clock::time_point now) {
-        score = effective(now) + points;
+        score = static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(std::int64_t{effective(now)} + points, INT32_MIN, INT32_MAX));
         scoredAt = now;
     }
 };
