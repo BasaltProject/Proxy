@@ -45,6 +45,11 @@ namespace {
 
 namespace bedrock = wire::bedrock;
 namespace play = wire::protocol::play;
+
+[[nodiscard]] std::int32_t worldOf(std::int32_t section, std::int32_t local) {
+    return static_cast<std::int32_t>(static_cast<std::uint32_t>(section) * 16U + static_cast<std::uint32_t>(local));
+}
+
 using bedrock::BedrockPacket;
 using namespace bedrockLimits;
 
@@ -71,8 +76,8 @@ void BedrockSession::sectionChanged(std::span<const std::uint8_t> body) {
     for (const auto& change : packet->changes) {
         const auto at = static_cast<std::int32_t>(change.position);
         wire::io::ByteBuffer out;
-        bedrock::writeUpdateBlock(out, packet->sectionX * 16 + ((at >> 8) & 15), packet->sectionY * 16 + (at & 15),
-                                  packet->sectionZ * 16 + ((at >> 4) & 15), change.blockStateId,
+        bedrock::writeUpdateBlock(out, worldOf(packet->sectionX, (at >> 8) & 15), worldOf(packet->sectionY, at & 15),
+                                  worldOf(packet->sectionZ, (at >> 4) & 15), change.blockStateId,
                                   connection_.protocolVersion());
         sendBedrock(BedrockPacket::UpdateBlock, out);
     }
@@ -149,8 +154,8 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
                         continue;
                     const auto y = static_cast<std::int32_t>(((minSection_ + static_cast<std::int32_t>(section)) * 16) +
                                                              static_cast<std::int32_t>(at >> 8));
-                    bedrock::writeBedTag(tags, (packet->x * 16) + static_cast<std::int32_t>(at & 15), y,
-                                         (packet->z * 16) + static_cast<std::int32_t>((at >> 4) & 15), *colour);
+                    bedrock::writeBedTag(tags, worldOf(packet->x, static_cast<std::int32_t>(at & 15)), y,
+                                         worldOf(packet->z, static_cast<std::int32_t>((at >> 4) & 15)), *colour);
                 }
             }
             for (const auto& entity : packet->blockEntities) {
@@ -158,7 +163,7 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
                     continue;
                 const std::int32_t localX = (entity.packedXZ >> 4) & 0xF;
                 const std::int32_t localZ = entity.packedXZ & 0xF;
-                bedrock::writeJavaBlockEntity(tags, (packet->x * 16) + localX, entity.y, (packet->z * 16) + localZ,
+                bedrock::writeJavaBlockEntity(tags, worldOf(packet->x, localX), entity.y, worldOf(packet->z, localZ),
                                               entity.typeId, *entity.tag, stateAt(localX, entity.y, localZ));
             }
         });
