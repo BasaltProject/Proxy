@@ -2,6 +2,7 @@
 
 #include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/ConfigDefaults.hpp>
+#include <basalt/proxy/config/PatternSafety.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 
@@ -60,7 +61,9 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     reader.scalar(general, "enforce-secure-profile", result.general.enforceSecureProfile, "general.");
     if (result.general.brand.size() > 64)
         reader.fail("general.brand", "must be at most 64 bytes");
-    if (!result.general.usernamePattern.empty()) {
+    if (const auto reason = unsafePatternReason(result.general.usernamePattern)) {
+        reader.fail("general.username-pattern", *reason);
+    } else if (!result.general.usernamePattern.empty()) {
         try {
             static_cast<void>(std::regex{result.general.usernamePattern});
         } catch (const std::regex_error&) {

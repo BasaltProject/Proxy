@@ -9,7 +9,7 @@ basalt_embed_text(proxy-config-defaults
 )
 
 basalt_module(proxy-config
-    SOURCES src/ProxyConfig.cpp src/ServersConfig.cpp src/ConfigFiles.cpp src/AddressRange.cpp src/RemoteConfig.cpp src/AntibotConfig.cpp
+    SOURCES src/ProxyConfig.cpp src/ServersConfig.cpp src/ConfigFiles.cpp src/AddressRange.cpp src/RemoteConfig.cpp src/AntibotConfig.cpp src/PatternSafety.cpp
     DEPENDS basalt::wire-common basalt::wire-config basalt::wire-io basalt::wire-auth basalt::wire-protocol
             basalt::proxy-config-defaults
 )

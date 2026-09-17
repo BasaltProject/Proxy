@@ -1,5 +1,6 @@
 #include "BedrockStatus.hpp"
 
+#include <basalt/proxy/config/PatternSafety.hpp>
 #include <basalt/wire/bedrock/BedrockAdvertisement.hpp>
 #include <basalt/wire/bedrock/BedrockPacketIds.hpp>
 #include <basalt/wire/bedrock/NetherNetIdentityStore.hpp>
@@ -176,6 +177,10 @@ void BedrockStatus::adopt(wire::bedrock::BedrockTransport& transport, const wire
     raw.onReady([this, &raw, peer] {
         if (guard_.login) {
             const auto login = raw.login();
+            if (login.name.size() > config::kMaxMatchedNameBytes || login.xuid.size() > config::kMaxMatchedNameBytes) {
+                raw.disconnect("Invalid player name.");
+                return;
+            }
             if (const auto refusal = guard_.login(originOf(peer), login.name, login.xuid, login.authenticated)) {
                 raw.disconnect(*refusal);
                 return;

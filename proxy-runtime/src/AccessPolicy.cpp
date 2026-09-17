@@ -1,5 +1,7 @@
 #include "AccessPolicy.hpp"
 
+#include <basalt/proxy/config/PatternSafety.hpp>
+
 #include <algorithm>
 #include <regex>
 
@@ -39,7 +41,8 @@ bool AccessSettings::trustsUpstream(std::string_view address) const {
 }
 
 bool AccessSettings::allowsName(std::string_view name) const {
-    return !usernames_ || std::regex_match(name.begin(), name.end(), usernames_->pattern);
+    return !usernames_ || (name.size() <= config::kMaxMatchedNameBytes &&
+                           std::regex_match(name.begin(), name.end(), usernames_->pattern));
 }
 
 AccessPolicy::AccessPolicy(const config::ProxyConfig& config, Admission& admission)

@@ -2,6 +2,7 @@
 
 #include <basalt/proxy/config/AddressRange.hpp>
 #include <basalt/proxy/config/AntibotConfig.hpp>
+#include <basalt/proxy/config/PatternSafety.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -129,6 +130,10 @@ std::expected<AntibotConfig, std::string> readAntibot(const TomlTable& table, st
     number(reader, names, "similar-names-score", result.similarNamesScore, 0, 1000000, "names.");
     number(reader, names, "names-per-origin-score", result.namesPerOriginScore, 0, 1000000, "names.");
     for (const auto& pattern : result.blockedNamePatterns) {
+        if (const auto reason = unsafePatternReason(pattern)) {
+            reader.fail("names.blocked-patterns", "entry '" + pattern + "' " + std::string{*reason});
+            continue;
+        }
         try {
             static_cast<void>(std::regex{pattern});
         } catch (const std::regex_error&) {

@@ -5,6 +5,7 @@
 #include "VerifiedKeeper.hpp"
 
 #include <basalt/proxy/config/AddressRange.hpp>
+#include <basalt/proxy/config/PatternSafety.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -658,6 +659,8 @@ Verdict Antibot::login(const OriginKey& origin, std::string_view name, bool lega
     };
     if (Settings::within(settings->trusted, origin))
         return {Action::kAllow, Reason::kTrusted, 0};
+    if (name.size() > config::kMaxMatchedNameBytes)
+        return deny(Reason::kNamePattern, 0);
     if (std::ranges::any_of(settings->patterns,
                             [&](const std::regex& p) { return std::regex_match(name.begin(), name.end(), p); }))
         return deny(Reason::kNamePattern, 0);
