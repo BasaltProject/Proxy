@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace basalt::proxy::config {
 
@@ -14,6 +15,7 @@ public:
 
     [[nodiscard]] static std::optional<AddressRange> parse(std::string_view text);
     [[nodiscard]] static std::optional<Bytes> parseAddress(std::string_view text);
+    [[nodiscard]] static std::vector<AddressRange> parseList(std::string_view text);
 
     [[nodiscard]] bool contains(const Bytes& address) const noexcept;
 

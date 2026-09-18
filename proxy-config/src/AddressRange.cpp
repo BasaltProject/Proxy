@@ -128,4 +128,23 @@ bool AddressRange::contains(const Bytes& address) const noexcept {
     return (base_[whole] & mask) == (address[whole] & mask);
 }
 
+std::vector<AddressRange> AddressRange::parseList(std::string_view text) {
+    std::vector<AddressRange> ranges;
+    std::size_t begin = 0;
+    while (begin < text.size()) {
+        auto end = text.find('\n', begin);
+        if (end == std::string_view::npos)
+            end = text.size();
+        auto line = text.substr(begin, end - begin);
+        begin = end + 1;
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string_view::npos || line[first] == '#')
+            continue;
+        line = line.substr(first, line.find_last_not_of(" \t\r") - first + 1);
+        if (const auto range = parse(line))
+            ranges.push_back(*range);
+    }
+    return ranges;
+}
+
 } // namespace basalt::proxy::config

@@ -84,21 +84,8 @@ void AddressFeeds::refreshLists(const config::AntibotConfig& config, std::stop_t
             wire::common::Logger{"Antibot"}.warn([&] { return "Could not download the block list " + url + "."; });
             continue;
         }
-        const auto text = response->text();
-        std::size_t begin = 0;
-        while (begin < text.size()) {
-            auto end = text.find('\n', begin);
-            if (end == std::string::npos)
-                end = text.size();
-            auto line = std::string_view{text}.substr(begin, end - begin);
-            begin = end + 1;
-            const auto first = line.find_first_not_of(" \t\r");
-            if (first == std::string_view::npos || line[first] == '#')
-                continue;
-            line = line.substr(first, line.find_last_not_of(" \t\r") - first + 1);
-            if (const auto range = config::AddressRange::parse(line))
-                merged->push_back(*range);
-        }
+        const auto parsed = config::AddressRange::parseList(response->text());
+        merged->insert(merged->end(), parsed.begin(), parsed.end());
     }
     const std::lock_guard lock{mutex_};
     imported_ = std::move(merged);
