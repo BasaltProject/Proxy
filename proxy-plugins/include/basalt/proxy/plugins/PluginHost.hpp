@@ -252,6 +252,7 @@ private:
     std::deque<Task> queue_;
     mutable std::shared_mutex commandsMutex_;
     std::mutex reloadMutex_;
+    std::mutex foreignMutex_;
     std::vector<std::string> foreignNames_;
     /// Held while any Lua of any plugin runs, on the plugin thread or on a session owner delivering a packet.
     std::recursive_timed_mutex luaMutex_;

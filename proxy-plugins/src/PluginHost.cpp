@@ -351,6 +351,7 @@ std::vector<std::string> PluginHost::names() {
     std::vector<std::string> result;
     for (const auto& [id, installed] : installed_)
         result.push_back(installed.second.name.empty() ? id : installed.second.name);
+    const std::lock_guard names{foreignMutex_};
     result.insert(result.end(), foreignNames_.begin(), foreignNames_.end());
     return result;
 }
@@ -476,7 +477,7 @@ void PluginHost::run(std::stop_token stop) {
         for (const auto& adapter : adapters_)
             for (const ForeignPlugin& plugin : adapter->plugins())
                 foreign.push_back(plugin.name + " (" + std::string{adapter->label()} + ")");
-        std::lock_guard serial{reloadMutex_};
+        const std::lock_guard names{foreignMutex_};
         foreignNames_ = std::move(foreign);
     }
     // Enable runs here rather than while loading so a handler can wait, schedule and look at the players.
