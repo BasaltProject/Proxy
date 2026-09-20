@@ -1,5 +1,6 @@
 #include <basalt/proxy/config/PatternSafety.hpp>
 
+#include <algorithm>
 #include <vector>
 
 namespace basalt::proxy::config {
@@ -24,8 +25,25 @@ std::optional<std::string_view> unsafePatternReason(std::string_view pattern) {
         return "is longer than 128 bytes";
     std::vector<Group> groups;
     bool inClass = false;
+    int quantified = 0;
     for (std::size_t at = 0; at < pattern.size(); ++at) {
         const char c = pattern[at];
+        if (!inClass && c != '\\') {
+            const bool isQuantifier = c == '*' || c == '+' || c == '?' || (c == '{' && quantifierAt(pattern, at));
+            if (!isQuantifier) {
+                quantified = 0;
+            } else if (c == '?' && quantified == 1) {
+                quantified = 2;
+            } else if (quantified != 0) {
+                return "stacks quantifiers";
+            } else {
+                quantified = 1;
+                if (c == '{')
+                    at = std::min(pattern.find('}', at), pattern.size() - 1);
+            }
+        } else {
+            quantified = 0;
+        }
         if (c == '\\') {
             if (at + 1 < pattern.size() && pattern[at + 1] >= '1' && pattern[at + 1] <= '9')
                 return "uses a back-reference";
@@ -50,10 +68,8 @@ std::optional<std::string_view> unsafePatternReason(std::string_view pattern) {
         case '*':
         case '+':
         case '{':
-            if (c != '{' || quantifierAt(pattern, at)) {
-                if (!groups.empty())
-                    groups.back().repeats = true;
-            }
+            if (!groups.empty() && (c != '{' || quantified != 0))
+                groups.back().repeats = true;
             break;
         case ')': {
             if (groups.empty())
