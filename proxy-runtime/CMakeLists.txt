@@ -13,7 +13,6 @@ basalt_module(proxy-runtime-core
         src/PermissionService.cpp
         src/AccessPolicy.cpp
         src/Admission.cpp
-        src/QueryServer.cpp
         src/BedrockStatus.cpp
         src/bedrock/BedrockLanguage.cpp
         src/bedrock/JavaLink.cpp
@@ -80,10 +79,9 @@ basalt_module(proxy-runtime-core
         src/UiService.cpp
         src/Inspection.cpp
         src/ProxyRuntime.cpp
-        src/UpdateChecker.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
             basalt::wire-multiversion basalt::wire-auth basalt::wire-chat basalt::wire-bedrock basalt::wire-config basalt::wire-storage
-            basalt::wire-plugins
+            basalt::wire-plugins basalt::wire-remote
 )
 
 # Only this file sees the version, so stamping a new one does not recompile (or invalidate the cache of) the rest.

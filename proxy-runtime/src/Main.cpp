@@ -10,7 +10,6 @@
 #include "OnlineRoster.hpp"
 #include "PermissionService.hpp"
 #include "PlayerDirectory.hpp"
-#include "QueryServer.hpp"
 #include "ServerListService.hpp"
 #include "UiService.hpp"
 #include "bedrock/BedrockLanguage.hpp"
@@ -29,7 +28,6 @@
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
-#include <basalt/proxy/runtime/UpdateChecker.hpp>
 #include <basalt/wire/common/logging/LogOutput.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/common/logging/Panic.hpp>
@@ -42,6 +40,8 @@
 #include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
+#include <basalt/wire/remote/QueryServer.hpp>
+#include <basalt/wire/remote/UpdateChecker.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -66,6 +66,9 @@ namespace {
 
 /// Stable, so orchestrators and scripts can tell a bad command line from a crash.
 constexpr int kUsageExitCode = 2;
+
+constexpr wire::remote::updateChecker::Product kUpdateProduct{
+    .name = "Basalt Proxy", .repository = "Proxy", .assetPrefix = "BasaltProxy-"};
 
 constexpr std::string_view kIssuesUrl = "https://github.com/BasaltProject/Proxy/issues";
 
@@ -372,17 +375,17 @@ int run(const cliCommand::Run& command) {
         return 1;
     }
     std::mutex queryMutex;
-    std::unique_ptr<detail::QueryServer> query;
+    std::unique_ptr<wire::remote::QueryServer> query;
     proxy::config::QueryConfig activeQuery;
     const auto startQuery = [&](const proxy::config::QueryConfig& wanted) {
         query.reset();
         activeQuery = wanted;
         if (!wanted.enabled)
             return true;
-        query = detail::QueryServer::start(
+        query = wire::remote::QueryServer::start(
             wanted.port,
             [&runtime, &configuration] {
-                detail::QueryServer::Info info;
+                wire::remote::QueryServer::Info info;
                 info.serverName = "Basalt Proxy";
                 info.worldName = "world";
                 info.version = std::string{buildInfo::kMinecraftVersion};
@@ -817,9 +820,11 @@ int run(const cliCommand::Run& command) {
             });
     }
     std::jthread updateChecker;
-    if (configuration->runtime.updateChecker && updateChecker::parseVersion(buildInfo::kVersion).has_value()) {
-        updateChecker = std::jthread{
-            [&logger](std::stop_token stop) { updateChecker::checkAndAnnounce(buildInfo::kVersion, logger, stop); }};
+    if (configuration->runtime.updateChecker &&
+        wire::remote::updateChecker::parseVersion(buildInfo::kVersion).has_value()) {
+        updateChecker = std::jthread{[&logger](std::stop_token stop) {
+            wire::remote::updateChecker::checkAndAnnounce(kUpdateProduct, buildInfo::kVersion, logger, stop);
+        }};
     }
     std::jthread console{[&](std::stop_token stop) {
         for (const auto& line : configuration->general.startupCommands) {
