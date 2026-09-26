@@ -3,6 +3,8 @@
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
+#include <basalt/wire/plugins/PluginListeners.hpp>
+#include <basalt/wire/plugins/PluginScheduling.hpp>
 #include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
@@ -58,15 +60,6 @@ runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::Com
         node = std::move(parent);
     }
     return node;
-}
-
-void pushHandle(LuaArgs& lua, std::shared_ptr<std::atomic<bool>> cancelled) {
-    lua.pushTable();
-    wire::lua::pushHostFunction(lua, "cancel", [cancelled](LuaArgs&) {
-        cancelled->store(true);
-        return 0;
-    });
-    lua.setField("cancel");
 }
 
 } // namespace
@@ -452,106 +445,69 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         }
         server->wake_.notify_one();
     };
-    wire::lua::installWaitingFunction(*plugin.sandbox, "wait",
-                                      [schedule, self](LuaArgs& args, wire::lua::LuaCall::Resume resume) {
-                                          const auto ticks = std::max<std::int64_t>(1, args.integerOr(1, 1));
-                                          PluginHost::Timer timer;
-                                          timer.due = std::chrono::steady_clock::now() + kTick * ticks;
-                                          timer.resume = std::move(resume);
-                                          schedule(std::move(timer));
-                                          static_cast<void>(self);
-                                      });
-    wire::lua::pushHostFunction(lua, "later", [schedule](LuaArgs& args) {
-        const auto ticks = std::max<std::int64_t>(0, args.checkInteger(1));
-        if (!args.isFunction(2))
-            return args.fail("later(ticks, fn) needs a function");
-        PluginHost::Timer timer;
-        timer.due = std::chrono::steady_clock::now() + kTick * ticks;
-        timer.function = std::make_shared<LuaRef>(LuaRef::of(args.state(), 2));
+    const auto timerHandle = [schedule](PluginHost::Timer timer) {
         timer.cancelled = std::make_shared<std::atomic<bool>>(false);
         const auto cancelled = timer.cancelled;
         schedule(std::move(timer));
-        pushHandle(args, cancelled);
-        return 1;
-    });
-    lua.setGlobal("later");
-    wire::lua::pushHostFunction(lua, "every", [schedule](LuaArgs& args) {
-        const bool three = args.count() >= 3;
-        const auto delay = std::max<std::int64_t>(0, args.checkInteger(1));
-        const auto period = std::max<std::int64_t>(1, three ? args.checkInteger(2) : args.checkInteger(1));
-        const std::int32_t at = three ? 3 : 2;
-        if (!args.isFunction(at))
-            return args.fail("every(period, fn) needs a function");
+        return wire::plugins::PluginHandle{[cancelled] { cancelled->store(true); }};
+    };
+    wire::plugins::SchedulingHost scheduling;
+    scheduling.wait = [schedule](std::int32_t ticks, wire::lua::LuaCall::Resume resume) {
+        PluginHost::Timer timer;
+        timer.due = std::chrono::steady_clock::now() + kTick * ticks;
+        timer.resume = std::move(resume);
+        schedule(std::move(timer));
+    };
+    scheduling.later = [timerHandle](std::int32_t ticks, std::shared_ptr<LuaRef> function) {
+        PluginHost::Timer timer;
+        timer.due = std::chrono::steady_clock::now() + kTick * ticks;
+        timer.function = std::move(function);
+        return timerHandle(std::move(timer));
+    };
+    scheduling.every = [timerHandle](std::int32_t delay, std::int32_t period, std::shared_ptr<LuaRef> function) {
         PluginHost::Timer timer;
         timer.due = std::chrono::steady_clock::now() + kTick * delay;
         timer.period = kTick * period;
-        timer.function = std::make_shared<LuaRef>(LuaRef::of(args.state(), at));
-        timer.cancelled = std::make_shared<std::atomic<bool>>(false);
-        const auto cancelled = timer.cancelled;
-        schedule(std::move(timer));
-        pushHandle(args, cancelled);
-        return 1;
-    });
-    lua.setGlobal("every");
+        timer.function = std::move(function);
+        return timerHandle(std::move(timer));
+    };
+    wire::plugins::installScheduling(*plugin.sandbox, lua, scheduling);
 
-    for (const bool observer : {false, true}) {
-        const std::string verb = observer ? "watch" : "on";
-        wire::lua::pushHostFunction(lua, verb, [self, verb, observer](LuaArgs& args) {
-            const std::string name = args.checkString(1);
-            const bool hasOptions = args.count() >= 3;
-            const std::int32_t options = hasOptions ? 2 : 0;
-            const std::int32_t at = hasOptions ? 3 : 2;
-            if (!args.isFunction(at))
-                return args.fail(verb + "(event, fn) needs a function");
-            if (name == kEnableEvent || name == kDisableEvent) {
-                if (observer)
-                    return args.fail("'" + name + "' is about this plugin: listen to it with on(), not watch()");
-                (name == kEnableEvent ? self->onEnable : self->onDisable).push_back(LuaRef::of(args.state(), at));
-                return 0;
-            }
-            if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
-                name != kKickEvent && name != kPingEvent && name != kLoginEvent && name != kMessageEvent &&
-                name != kPreConnectEvent && name != kCommandEvent && name != kAntibotEvent)
-                return args.fail("there is no event called '" + name +
-                                 "'; this proxy has plugin.enable, plugin.disable, " + std::string{kJoinEvent} + ", " +
-                                 std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} + ", " +
-                                 std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " +
-                                 std::string{kPingEvent} + ", " + std::string{kLoginEvent} + ", " +
-                                 std::string{kMessageEvent} + ", " + std::string{kPreConnectEvent} + ", " +
-                                 std::string{kCommandEvent} + ", " + std::string{kAntibotEvent});
-            PluginHost::Plugin::Handler handler;
-            handler.observer = observer;
-            handler.function = LuaRef::of(args.state(), at);
-            if (!observer)
-                self->host->deciders_.fetch_or(decisionBit(name));
-            if (options != 0 && args.isTable(options)) {
-                args.pushField(options, "priority");
-                if (args.isString(-1)) {
-                    const std::string written = args.toText(-1);
-                    args.pop(1);
-                    const auto spelled = wire::plugins::priorityOf(written);
-                    if (!spelled)
-                        return args.fail("'" + written + "' is not a priority");
-                    handler.priority = *spelled;
-                } else {
-                    args.pop(1);
-                }
-                for (const std::string_view field :
-                     {"player_name", "player_uuid", "server", "from_server", "channel"}) {
-                    args.pushField(options, field);
-                    if (args.isString(-1))
-                        handler.filters.emplace(std::string{field}, args.toText(-1));
-                    args.pop(1);
-                }
-            }
-            auto& list = self->handlers[name];
-            const auto position =
-                std::ranges::upper_bound(list, handler.priority, {}, &PluginHost::Plugin::Handler::priority);
-            list.insert(position, std::move(handler));
-            return 0;
-        });
-        lua.setGlobal(verb);
-    }
+    wire::plugins::ListenerHost listeners;
+    listeners.filterFields = [](std::string_view name) -> std::expected<std::vector<std::string>, std::string> {
+        if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
+            name != kKickEvent && name != kPingEvent && name != kLoginEvent && name != kMessageEvent &&
+            name != kPreConnectEvent && name != kCommandEvent && name != kAntibotEvent)
+            return std::unexpected(
+                "there is no event called '" + std::string{name} + "'; this proxy has plugin.enable, plugin.disable, " +
+                std::string{kJoinEvent} + ", " + std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} +
+                ", " + std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " + std::string{kPingEvent} +
+                ", " + std::string{kLoginEvent} + ", " + std::string{kMessageEvent} + ", " +
+                std::string{kPreConnectEvent} + ", " + std::string{kCommandEvent} + ", " + std::string{kAntibotEvent});
+        return std::vector<std::string>{"player_name", "player_uuid", "server", "from_server", "channel"};
+    };
+    listeners.lifecycle = [self](bool enable, LuaRef function) {
+        (enable ? self->onEnable : self->onDisable).push_back(std::move(function));
+    };
+    listeners.add = [self](wire::plugins::ListenerRequest request) -> std::optional<std::string> {
+        PluginHost::Plugin::Handler handler;
+        handler.observer = request.observer;
+        handler.function = std::move(request.function);
+        handler.priority = request.options.priority;
+        for (const auto& [field, value] : request.options.filters)
+            if (const auto* text = std::get_if<std::string>(&value))
+                handler.filters.emplace(field, *text);
+            else if (const auto* number = std::get_if<std::int64_t>(&value))
+                handler.filters.emplace(field, std::to_string(*number));
+        if (!request.observer)
+            self->host->deciders_.fetch_or(decisionBit(request.event));
+        auto& list = self->handlers[request.event];
+        const auto position =
+            std::ranges::upper_bound(list, handler.priority, {}, &PluginHost::Plugin::Handler::priority);
+        list.insert(position, std::move(handler));
+        return std::nullopt;
+    };
+    wire::plugins::installListeners(lua, listeners);
 
     wire::lua::pushHostFunction(lua, "cmd", [server, self](LuaArgs& args) {
         const std::string spec = args.checkString(1);

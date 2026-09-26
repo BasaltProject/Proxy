@@ -76,8 +76,6 @@ struct PluginApi {
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
 
-inline constexpr std::string_view kEnableEvent = "plugin.enable";
-inline constexpr std::string_view kDisableEvent = "plugin.disable";
 inline constexpr std::string_view kJoinEvent = "player.join";
 inline constexpr std::string_view kQuitEvent = "player.quit";
 inline constexpr std::string_view kChatEvent = "player.chat";
