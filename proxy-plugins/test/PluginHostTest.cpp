@@ -70,7 +70,7 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     manifest(root / "wants", "wants", "[capabilities]\ncommands = true\n");
     write(root / "wants" / "src" / "main.lua", "log.info('must not run either')\n");
     manifest(root / "plain", "plain");
-    write(root / "plain" / "src" / "main.lua", "local ok, err = pcall(store.get, 'k')\n"
+    write(root / "plain" / "src" / "main.lua", "local ok, err = pcall(function() return store.k end)\n"
                                                "log.info('storage: ' .. tostring(ok) .. ' ' .. tostring(err))\n");
     manifest(root / "child", "child", "[depends]\nmissing = \">=1\"\n");
     write(root / "child" / "src" / "main.lua", "log.info('must not run')\n");
@@ -175,13 +175,13 @@ TEST_CASE("plugin data persists across restarts and stays private to each plugin
     std::filesystem::remove_all(root);
     manifest(root / "plugins" / "counter", "counter", "[capabilities]\nstorage = true\n");
     write(root / "plugins" / "counter" / "src" / "main.lua", "on('player.join', function(e)\n"
-                                                             "  local n = tonumber(store.get('visits') or '0') + 1\n"
-                                                             "  store.set('visits', tostring(n))\n"
+                                                             "  local n = (store.visits or 0) + 1\n"
+                                                             "  store.visits = n\n"
                                                              "  log.info('visits ' .. n)\n"
                                                              "end)\n");
     manifest(root / "plugins" / "snoop", "snoop", "[capabilities]\nstorage = true\n");
     write(root / "plugins" / "snoop" / "src" / "main.lua",
-          "on('player.join', function(e) log.info('snoop sees ' .. tostring(store.get('visits'))) end)\n");
+          "on('player.join', function(e) log.info('snoop sees ' .. tostring(store.visits)) end)\n");
 
     std::mutex mutex;
     std::condition_variable ready;

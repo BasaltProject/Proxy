@@ -3,10 +3,12 @@
 #include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/plugins/PacketNaming.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
+#include <basalt/wire/plugins/PluginData.hpp>
 #include <basalt/wire/plugins/PluginListeners.hpp>
 #include <basalt/wire/plugins/PluginScheduling.hpp>
 #include <basalt/wire/plugins/PluginToml.hpp>
 #include <basalt/wire/plugins/PluginValue.hpp>
+#include <basalt/wire/storage/PluginDataRepository.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
 
 #include <algorithm>
@@ -27,13 +29,44 @@ namespace {
 using wire::lua::LuaArgs;
 using wire::lua::LuaRef;
 
-constexpr std::size_t kMaxKey = 128;
-constexpr std::size_t kMaxValue = 64 * 1024;
+constexpr std::string_view kServerScope = "server";
 constexpr std::int64_t kMaxKeys = 1000;
 constexpr std::size_t kMaxLine = 4096;
 constexpr std::array<std::string_view, 16> kBuiltinCommands = {
     "help", "list", "glist", "server",    "send", "stop",   "reload",  "plugins",
     "op",   "deop", "group", "whitelist", "ban",  "pardon", "banlist", "kick"};
+
+[[nodiscard]] wire::plugins::DataScopeHost dataScope(wire::sql::Database* database, const std::string& pluginId,
+                                                      const std::string& scope, bool allowed, const char* denied,
+                                                      const char* full, bool ranked) {
+    wire::plugins::DataScopeHost host;
+    host.problem = [database, allowed, denied]() -> const char* {
+        if (!allowed) {
+            return denied;
+        }
+        return database == nullptr ? "plugin data is not available" : nullptr;
+    };
+    host.get = [database, pluginId, scope](std::string_view key) {
+        return wire::storage::PluginDataRepository{*database}.get(pluginId, scope, key);
+    };
+    host.set = [database, pluginId, scope, full](std::string_view key, const std::optional<std::string>& value) {
+        wire::storage::PluginDataRepository repository{*database};
+        if (value.has_value()) {
+            auto held = repository.all(pluginId, scope);
+            if (std::cmp_greater_equal(held.size(), kMaxKeys) && !held.contains(key)) {
+                return std::optional<std::string>{full};
+            }
+        }
+        repository.set(pluginId, scope, key, value);
+        return std::optional<std::string>{};
+    };
+    if (ranked) {
+        host.top = [database, pluginId](std::string_view key, std::int32_t limit) {
+            return wire::storage::PluginDataRepository{*database}.top(pluginId, key, limit);
+        };
+    }
+    return host;
+}
 
 runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::CommandExecutor executor) {
     using Type = wire::plugins::CommandArgumentType;
@@ -86,74 +119,11 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
         return 1;
     });
     lua.setField("has_permission");
-    // A table that reads and writes this plugin's values for this player in the database.
-    PluginHost* host = plugin.host;
-    PluginHost::Plugin* self = &plugin;
     const std::string key = player.uuid.empty() ? player.name : player.uuid;
-    lua.pushTable();
-    lua.pushTable();
-    wire::lua::pushHostFunction(lua, "player.data.get", [host, self, key](LuaArgs& args) {
-        if (!self->playersData)
-            return args.fail("player.data needs players_data = true under [capabilities] in plugin.toml");
-        const std::string name = args.checkString(2);
-        std::optional<std::string> value;
-        if (host->database_ && name.size() <= kMaxKey) {
-            auto query = host->database_->prepare("SELECT value FROM player_data WHERE plugin = ?1 AND player = ?2 "
-                                                  "AND key = ?3");
-            query.bind(1, self->id);
-            query.bind(2, key);
-            query.bind(3, name);
-            if (query.step())
-                value = query.text(0);
-        }
-        if (value)
-            wire::plugins::pushValue(args, *value);
-        else
-            args.pushNil();
-        return 1;
-    });
-    lua.setField("__index");
-    wire::lua::pushHostFunction(lua, "player.data.set", [host, self, key](LuaArgs& args) {
-        if (!self->playersData)
-            return args.fail("player.data needs players_data = true under [capabilities] in plugin.toml");
-        const std::string name = args.checkString(2);
-        if (!host->database_)
-            return args.fail("plugin data is not available");
-        if (name.empty() || name.size() > kMaxKey)
-            return args.fail("a data key is 1 to 128 bytes");
-        auto& database = *host->database_;
-        if (args.isNil(3)) {
-            auto remove = database.prepare("DELETE FROM player_data WHERE plugin = ?1 AND player = ?2 AND key = ?3");
-            remove.bind(1, self->id);
-            remove.bind(2, key);
-            remove.bind(3, name);
-            static_cast<void>(remove.execute());
-            return 0;
-        }
-        const auto encoded = wire::plugins::encodeValue(args, 3);
-        if (!encoded)
-            return args.fail("only strings, numbers and booleans can be stored");
-        const std::string& value = *encoded;
-        if (value.size() > kMaxValue)
-            return args.fail("a data value is at most 65536 bytes");
-        auto count =
-            database.prepare("SELECT COUNT(*) FROM player_data WHERE plugin = ?1 AND player = ?2 AND key <> ?3");
-        count.bind(1, self->id);
-        count.bind(2, key);
-        count.bind(3, name);
-        if (count.step() && count.integer(0) >= kMaxKeys)
-            return args.fail("a player's data is limited to 1000 keys per plugin");
-        auto write = database.prepare("INSERT INTO player_data(plugin, player, key, value) VALUES(?1, ?2, ?3, ?4) "
-                                      "ON CONFLICT(plugin, player, key) DO UPDATE SET value = excluded.value");
-        write.bind(1, self->id);
-        write.bind(2, key);
-        write.bind(3, name);
-        write.bind(4, value);
-        static_cast<void>(write.execute());
-        return 0;
-    });
-    lua.setField("__newindex");
-    lua.setMetatable(-2);
+    wire::plugins::pushDataScope(
+        lua, dataScope(plugin.host->database_ ? &*plugin.host->database_ : nullptr, plugin.id, key, plugin.playersData,
+                       "player.data needs players_data = true under [capabilities] in plugin.toml",
+                       "a player's data is limited to 1000 keys per plugin", false));
     lua.setField("data");
     plugin.playerMeta.push(lua);
     lua.setMetatable(-2);
@@ -642,88 +612,10 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         lua.setGlobal("packet");
     }
 
-    const bool storage = manifest.capabilities.storage;
-    lua.pushTable();
-    const auto problem = [server, storage]() -> const char* {
-        if (!storage)
-            return "store needs storage = true under [capabilities] in plugin.toml";
-        if (!server->database_)
-            return "plugin data is not available";
-        return nullptr;
-    };
-    wire::lua::pushHostFunction(lua, "store.get", [self, server, problem](LuaArgs& args) {
-        if (const char* why = problem())
-            return args.fail(why);
-        auto& database = *server->database_;
-        const std::string name = args.checkString(1);
-        std::optional<std::string> value;
-        if (name.size() <= kMaxKey) {
-            auto query = database.prepare("SELECT value FROM plugin_data WHERE plugin = ?1 AND key = ?2");
-            query.bind(1, self->id);
-            query.bind(2, name);
-            if (query.step())
-                value = query.text(0);
-        }
-        if (value)
-            wire::plugins::pushValue(args, *value);
-        else
-            args.pushNil();
-        return 1;
-    });
-    lua.setField("get");
-    wire::lua::pushHostFunction(lua, "store.set", [self, server, problem](LuaArgs& args) {
-        if (const char* why = problem())
-            return args.fail(why);
-        auto& database = *server->database_;
-        const std::string name = args.checkString(1);
-        if (name.empty() || name.size() > kMaxKey)
-            return args.fail("a store key is 1 to 128 bytes");
-        const auto encoded = wire::plugins::encodeValue(args, 2);
-        if (!encoded)
-            return args.fail("only strings, numbers and booleans can be stored");
-        const std::string& value = *encoded;
-        if (value.size() > kMaxValue)
-            return args.fail("a store value is at most 65536 bytes");
-        auto count = database.prepare("SELECT COUNT(*) FROM plugin_data WHERE plugin = ?1 AND key <> ?2");
-        count.bind(1, self->id);
-        count.bind(2, name);
-        if (count.step() && count.integer(0) >= kMaxKeys)
-            return args.fail("a plugin's store is limited to 1000 keys");
-        auto write = database.prepare("INSERT INTO plugin_data(plugin, key, value) VALUES(?1, ?2, ?3) "
-                                      "ON CONFLICT(plugin, key) DO UPDATE SET value = excluded.value");
-        write.bind(1, self->id);
-        write.bind(2, name);
-        write.bind(3, value);
-        args.pushBoolean(write.execute());
-        return 1;
-    });
-    lua.setField("set");
-    wire::lua::pushHostFunction(lua, "store.delete", [self, server, problem](LuaArgs& args) {
-        if (const char* why = problem())
-            return args.fail(why);
-        auto& database = *server->database_;
-        auto remove = database.prepare("DELETE FROM plugin_data WHERE plugin = ?1 AND key = ?2");
-        remove.bind(1, self->id);
-        remove.bind(2, args.checkString(1));
-        args.pushBoolean(remove.execute());
-        return 1;
-    });
-    lua.setField("delete");
-    wire::lua::pushHostFunction(lua, "store.keys", [self, server, problem](LuaArgs& args) {
-        if (const char* why = problem())
-            return args.fail(why);
-        auto& database = *server->database_;
-        args.pushTable();
-        auto query = database.prepare("SELECT key FROM plugin_data WHERE plugin = ?1 ORDER BY key LIMIT 1000");
-        query.bind(1, self->id);
-        std::int64_t position = 1;
-        while (query.step()) {
-            args.pushString(query.text(0));
-            args.setIndex(position++);
-        }
-        return 1;
-    });
-    lua.setField("keys");
+    wire::plugins::pushDataScope(
+        lua, dataScope(server->database_ ? &*server->database_ : nullptr, plugin.id, std::string{kServerScope},
+                       manifest.capabilities.storage, "store needs storage = true under [capabilities] in plugin.toml",
+                       "a plugin's store is limited to 1000 keys", true));
     lua.setGlobal("store");
 }
 
