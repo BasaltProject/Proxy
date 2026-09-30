@@ -3,6 +3,7 @@
 #include <basalt/proxy/plugins/BungeeMessaging.hpp>
 #include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
+#include <basalt/wire/plugins/CommandArguments.hpp>
 #include <basalt/wire/plugins/PacketView.hpp>
 #include <basalt/wire/plugins/PluginFolder.hpp>
 #include <basalt/wire/plugins/PluginOrder.hpp>
@@ -862,61 +863,8 @@ void PluginHost::invoke(const std::vector<std::string>& words, const std::option
         return;
     }
 
-    // Arguments are read word by word; a text argument takes whatever is left.
-    struct Value {
-        std::variant<std::monostate, std::string, std::int64_t, double, bool> value;
-    };
-
-    std::vector<Value> values;
-    std::size_t at = best->spec.literals.size();
-    for (const wire::plugins::CommandArgument& argument : best->spec.arguments) {
-        if (at >= words.size()) {
-            if (!argument.optional) {
-                answer("<red>Usage: /" + best->spec.usage());
-                return;
-            }
-            values.push_back({});
-            continue;
-        }
-        const std::string& word = words[at];
-        using Type = wire::plugins::CommandArgumentType;
-        if (argument.type == Type::Text) {
-            std::string joined;
-            for (std::size_t i = at; i < words.size(); ++i)
-                joined += (i == at ? "" : " ") + words[i];
-            values.push_back({joined});
-            at = words.size();
-            continue;
-        }
-        ++at;
-        if (argument.type == Type::Word) {
-            values.push_back({word});
-        } else if (argument.type == Type::Int) {
-            std::int64_t number = 0;
-            const auto [end, error] = std::from_chars(word.data(), word.data() + word.size(), number);
-            if (error != std::errc{} || end != word.data() + word.size() || (argument.min && number < *argument.min) ||
-                (argument.max && number > *argument.max)) {
-                answer("<red>Usage: /" + best->spec.usage());
-                return;
-            }
-            values.push_back({number});
-        } else if (argument.type == Type::Float) {
-            char* end = nullptr;
-            const double number = std::strtod(word.c_str(), &end);
-            if (end != word.c_str() + word.size()) {
-                answer("<red>Usage: /" + best->spec.usage());
-                return;
-            }
-            values.push_back({number});
-        } else {
-            if (word != "true" && word != "false") {
-                answer("<red>Usage: /" + best->spec.usage());
-                return;
-            }
-            values.push_back({word == "true"});
-        }
-    }
-    if (at < words.size()) {
+    const auto values = wire::plugins::parseCommandWords(best->spec, words);
+    if (!values) {
         answer("<red>Usage: /" + best->spec.usage());
         return;
     }
@@ -934,19 +882,9 @@ void PluginHost::invoke(const std::vector<std::string>& words, const std::option
                 plugin.consoleMeta.push(lua);
                 lua.setMetatable(-2);
             }
-            for (const Value& value : values) {
-                if (const auto* text = std::get_if<std::string>(&value.value))
-                    lua.pushString(*text);
-                else if (const auto* whole = std::get_if<std::int64_t>(&value.value))
-                    lua.pushInteger(*whole);
-                else if (const auto* real = std::get_if<double>(&value.value))
-                    lua.pushNumber(*real);
-                else if (const auto* flag = std::get_if<bool>(&value.value))
-                    lua.pushBoolean(*flag);
-                else
-                    lua.pushNil();
-            }
-            return static_cast<std::int32_t>(values.size() + 1);
+            for (const wire::plugins::CommandValue& value : *values)
+                wire::plugins::pushCommandValue(lua, value);
+            return static_cast<std::int32_t>(values->size() + 1);
         },
         "command " + best->spec.name());
 }
