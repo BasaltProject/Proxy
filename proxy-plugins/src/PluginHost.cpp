@@ -87,6 +87,17 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
         host->database_ = wire::sql::Database::open(host->settings_.database);
         if (!host->database_)
             return std::unexpected("could not open the plugin database " + host->settings_.database);
+        const bool legacyStore = [&] {
+            auto table = host->database_->prepare("SELECT 1 FROM pragma_table_info('plugin_data')");
+            const bool exists = table.step();
+            auto column =
+                host->database_->prepare("SELECT 1 FROM pragma_table_info('plugin_data') WHERE name = 'uuid'");
+            return exists && !column.step();
+        }();
+        if (legacyStore)
+            host->database_->exec("DROP INDEX IF EXISTS plugin_data_by_plugin;"
+                                  "ALTER TABLE plugin_data RENAME TO plugin_data_v1;"
+                                  "ALTER TABLE player_data RENAME TO player_data_v1;");
         if (!host->database_->exec(wire::storage::schema::pluginDdl()))
             return std::unexpected("plugin database " + host->settings_.database + ": could not create its tables");
     }
