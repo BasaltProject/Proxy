@@ -237,6 +237,8 @@ struct RuntimeServices {
     std::function<bool(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
                        bool fromBackend)>
         pluginMessage = {};
+    /// Channels plugins registered, announced to each backend a player connects to. Owner threads.
+    std::function<std::vector<std::string>()> pluginChannels = {};
     /// Asks plugins to decide; false means nobody listens and the proxy goes on at once. Owner threads, no blocking.
     std::function<bool(DecisionRequest)> decide = {};
     /// Told a player's round trip to their client in milliseconds, measured on each keepalive. Owner threads.

@@ -102,6 +102,10 @@ public:
 
     void useUi(UiSource source) { uiSource_ = std::move(source); }
 
+    void usePluginChannels(std::function<std::vector<std::string>()> channels) {
+        pluginChannels_ = std::move(channels);
+    }
+
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -440,6 +444,7 @@ private:
     void uiTick(Clock::time_point now);
     void uiLeavePlay();
     UiSource uiSource_;
+    std::function<std::vector<std::string>()> pluginChannels_;
     std::unique_ptr<wire::config::PlayerUi> ui_;
     std::optional<wire::config::PingRequest> uiRequest_;
     wire::common::placeholder::PlaceholderContext uiContext_;

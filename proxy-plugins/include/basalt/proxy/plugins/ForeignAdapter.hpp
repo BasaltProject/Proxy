@@ -30,6 +30,9 @@ public:
     [[nodiscard]] virtual std::optional<runtime::DecisionResult> decide(const runtime::DecisionRequest& request) = 0;
     virtual void notify(const runtime::PlayerEvent& event) = 0;
     [[nodiscard]] virtual bool listens(std::string_view channel) const = 0;
+
+    [[nodiscard]] virtual std::vector<std::string> channels() const { return {}; }
+
     /// True when a foreign handler cancelled the message.
     [[nodiscard]] virtual bool message(std::string_view player, std::string_view channel,
                                        std::span<const std::uint8_t> data, bool fromBackend) = 0;

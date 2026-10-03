@@ -371,6 +371,18 @@ std::vector<std::string> PluginHost::playersOn(std::string_view server) const {
     return names;
 }
 
+std::vector<std::string> PluginHost::channelNames() const {
+    std::set<std::string, std::less<>> names;
+    {
+        std::shared_lock lock{channelsMutex_};
+        names.insert(channels_.begin(), channels_.end());
+    }
+    for (const auto& adapter : adapters_)
+        for (auto& name : adapter->channels())
+            names.insert(std::move(name));
+    return {names.begin(), names.end()};
+}
+
 bool PluginHost::message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
                          bool fromBackend) {
     if (!isBungeeChannel(channel)) {

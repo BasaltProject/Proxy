@@ -126,14 +126,24 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
 
 void ClientSession::registerBungeeChannels() {
     namespace protocol = wire::protocol;
-    if (backend() == nullptr || !backends_[backend()->attempt().target].bungeeMessages)
+    if (backend() == nullptr)
         return;
-    constexpr std::string_view kChannels{"BungeeCord\0bungeecord:main", 26};
+    std::string names;
+    if (backends_[backend()->attempt().target].bungeeMessages)
+        names = std::string{"BungeeCord\0bungeecord:main", 26};
+    if (pluginChannels_)
+        for (const auto& channel : pluginChannels_()) {
+            if (channel == kBungeeChannel || channel == "BungeeCord" || !validName(channel))
+                continue;
+            names += (names.empty() ? "" : std::string{'\0'}) + channel;
+        }
+    if (names.empty() || names.size() > kControlPayloadLimit)
+        return;
     wire::io::ByteBuffer registration;
     protocol::varInt::write(registration, protocol::play::CustomPayloadPacket::kServerboundId);
     protocol::writeString(registration, "minecraft:register");
     registration.writeBytes(
-        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(kChannels.data()), kChannels.size()});
+        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(names.data()), names.size()});
     if (toBackend(*backend(), registration.readable()))
         backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
 }

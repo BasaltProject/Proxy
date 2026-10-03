@@ -145,6 +145,9 @@ public:
     /// Starts a decision on the plugin thread; false when no plugin decides it, so the caller goes on at once.
     [[nodiscard]] bool decide(runtime::DecisionRequest request);
 
+    /// Channels plugins registered, native and foreign, for the proxy to announce to backends.
+    [[nodiscard]] std::vector<std::string> channelNames() const;
+
     /// Offered a plugin message in play; true when a plugin registered the channel or it is the BungeeCord one.
     [[nodiscard]] bool message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
                                bool fromBackend);

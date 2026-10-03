@@ -346,6 +346,10 @@ int run(const cliCommand::Run& command) {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr && host->message(player, channel, data, fromBackend);
     };
+    services.pluginChannels = [&pluginHost] {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr ? host->channelNames() : std::vector<std::string>{};
+    };
     services.latency = [&pluginHost](std::string_view player, std::int32_t milliseconds) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLatency, std::string{player}, {}, {}, {}, {}, 0, milliseconds});
@@ -655,6 +659,11 @@ int run(const cliCommand::Run& command) {
         plugins = std::move(*started);
         pluginHost.store(plugins.get(), std::memory_order_release);
         logger.info([&plugins] { return "Loaded " + std::to_string(plugins->loaded()) + " plugin(s)."; });
+    } else if (std::ranges::any_of(configuration->backends, [](const auto& b) { return b.bungeeMessages; })) {
+        logger.warn([] {
+            return std::string{"bungee-messages is on but plugins are disabled: only GetServer, GetServers, UUID and "
+                               "Connect are answered. Set enabled = true in plugins.toml for the rest."};
+        });
     }
 #if !defined(_WIN32)
     const auto oldReload = std::signal(SIGHUP, reloadSignal);

@@ -249,6 +249,11 @@ public:
         return channels_.contains(channel);
     }
 
+    [[nodiscard]] std::vector<std::string> channels() const override {
+        std::lock_guard lock{mutex_};
+        return {channels_.begin(), channels_.end()};
+    }
+
     [[nodiscard]] bool message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
                                bool fromBackend) override {
         JNIEnv* env = shim_->env();
