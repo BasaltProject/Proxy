@@ -374,6 +374,9 @@ int run(const cliCommand::Run& command) {
     signalStop.store(false);
     const auto oldInterrupt = std::signal(SIGINT, stopSignal);
     const auto oldTerminate = std::signal(SIGTERM, stopSignal);
+#ifdef SIGPIPE
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
     if (oldInterrupt == SIG_ERR || oldTerminate == SIG_ERR) {
         logger.error([] { return std::string{"Could not install shutdown signal handlers."}; });
         return 1;
