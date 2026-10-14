@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <img alt="Minecraft" src="https://img.shields.io/badge/Minecraft-26.2-62B47A?logo=minecraft&logoColor=white">
-  <img alt="Protocol" src="https://img.shields.io/badge/protocol-776-62B47A">
+  <img alt="Minecraft" src="https://img.shields.io/badge/Minecraft-26.3-62B47A?logo=minecraft&logoColor=white">
+  <img alt="Protocol" src="https://img.shields.io/badge/protocol-777-62B47A">
   <img alt="C++" src="https://img.shields.io/badge/C%2B%2B-23-00599C?logo=cplusplus&logoColor=white">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS_%7C_Linux_%7C_Windows-00599C">
   <img alt="Build" src="https://img.shields.io/badge/build-CMake-064F8C?logo=cmake&logoColor=white">
@@ -39,7 +39,7 @@ protocol, used by both sides.
 | | |
 |---|---|
 | Language | C++23, 100 %. No Java, no JVM at runtime |
-| Target version | Minecraft 26.2 (protocol 776) |
+| Target version | Minecraft 26.3 (protocol 777) |
 | Distribution | Native binaries per platform |
 | Backends | Any Minecraft server, Basalt or not |
 | Plugin API | Lua, `.bppkg` packages. Velocity and BungeeCord plugins optionally, see below |
@@ -141,9 +141,9 @@ cmake --build build/release
 That leaves the binary in `build/release/bin/`, named for what it is:
 
 ```
-build/release/bin/BasaltProxy-26.2.0-dev-macOS-arm64
-build/release/bin/BasaltProxy-26.2.14-Linux-x64
-build/release/bin/BasaltProxy-26.2.14-Windows-x64.exe
+build/release/bin/BasaltProxy-26.3.0-dev-macOS-arm64
+build/release/bin/BasaltProxy-26.3.14-Linux-x64
+build/release/bin/BasaltProxy-26.3.14-Windows-x64.exe
 ```
 
 The version is `<minecraft>.<build>`: which Minecraft the proxy speaks natively,
