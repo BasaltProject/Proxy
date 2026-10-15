@@ -45,8 +45,11 @@ with forwarding set to `none`, it sends the login handshake and identity and rel
 login disconnects, decoding backend compression independently of frontend framing.
 Unknown login queries receive a matching negative response using backend compression.
 Native LoginFinished/ACK and configuration/play transitions relay small packets in
-synthetic tests, retaining the verified frontend UUID. Buffers still have bootstrap
-limits; real registry/chunk traffic, backpressure and frontend compression remain pending.
+synthetic tests, retaining the verified frontend UUID. Configuration/play buffers grow
+within session/global quotas; bidirectional 512 KiB payload fixtures pass. Login keeps
+bootstrap limits. Frontend compression is negotiated before login success and remains
+independent of backend compression. Directional high/low watermarks pause producers
+while the receiving endpoint drains. Real registry/chunk traffic remains unvalidated.
 
 ## Product goals
 
@@ -124,7 +127,7 @@ ctest --preset debug
 | Network layer, shared with the server | Inherited from Wire |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
 | Initial login crypto and session verification | Implemented; simulated-endpoint tests |
-| Native backend login, configuration and play relay | Small-packet fixtures pass; real game traffic pending |
+| Native backend login, configuration and play relay | Large-payload fixtures pass; real game traffic pending |
 | Backend connections and server switching | TCP connection implemented; switching pending |
 | Player forwarding to the backend | Not started |
 | Configuration files | Generated, loaded and validated at startup |
@@ -133,8 +136,8 @@ ctest --preset debug
 | Plugins and the Lua runtime | Not started |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
-Tests use synthetic clients and backends on Linux. Bootstrap buffers do not yet
-support full registry/chunk traffic, and no real game client has been validated.
+Tests use synthetic clients and backends on Linux. No full registry/chunk sequence
+or real game client has been validated.
 
 ## Related repositories
 

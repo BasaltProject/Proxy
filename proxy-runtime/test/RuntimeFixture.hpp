@@ -28,6 +28,7 @@ inline config::ProxyConfig settings() {
     config::ProxyConfig result;
     result.network.bind = "127.0.0.1";
     result.network.port = 0;
+    result.network.compressionThreshold = -1;
     result.runtime.ioLoops = 3;
     result.runtime.handshakeTimeoutMs = 1000;
     result.admission.originBurst = 100;

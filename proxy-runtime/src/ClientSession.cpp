@@ -33,11 +33,19 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              Clock::time_point acceptedAt, bool online, bool checkAddress,
                              std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
                              AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
-                             const std::vector<config::BackendConfig>& backends)
-    : slot_(std::move(slot)), buffers_(std::move(buffers)), connection_(std::move(connection)), settings_(settings),
-      status_(status), unavailable_(unavailable), online_(online), checkAddress_(checkAddress), publicKey_(publicKey),
-      authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)),
-      backends_(backends), readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {}
+                             const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
+                             std::int32_t compressionThreshold)
+    : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
+      memory_(std::move(globalBuffers), localBuffers_), connection_(std::move(connection)), settings_(settings),
+      status_(status), unavailable_(unavailable), online_(online), checkAddress_(checkAddress),
+      compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
+      authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
+      input_(0, memory_), frame_(0, memory_), output_(0, memory_),
+      readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
+    buffers.reset();
+    allocationReady_ =
+        input_.tryReserve(kBufferCapacity) && frame_.tryReserve(kBufferCapacity) && output_.tryReserve(kBufferCapacity);
+}
 
 ClientSession::~ClientSession() {
     if (authentication_)
@@ -47,21 +55,25 @@ ClientSession::~ClientSession() {
 }
 
 bool ClientSession::accounted() const {
-    return input_.capacity() + frame_.capacity() + output_.capacity() + (backend_ ? backend_->allocated() : 0) <=
-           buffers_.size();
+    return allocationReady_ &&
+           input_.capacity() + frame_.capacity() + output_.capacity() + (backend_ ? backend_->allocated() : 0) <=
+               localBuffers_.used();
 }
 
 ClientSession::Clock::time_point ClientSession::deadline() const {
-    auto result = closing_ ? writeDeadline_ : std::min(readDeadline_, writeDeadline_);
+    auto result = closing_ ? writeDeadline_
+                           : std::min(frontendPaused_ ? Clock::time_point::max() : readDeadline_, writeDeadline_);
     if (!closing_ && (state_ == State::kResolving || state_ == State::kConnecting))
         result = std::min(result, connectDeadline_);
-    return closing_ ? result : std::min({result, backendWriteDeadline_, backendReadDeadline_});
+    return closing_ ? result
+                    : std::min({result, backendWriteDeadline_,
+                                backendPaused_ ? Clock::time_point::max() : backendReadDeadline_});
 }
 
 wire::io::IoInterest ClientSession::interest() const {
-    return {!closing_ && !paused_ && state_ != State::Authenticating && state_ != State::kResolving &&
+    return {!closing_ && !frontendPaused_ && state_ != State::Authenticating && state_ != State::kResolving &&
                 state_ != State::kConnecting && state_ != State::kBackendLogin,
-            output_.readableBytes() != 0};
+            output_.readableBytes() != 0 || (!frontendPaused_ && bufferedPacket())};
 }
 
 bool ClientSession::queue(std::span<const std::uint8_t> bytes) {
@@ -75,23 +87,28 @@ bool ClientSession::queue(std::span<const std::uint8_t> bytes) {
     if (encryptor_)
         encryptor_->encrypt(output_.mutableSpan(offset));
     if (output_.readableBytes() >= settings_.highWaterBytes)
-        paused_ = true;
+        backendPaused_ = true;
     return true;
 }
 
 bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
     output_.discardReadBytes();
-    if (packet.empty() || packet.size() + 3 > kBufferCapacity - output_.writerIndex())
+    const auto maximum = compression_ ? wire::protocol::packetFraming::kMaxUncompressedSize
+                                      : wire::protocol::packetFraming::kMaxFrameSize;
+    if (packet.empty() || packet.size() > static_cast<std::size_t>(maximum) ||
+        !output_.tryReserve(packet.size() + packet.size() / 1000 + 64))
         return false;
     if (output_.readableBytes() == 0)
         writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
     const auto offset = output_.writerIndex();
-    if (!wire::protocol::packetFraming::writeUncompressed(output_, packet))
+    auto encoded = compression_ ? wire::protocol::packetFraming::writeCompressed(output_, packet, *compression_)
+                                : wire::protocol::packetFraming::writeUncompressed(output_, packet);
+    if (!encoded)
         return false;
     if (encryptor_)
         encryptor_->encrypt(output_.mutableSpan(offset));
     if (output_.readableBytes() >= settings_.highWaterBytes)
-        paused_ = true;
+        backendPaused_ = true;
     return true;
 }
 
@@ -107,6 +124,7 @@ bool ClientSession::packet() {
             return false;
         if (!backend_->queue(raw))
             return false;
+        backpressure();
         backend_->acknowledgeLogin();
         state_ = State::kConfiguration;
         readDeadline_ = backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
@@ -124,6 +142,7 @@ bool ClientSession::packet() {
         }
         if (!backend_->queue(raw))
             return false;
+        backpressure();
         if (backendWriteDeadline_ == Clock::time_point::max())
             backendWriteDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
         readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
@@ -193,6 +212,9 @@ bool ClientSession::packet() {
                                                std::move(key->encryptedSecret),
                                                std::move(key->encryptedChallenge),
                                                loginDeadline_};
+        profileLocal_ = localBuffers_.acquire(kAuthenticationBytes);
+        if (!profileLocal_)
+            return false;
         authentication_ = authenticate_(std::move(request));
         if (!authentication_)
             return false;
@@ -223,27 +245,26 @@ bool ClientSession::packet() {
 }
 
 bool ClientSession::decode() {
-    while (input_.readableBytes() != 0 && !closing_ && state_ != State::Authenticating && state_ != State::kResolving &&
-           state_ != State::kConnecting && state_ != State::kBackendLogin) {
-        // Reject the declared bootstrap size before buffering its body or running a codec.
-        std::uint32_t length = 0;
-        bool complete = false;
-        for (std::size_t i = 0; i < std::min<std::size_t>(input_.readableBytes(), 3); ++i) {
-            const auto byte = input_.peekByte(i);
-            length |= static_cast<std::uint32_t>(byte & 0x7fU) << (i * 7);
-            if ((byte & 0x80U) == 0) {
-                complete = true;
-                break;
-            }
-        }
-        if (!complete) {
-            if (input_.readableBytes() >= 3)
-                return false;
-            break;
-        }
-        if (length == 0 || length > kBufferCapacity - 3)
+    while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && state_ != State::Authenticating &&
+           state_ != State::kResolving && state_ != State::kConnecting && state_ != State::kBackendLogin) {
+        const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
+        const auto hint = wire::protocol::packetFraming::inspectFrame(
+            input_.readable(), compression_.has_value(),
+            relay ? wire::protocol::packetFraming::kMaxUncompressedSize : kBufferCapacity - 3, compression_);
+        if (!hint)
             return false;
-        auto decoded = wire::protocol::packetFraming::tryReadFrame(input_, false, frame_);
+        if (!*hint)
+            break;
+        const auto sizes = **hint;
+        if (sizes.frameBytes > input_.capacity() && !input_.tryReserve(sizes.frameBytes - input_.writerIndex()))
+            return false;
+        if (!sizes.complete)
+            break;
+        frame_.clear();
+        if (!sizes.packetBytes || (*sizes.packetBytes > frame_.capacity() && !frame_.tryReserve(*sizes.packetBytes)))
+            return false;
+        auto decoded =
+            wire::protocol::packetFraming::tryReadFrame(input_, compression_.has_value(), frame_, compression_);
         if (!decoded)
             return false;
         if (!*decoded)
@@ -262,12 +283,18 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
                          state_ == State::kConnecting || state_ == State::kBackendLogin;
     if (waiting && event.closed)
         return false;
-    if (!closing_ && !paused_ && !waiting && (event.readable || event.closed)) {
+    if (frontendPaused_ && event.closed)
+        return false;
+    if (!closing_ && !frontendPaused_ && !waiting && bufferedPacket()) {
+        if (!decode())
+            return false;
+    }
+    if (!closing_ && !frontendPaused_ && !waiting && (event.readable || event.closed)) {
         std::array<std::uint8_t, kBufferCapacity> chunk{};
-        const auto room = kBufferCapacity - input_.writerIndex();
+        const auto room = input_.capacity() - input_.writerIndex();
         if (room == 0)
             return false;
-        const auto read = connection_.read(std::span{chunk}.first(room));
+        const auto read = connection_.read(std::span{chunk}.first(std::min(room, chunk.size())));
         if (!read) {
             if (read.error().kind != wire::io::SocketError::Kind::WouldBlock)
                 return false;
@@ -292,10 +319,9 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
                 output_.clear();
                 writeDeadline_ = Clock::time_point::max();
             }
-            if (output_.readableBytes() <= settings_.lowWaterBytes)
-                paused_ = false;
         }
     }
+    backpressure();
     return accounted() && (!closing_ || output_.readableBytes() != 0);
 }
 
@@ -323,7 +349,7 @@ bool ClientSession::authenticated(
             if (property.signature)
                 retained += property.signature->capacity();
         }
-        if (!profileStorage_->resize(retained))
+        if (!profileStorage_->resize(retained) || !profileLocal_ || !profileLocal_->resize(retained))
             return false;
     }
     if (result)
@@ -335,6 +361,7 @@ bool ClientSession::authenticated(
 bool ClientSession::route() {
     dial_.reset();
     resolutionStorage_.reset();
+    resolutionLocal_.reset();
     if (resolution_)
         resolution_->request_stop();
     resolution_.reset();
@@ -346,6 +373,9 @@ bool ClientSession::route() {
         kBufferBytes + kResolutionBytes + (profileStorage_ ? profileStorage_->size() : 0))
         return false;
     connectDeadline_ = std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.connectTimeoutMs});
+    resolutionLocal_ = localBuffers_.acquire(kResolutionBytes);
+    if (!resolutionLocal_)
+        return false;
     resolution_ = resolve_(targets_[nextTarget_++], connectDeadline_);
     if (!resolution_)
         return false;
@@ -365,7 +395,8 @@ bool ClientSession::resolved(std::size_t target, std::vector<wire::io::TcpAddres
     }
     if (addresses.size() > 32 || addresses.capacity() > storage.size() / sizeof(wire::io::TcpAddress))
         return false;
-    if (!storage.resize(addresses.capacity() * sizeof(wire::io::TcpAddress)))
+    if (!storage.resize(addresses.capacity() * sizeof(wire::io::TcpAddress)) || !resolutionLocal_ ||
+        !resolutionLocal_->resize(addresses.capacity() * sizeof(wire::io::TcpAddress)))
         return false;
     resolutionStorage_ = std::move(storage);
     dial_ = std::make_unique<BackendDial>(std::move(addresses), connectDeadline_);
@@ -384,14 +415,10 @@ bool ClientSession::dial() {
         return route();
     dial_.reset();
     resolutionStorage_.reset();
-    const auto bytes = kBufferBytes + BackendLogin::kBytes;
-    if (bytes + (profileStorage_ ? profileStorage_->size() : 0) > settings_.sessionBufferBytes ||
-        !buffers_.resize(bytes))
-        return false;
-    backend_ = std::make_unique<BackendLogin>(std::move(*connected));
+    resolutionLocal_.reset();
+    backend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_);
     if (!profile_ || !backend_->start(backends_[targets_[nextTarget_ - 1]], *profile_, virtualHost_, virtualPort_)) {
         backend_.reset();
-        (void)buffers_.resize(kBufferBytes);
         closing_ = true;
         return queue(unavailable_);
     }
@@ -410,16 +437,22 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
          state_ != State::kPlay) ||
         !backend_)
         return false;
-    auto packet = backend_->ready(event);
+    if (backendPaused_ && event.closed && backend_->hasOutput())
+        return false;
+    auto packet = backend_->ready(event, !backendPaused_ && state_ != State::kLoginAck);
+    backpressure();
     if (!packet)
         return false;
     if (!backend_->hasOutput())
         backendWriteDeadline_ = Clock::time_point::max();
     if (packet->empty())
         return true;
-    if (packet->size() > kBufferCapacity - 3)
+    const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
+    if (!relay && packet->size() > kBufferCapacity - 3)
         return false;
     frame_.clear();
+    if (!frame_.tryReserve(packet->size()))
+        return false;
     frame_.writeBytes(*packet);
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
@@ -441,13 +474,11 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         } else if (state_ == State::kConfiguration && finishingConfiguration_) {
             return false;
         }
-        frame_.clear();
-        if (!wire::protocol::packetFraming::writeUncompressed(frame_, *packet) || !queue(frame_.readable()))
+        if (!queuePacket(*packet))
             return false;
         if (terminal) {
             closing_ = true;
             backend_.reset();
-            (void)buffers_.resize(kBufferBytes);
         }
         backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         return true;
@@ -461,6 +492,14 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         // The backend's explicit offline identity must not replace the verified frontend UUID.
         finished->gameProfile.id = profile_->id;
         frame_.clear();
+        if (compressionThreshold_ >= 0) {
+            wire::protocol::varInt::write(frame_, wire::protocol::login::LoginCompressionPacket::kId);
+            wire::protocol::login::LoginCompressionPacket{compressionThreshold_}.write(frame_);
+            if (!queuePacket(frame_.readable()))
+                return false;
+            compression_ = compressionThreshold_;
+            frame_.clear();
+        }
         wire::protocol::varInt::write(frame_, wire::protocol::login::LoginFinishedPacket::kId);
         finished->write(frame_);
         if (!queuePacket(frame_.readable()))
@@ -485,7 +524,6 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
     closing_ = true;
     if (id != wire::protocol::login::LoginDisconnectPacket::kId) {
         backend_.reset();
-        (void)buffers_.resize(kBufferBytes);
         return queue(unavailable_);
     }
     const auto reason = wire::protocol::readString(frame_);
@@ -495,7 +533,6 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
     if (!wire::protocol::packetFraming::writeUncompressed(frame_, *packet))
         return false;
     backend_.reset();
-    (void)buffers_.resize(kBufferBytes);
     return queue(frame_.readable());
 }
 
@@ -506,7 +543,33 @@ std::int64_t ClientSession::backendHandle() const {
 wire::io::IoInterest ClientSession::backendInterest() const {
     if (backend_ && state_ == State::kLoginAck)
         return {false, backend_->hasOutput()};
-    return backend_ ? backend_->interest() : wire::io::IoInterest{false, true};
+    return backend_ ? backend_->interest(!backendPaused_) : wire::io::IoInterest{false, true};
 }
 
+void ClientSession::backpressure() {
+    if (backend_ && backend_->pendingBytes() >= settings_.highWaterBytes)
+        frontendPaused_ = true;
+    else if (frontendPaused_ && (!backend_ || backend_->pendingBytes() <= settings_.lowWaterBytes)) {
+        frontendPaused_ = false;
+        if (state_ == State::kConfiguration || state_ == State::kPlay)
+            readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+    }
+    if (output_.readableBytes() >= settings_.highWaterBytes)
+        backendPaused_ = true;
+    else if (backendPaused_ && output_.readableBytes() <= settings_.lowWaterBytes) {
+        backendPaused_ = false;
+        if (state_ == State::kConfiguration || state_ == State::kPlay)
+            backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+    }
+}
+
+bool ClientSession::bufferedPacket() const {
+    if (state_ != State::kConfiguration && state_ != State::kPlay)
+        return false;
+    auto hint = wire::protocol::packetFraming::inspectFrame(
+        input_.readable(), compression_.has_value(), wire::protocol::packetFraming::kMaxUncompressedSize, compression_);
+    return !hint || (*hint && (**hint).complete);
+}
+
+bool ClientSession::backendSuspended() const { return backendPaused_ && backend_ && !backend_->hasOutput(); }
 } // namespace basalt::proxy::runtime::detail

@@ -2,6 +2,7 @@
 
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/io/BudgetMemoryResource.hpp>
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/ResourceBudget.hpp>
@@ -42,7 +43,8 @@ public:
                   Clock::time_point acceptedAt, bool online, bool checkAddress, std::span<const std::uint8_t> publicKey,
                   std::span<const std::uint8_t> authFailure, AuthenticationStart authenticate,
                   const BackendRoutes& routes, ResolutionStart resolve,
-                  const std::vector<config::BackendConfig>& backends);
+                  const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
+                  std::int32_t compressionThreshold);
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -52,6 +54,10 @@ public:
     [[nodiscard]] bool backendReady(const wire::io::IoReady& event);
     [[nodiscard]] std::int64_t backendHandle() const;
     [[nodiscard]] wire::io::IoInterest backendInterest() const;
+
+    [[nodiscard]] bool frontendSuspended() const { return frontendPaused_ && output_.readableBytes() == 0; }
+
+    [[nodiscard]] bool backendSuspended() const;
 
     [[nodiscard]] bool ready(const wire::io::IoReady& event);
     [[nodiscard]] wire::io::IoInterest interest() const;
@@ -83,14 +89,20 @@ private:
     [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool route();
     [[nodiscard]] bool dial();
+    void backpressure();
+    [[nodiscard]] bool bufferedPacket() const;
     wire::io::ResourceBudget::Reservation slot_;
-    wire::io::ResourceBudget::Reservation buffers_;
+    wire::io::ResourceBudget localBuffers_;
+    wire::io::BudgetMemoryResource memory_;
+    bool allocationReady_ = false;
     wire::io::TcpConnection connection_;
     const config::RuntimeConfig& settings_;
     std::span<const std::uint8_t> status_;
     std::span<const std::uint8_t> unavailable_;
     bool online_;
     bool checkAddress_;
+    std::int32_t compressionThreshold_;
+    std::optional<std::int32_t> compression_;
     std::span<const std::uint8_t> publicKey_;
     std::span<const std::uint8_t> authFailure_;
     AuthenticationStart authenticate_;
@@ -101,6 +113,7 @@ private:
     ResolutionStart resolve_;
     std::size_t nextTarget_ = 0;
     std::optional<std::stop_source> resolution_;
+    std::optional<wire::io::ResourceBudget::Reservation> resolutionLocal_;
     std::optional<wire::io::ResourceBudget::Reservation> resolutionStorage_;
     std::unique_ptr<BackendDial> dial_;
     const std::vector<config::BackendConfig>& backends_;
@@ -113,15 +126,17 @@ private:
     std::string name_;
     std::optional<std::stop_source> authentication_;
     std::optional<wire::io::ResourceBudget::Reservation> profileStorage_;
+    std::optional<wire::io::ResourceBudget::Reservation> profileLocal_;
     std::optional<wire::auth::SessionProfile> profile_;
     std::optional<wire::auth::Cfb8Cipher> encryptor_;
     std::optional<wire::auth::Cfb8Cipher> decryptor_;
-    wire::io::ByteBuffer input_{kBufferCapacity};
-    wire::io::ByteBuffer frame_{kBufferCapacity};
-    wire::io::ByteBuffer output_{kBufferCapacity};
+    wire::io::ByteBuffer input_;
+    wire::io::ByteBuffer frame_;
+    wire::io::ByteBuffer output_;
     State state_ = State::Handshake;
     bool closing_ = false;
-    bool paused_ = false;
+    bool backendPaused_ = false;
+    bool frontendPaused_ = false;
     Clock::time_point readDeadline_;
     Clock::time_point writeDeadline_ = Clock::time_point::max();
     Clock::time_point loginDeadline_;
