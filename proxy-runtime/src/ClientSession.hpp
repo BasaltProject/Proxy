@@ -13,6 +13,7 @@
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -58,12 +59,15 @@ public:
                                 wire::io::ResourceBudget::Reservation storage);
     [[nodiscard]] bool backendReady(const wire::io::IoReady& event);
     [[nodiscard]] bool timedOut(Clock::time_point now);
-    [[nodiscard]] std::int64_t backendHandle() const;
-    [[nodiscard]] wire::io::IoInterest backendInterest() const;
+
+    struct BackendWatch {
+        std::int64_t handle = -1;
+        wire::io::IoInterest interest{false, false};
+    };
+
+    [[nodiscard]] std::array<BackendWatch, 3> backendWatches() const;
 
     [[nodiscard]] bool frontendSuspended() const { return frontendPaused_ && output_.readableBytes() == 0; }
-
-    [[nodiscard]] bool backendSuspended() const;
 
     [[nodiscard]] bool ready(const wire::io::IoReady& event);
     [[nodiscard]] wire::io::IoInterest interest() const;
@@ -73,6 +77,7 @@ public:
 
     [[nodiscard]] bool accounted() const;
     std::uint64_t timer = 0;
+    std::array<std::int64_t, 3> watchedBackends{-1, -1, -1};
 
 private:
     enum class State {
@@ -132,6 +137,7 @@ private:
     std::optional<wire::io::ResourceBudget::Reservation> resolutionLocal_;
     std::optional<wire::io::ResourceBudget::Reservation> resolutionStorage_;
     std::unique_ptr<BackendDial> dial_;
+    std::optional<BackendAttempt> dialAttempt_;
     const std::vector<config::BackendConfig>& backends_;
     std::unique_ptr<BackendLogin> activeBackend_;
     std::unique_ptr<BackendLogin> candidateBackend_;
@@ -139,8 +145,6 @@ private:
     Clock::time_point backendReadDeadline_ = Clock::time_point::max();
     bool finishingConfiguration_ = false;
     bool startingConfiguration_ = false;
-    std::optional<std::string> cookie_;
-    bool velocityForwarded_ = false;
     Clock::time_point connectDeadline_;
     std::array<std::uint8_t, 4> challenge_{};
     std::string name_;
