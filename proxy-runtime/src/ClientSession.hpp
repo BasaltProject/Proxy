@@ -72,11 +72,15 @@ private:
         Authenticating,
         kResolving,
         kConnecting,
-        kBackendLogin
+        kBackendLogin,
+        kLoginAck,
+        kConfiguration,
+        kPlay
     };
     [[nodiscard]] bool decode();
     [[nodiscard]] bool packet();
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
+    [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool route();
     [[nodiscard]] bool dial();
     wire::io::ResourceBudget::Reservation slot_;
@@ -102,6 +106,8 @@ private:
     const std::vector<config::BackendConfig>& backends_;
     std::unique_ptr<BackendLogin> backend_;
     Clock::time_point backendWriteDeadline_ = Clock::time_point::max();
+    Clock::time_point backendReadDeadline_ = Clock::time_point::max();
+    bool finishingConfiguration_ = false;
     Clock::time_point connectDeadline_;
     std::array<std::uint8_t, 4> challenge_{};
     std::string name_;

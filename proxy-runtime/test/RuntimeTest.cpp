@@ -1,4 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "RuntimeFixture.hpp"
+
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
@@ -23,187 +25,7 @@ using namespace basalt::proxy;
 namespace io = basalt::wire::io;
 using namespace std::chrono_literals;
 
-namespace {
-config::ProxyConfig settings() {
-    config::ProxyConfig result;
-    result.network.bind = "127.0.0.1";
-    result.network.port = 0;
-    result.runtime.ioLoops = 3;
-    result.runtime.handshakeTimeoutMs = 1000;
-    result.admission.originBurst = 100;
-    return result;
-}
-
-runtime::ProxyRuntime makeRuntime(config::ProxyConfig config, runtime::RuntimeServices services = {}) {
-    auto created = runtime::ProxyRuntime::create(std::move(config), std::move(services));
-    if (!created)
-        throw std::runtime_error(created.error());
-    return std::move(*created);
-}
-
-struct Running {
-    runtime::ProxyRuntime runtime;
-    std::optional<std::string> failure;
-    std::jthread driver;
-
-    explicit Running(config::ProxyConfig config = settings(), runtime::RuntimeServices services = {})
-        : runtime(makeRuntime(std::move(config), std::move(services))), driver([this](std::stop_token stop) {
-              const auto result = runtime.run(stop);
-              if (!result)
-                  failure = result.error();
-          }) {}
-
-    ~Running() { stop(); }
-
-    void stop() {
-        driver.request_stop();
-        if (driver.joinable())
-            driver.join();
-        CHECK_FALSE(failure);
-    }
-
-    io::TcpConnection connect(std::string_view host = "127.0.0.1") {
-        auto connected = io::TcpConnection::connect(host, runtime.port());
-        if (!connected || !connected->setNonBlocking())
-            throw std::runtime_error("fixture client connection failed");
-        return std::move(*connected);
-    }
-};
-
-std::vector<std::uint8_t> receive(io::TcpConnection& client, std::size_t minimum, bool expectEof = false) {
-    io::EventLoop loop;
-    if (!loop.watch(client.nativeHandle(), {true, false}, 1))
-        throw std::runtime_error("fixture readiness failed");
-    const auto deadline = std::chrono::steady_clock::now() + 2s;
-    std::vector<std::uint8_t> output;
-    while (std::chrono::steady_clock::now() < deadline) {
-        const auto ready = loop.wait(100);
-        if (!ready)
-            throw std::runtime_error("fixture readiness wait failed");
-        std::array<std::uint8_t, 2048> bytes{};
-        const auto read = client.read(bytes);
-        if (!read) {
-            if (read.error().kind == io::SocketError::Kind::WouldBlock)
-                continue;
-            throw std::runtime_error("fixture receive failed");
-        }
-        if (*read == 0)
-            return output;
-        output.insert(output.end(), bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(*read));
-        if (!expectEof && output.size() >= minimum)
-            return output;
-    }
-    throw std::runtime_error("fixture receive deadline expired");
-}
-
-std::array<std::uint8_t, 17> handshake(std::uint16_t port, std::uint8_t intent = 1) {
-    return {16,
-            0,
-            0x89,
-            0x06,
-            9,
-            'l',
-            'o',
-            'c',
-            'a',
-            'l',
-            'h',
-            'o',
-            's',
-            't',
-            static_cast<std::uint8_t>(port >> 8),
-            static_cast<std::uint8_t>(port),
-            intent};
-}
-
-std::uint32_t integer(const std::vector<std::uint8_t>& bytes, std::size_t& offset) {
-    std::uint32_t result = 0;
-    for (unsigned shift = 0; shift < 21; shift += 7) {
-        if (offset >= bytes.size())
-            throw std::runtime_error("fixture response ended inside a VarInt");
-        const auto value = bytes[offset++];
-        result |= static_cast<std::uint32_t>(value & 0x7fU) << shift;
-        if ((value & 0x80U) == 0)
-            return result;
-    }
-    throw std::runtime_error("fixture response had an oversized VarInt");
-}
-
-void loginStart(io::TcpConnection& client, std::uint16_t port) {
-    const auto hello = handshake(port, 2);
-    if (!client.writeSome(hello))
-        throw std::runtime_error("fixture login handshake failed");
-    std::array<std::uint8_t, 25> login{};
-    login[0] = 24;
-    login[2] = 6;
-    const std::string name = "Tester";
-    std::copy(name.begin(), name.end(), login.begin() + 3);
-    if (!client.writeSome(login))
-        throw std::runtime_error("fixture login hello failed");
-}
-
-basalt::wire::auth::LoginSecret keyResponse(io::TcpConnection& client, bool wrongNonce = false) {
-    namespace auth = basalt::wire::auth;
-    const auto hello = receive(client, 174);
-    std::size_t offset = 0;
-    const auto length = integer(hello, offset);
-    const auto body = offset;
-    if (integer(hello, offset) != 1 || integer(hello, offset) != 0)
-        throw std::runtime_error("fixture encryption hello malformed");
-    const auto keyBytes = integer(hello, offset);
-    if (offset + keyBytes > hello.size())
-        throw std::runtime_error("fixture public key incomplete");
-    const std::span key{hello.data() + offset, keyBytes};
-    offset += keyBytes;
-    const auto nonceBytes = integer(hello, offset);
-    if (nonceBytes != 4 || offset + nonceBytes + 1 != hello.size() || body + length != hello.size())
-        throw std::runtime_error("fixture challenge malformed");
-    std::array<std::uint8_t, 4> nonce{};
-    std::copy_n(hello.begin() + static_cast<std::ptrdiff_t>(offset), 4, nonce.begin());
-    if (hello.back() != 1)
-        throw std::runtime_error("fixture proxy disabled authentication unexpectedly");
-    if (wrongNonce)
-        nonce[0] ^= 1;
-    const auth::LoginSecret secret{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    const auto encryptedSecret = auth::test::encryptRsa(key, secret);
-    const auto encryptedNonce = auth::test::encryptRsa(key, nonce);
-    if (encryptedSecret.size() != 128 || encryptedNonce.size() != 128)
-        throw std::runtime_error("fixture ciphertext size changed");
-    // Independent packet framing: length 261, packet 1, two length-128 ciphertexts.
-    std::vector<std::uint8_t> packet{0x85, 0x02, 1, 0x80, 0x01};
-    packet.insert(packet.end(), encryptedSecret.begin(), encryptedSecret.end());
-    packet.insert(packet.end(), {0x80, 0x01});
-    packet.insert(packet.end(), encryptedNonce.begin(), encryptedNonce.end());
-    if (!client.writeSome(packet))
-        throw std::runtime_error("fixture key response failed");
-    return secret;
-}
-
-basalt::wire::auth::HttpsResponse fakeProfile() {
-    const auto id = basalt::wire::common::Uuid::offlinePlayer("Tester").toUndashedString();
-    const std::string json = "{\"id\":\"" + id + "\",\"name\":\"Tester\"}";
-    return {200, {json.begin(), json.end()}};
-}
-
-std::vector<std::uint8_t> rejectBackendLogin(io::TcpConnection& backend, std::uint16_t virtualPort) {
-    REQUIRE(backend.setNonBlocking());
-    const auto bootstrap = receive(backend, 42);
-    const auto expectedHandshake = handshake(virtualPort, 2);
-    REQUIRE(bootstrap.size() == 42);
-    CHECK(std::equal(expectedHandshake.begin(), expectedHandshake.end(), bootstrap.begin()));
-    const std::array<std::uint8_t, 25> expectedLogin{24,   0,    6,    'T',  'e',  's',  't',  'e',  'r',
-                                                     0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba,
-                                                     0xeb, 0x2d, 0xad, 0xd2, 0xbe, 0x89, 0xae};
-    CHECK(std::equal(expectedLogin.begin(), expectedLogin.end(), bootstrap.begin() + 17));
-    const std::string reason = "{\"text\":\"Backend denied this login\"}";
-    std::vector<std::uint8_t> disconnect{static_cast<std::uint8_t>(reason.size() + 2), 0,
-                                         static_cast<std::uint8_t>(reason.size())};
-    disconnect.insert(disconnect.end(), reason.begin(), reason.end());
-    REQUIRE(backend.writeSome(std::span{disconnect}.first(1)));
-    REQUIRE(backend.writeSome(std::span{disconnect}.subspan(1)));
-    return disconnect;
-}
-} // namespace
+using namespace basalt::proxy::test;
 
 TEST_CASE("public listener handles fragmented handshake and pipelined status/pong independently of Wire encoders") {
     Running server;
@@ -688,6 +510,72 @@ TEST_CASE("a silent backend cannot extend the absolute login deadline") {
     REQUIRE(backend->setNonBlocking());
     REQUIRE(receive(*backend, 42).size() == 42);
     CHECK(receive(client, 0, true).empty());
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("backend compression is decoded independently of uncompressed frontend framing") {
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    const auto port = listener->localPort();
+    REQUIRE(port);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.backends = {{.name = "compressed", .host = "127.0.0.1", .port = *port}};
+    config.defaultRoute = {"compressed"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    const std::string reason = "{\"text\":\"Compressed denial\"}";
+    std::vector<std::uint8_t> expected{static_cast<std::uint8_t>(reason.size() + 2), 0,
+                                       static_cast<std::uint8_t>(reason.size())};
+    expected.insert(expected.end(), reason.begin(), reason.end());
+    std::vector<std::uint8_t> packets;
+    bool rejected = false;
+    SUBCASE("coalesced threshold zero and zlib packet") {
+        // Generated independently with Python zlib.compress on packet id/string payload.
+        packets = {2,  3,  0,  39, 30, 120, 156, 99, 144, 169, 86,  42, 73,  173, 40,  81, 178, 82,  114, 206, 207, 45,
+                   40, 74, 45, 46, 78, 77,  81,  72, 73,  205, 203, 76, 204, 81,  170, 5,  0,   147, 218, 10,  62};
+    }
+    SUBCASE("below threshold body uses the zero data-length carrier") {
+        packets = {3, 3, 0x80, 2, static_cast<std::uint8_t>(expected.size()), 0};
+        packets.insert(packets.end(), expected.begin() + 1, expected.end());
+    }
+    SUBCASE("negative threshold keeps backend framing uncompressed") {
+        packets = {6, 3, 255, 255, 255, 255, 15};
+        packets.insert(packets.end(), expected.begin(), expected.end());
+    }
+    SUBCASE("expanded size is rejected before inflation can allocate") {
+        packets = {2, 3, 0, 3, 0x81, 0x08, 0};
+        rejected = true;
+    }
+    SUBCASE("truncated compression header cannot borrow the next frame") {
+        packets = {2, 3, 0, 1, 0x80, 1, 0};
+        rejected = true;
+    }
+    SUBCASE("compression control cannot be negotiated twice") {
+        packets = {2, 3, 0, 3, 0, 3, 0};
+        rejected = true;
+    }
+    REQUIRE(backend->write(packets));
+    const auto response = receive(client, 0, true);
+    if (rejected)
+        CHECK(response.empty());
+    else
+        CHECK(response == expected);
     proxy.stop();
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);

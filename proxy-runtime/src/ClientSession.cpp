@@ -11,8 +11,11 @@
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/configuration/ConfigurationPackets.hpp>
 #include <basalt/wire/protocol/handshake/HandshakePacket.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
+#include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
+#include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
 
 #include <algorithm>
@@ -20,6 +23,9 @@
 #include <utility>
 
 namespace basalt::proxy::runtime::detail {
+namespace {
+constexpr std::int32_t kConfigurationDisconnectId = 2;
+}
 
 ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::ResourceBudget::Reservation slot,
                              wire::io::ResourceBudget::Reservation buffers, const config::RuntimeConfig& settings,
@@ -49,7 +55,7 @@ ClientSession::Clock::time_point ClientSession::deadline() const {
     auto result = closing_ ? writeDeadline_ : std::min(readDeadline_, writeDeadline_);
     if (!closing_ && (state_ == State::kResolving || state_ == State::kConnecting))
         result = std::min(result, connectDeadline_);
-    return closing_ ? result : std::min(result, backendWriteDeadline_);
+    return closing_ ? result : std::min({result, backendWriteDeadline_, backendReadDeadline_});
 }
 
 wire::io::IoInterest ClientSession::interest() const {
@@ -73,11 +79,56 @@ bool ClientSession::queue(std::span<const std::uint8_t> bytes) {
     return true;
 }
 
+bool ClientSession::queuePacket(std::span<const std::uint8_t> packet) {
+    output_.discardReadBytes();
+    if (packet.empty() || packet.size() + 3 > kBufferCapacity - output_.writerIndex())
+        return false;
+    if (output_.readableBytes() == 0)
+        writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
+    const auto offset = output_.writerIndex();
+    if (!wire::protocol::packetFraming::writeUncompressed(output_, packet))
+        return false;
+    if (encryptor_)
+        encryptor_->encrypt(output_.mutableSpan(offset));
+    if (output_.readableBytes() >= settings_.highWaterBytes)
+        paused_ = true;
+    return true;
+}
+
 bool ClientSession::packet() {
     namespace protocol = wire::protocol;
+    const auto raw = frame_.readable();
     const auto id = protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    if (state_ == State::kLoginAck) {
+        if (id != protocol::login::kLoginAcknowledgedId || frame_.readableBytes() != 0 ||
+            output_.readableBytes() != 0 || !backend_)
+            return false;
+        if (!backend_->queue(raw))
+            return false;
+        backend_->acknowledgeLogin();
+        state_ = State::kConfiguration;
+        readDeadline_ = backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+        backendWriteDeadline_ =
+            std::min(backendWriteDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        return true;
+    }
+    if (state_ == State::kConfiguration || state_ == State::kPlay) {
+        if (!backend_ || id < 0)
+            return false;
+        if (state_ == State::kConfiguration && id == protocol::configuration::kFinishConfigurationId) {
+            if (!finishingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
+                return false;
+            state_ = State::kPlay;
+        }
+        if (!backend_->queue(raw))
+            return false;
+        if (backendWriteDeadline_ == Clock::time_point::max())
+            backendWriteDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
+        readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+        return true;
+    }
     if (state_ == State::Handshake) {
         if (id != protocol::handshake::HandshakePacket::kId)
             return false;
@@ -355,20 +406,82 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         return false;
     if (state_ == State::kConnecting && dial_)
         return dial();
-    if (state_ != State::kBackendLogin || !backend_)
+    if ((state_ != State::kBackendLogin && state_ != State::kLoginAck && state_ != State::kConfiguration &&
+         state_ != State::kPlay) ||
+        !backend_)
         return false;
     auto packet = backend_->ready(event);
     if (!packet)
         return false;
-    if (!backend_->interest().writable)
+    if (!backend_->hasOutput())
         backendWriteDeadline_ = Clock::time_point::max();
     if (packet->empty())
         return true;
+    if (packet->size() > kBufferCapacity - 3)
+        return false;
     frame_.clear();
     frame_.writeBytes(*packet);
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
+    if (state_ == State::kLoginAck)
+        return false;
+    if (state_ == State::kConfiguration || state_ == State::kPlay) {
+        if (id < 0)
+            return false;
+        const bool terminal = (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||
+                              (state_ == State::kPlay && id == wire::protocol::play::PlayDisconnectPacket::kId);
+        if (terminal) {
+            if (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0)
+                return false;
+        } else if (state_ == State::kConfiguration && id == wire::protocol::configuration::kFinishConfigurationId) {
+            if (finishingConfiguration_ || frame_.readableBytes() != 0)
+                return false;
+            finishingConfiguration_ = true;
+        } else if (state_ == State::kConfiguration && finishingConfiguration_) {
+            return false;
+        }
+        frame_.clear();
+        if (!wire::protocol::packetFraming::writeUncompressed(frame_, *packet) || !queue(frame_.readable()))
+            return false;
+        if (terminal) {
+            closing_ = true;
+            backend_.reset();
+            (void)buffers_.resize(kBufferBytes);
+        }
+        backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+        return true;
+    }
+    if (id == wire::protocol::login::LoginFinishedPacket::kId) {
+        auto finished = wire::protocol::login::LoginFinishedPacket::read(frame_);
+        if (!finished || frame_.readableBytes() != 0 || !profile_ || finished->gameProfile.name != profile_->name ||
+            (finished->gameProfile.id != profile_->id &&
+             finished->gameProfile.id != wire::common::Uuid::offlinePlayer(profile_->name)))
+            return false;
+        // The backend's explicit offline identity must not replace the verified frontend UUID.
+        finished->gameProfile.id = profile_->id;
+        frame_.clear();
+        wire::protocol::varInt::write(frame_, wire::protocol::login::LoginFinishedPacket::kId);
+        finished->write(frame_);
+        if (!queuePacket(frame_.readable()))
+            return false;
+        state_ = State::kLoginAck;
+        return true;
+    }
+    if (id == wire::protocol::login::LoginPluginRequestPacket::kId) {
+        auto request = wire::protocol::login::LoginPluginRequestPacket::read(frame_);
+        if (!request || frame_.readableBytes() != 0)
+            return false;
+        frame_.clear();
+        wire::protocol::varInt::write(frame_, wire::protocol::login::LoginPluginResponsePacket::kId);
+        wire::protocol::login::LoginPluginResponsePacket{request->transactionId, std::nullopt}.write(frame_);
+        if (!backend_->queue(frame_.readable()))
+            return false;
+        if (backendWriteDeadline_ == Clock::time_point::max())
+            backendWriteDeadline_ =
+                std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        return true;
+    }
     closing_ = true;
     if (id != wire::protocol::login::LoginDisconnectPacket::kId) {
         backend_.reset();
@@ -391,6 +504,8 @@ std::int64_t ClientSession::backendHandle() const {
 }
 
 wire::io::IoInterest ClientSession::backendInterest() const {
+    if (backend_ && state_ == State::kLoginAck)
+        return {false, backend_->hasOutput()};
     return backend_ ? backend_->interest() : wire::io::IoInterest{false, true};
 }
 

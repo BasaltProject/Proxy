@@ -5,6 +5,7 @@
 #include <basalt/wire/io/TcpSocket.hpp>
 
 #include <expected>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -20,7 +21,7 @@ namespace basalt::proxy::runtime::detail {
 
 enum class BackendLoginError { kUnsupported, kMalformed, kIo, kLimit };
 
-/// Initial native login transport; all buffers and calls belong to the session's I/O owner.
+/// Native backend packet transport; all buffers and calls belong to the session's I/O owner.
 class BackendLogin {
 public:
     static constexpr std::size_t kCapacity = 1024;
@@ -31,19 +32,28 @@ public:
                                                                std::string_view virtualHost, std::uint16_t virtualPort);
     /// Returned packet view expires on the next call. No frontend framing/cipher state is shared.
     [[nodiscard]] std::expected<std::span<const std::uint8_t>, BackendLoginError> ready(const wire::io::IoReady& event);
+    [[nodiscard]] std::expected<void, BackendLoginError> queue(std::span<const std::uint8_t> packet);
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 
-    [[nodiscard]] wire::io::IoInterest interest() const { return {true, output_.readableBytes() != 0}; }
+    [[nodiscard]] wire::io::IoInterest interest() const;
+
+    [[nodiscard]] bool hasOutput() const { return output_.readableBytes() != 0; }
+
+    void acknowledgeLogin() { login_ = false; }
 
     [[nodiscard]] std::size_t allocated() const;
 
 private:
+    [[nodiscard]] bool bufferedPacket() const;
     wire::io::TcpConnection connection_;
     wire::io::ByteBuffer input_{kCapacity};
     wire::io::ByteBuffer output_{kCapacity};
     wire::io::ByteBuffer frame_{kCapacity};
     bool started_ = false;
+    bool compressionNegotiated_ = false;
+    bool login_ = true;
+    std::optional<std::int32_t> compression_;
 };
 
 } // namespace basalt::proxy::runtime::detail
