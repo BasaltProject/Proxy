@@ -19,110 +19,80 @@
 </p>
 
 > ⚠️ **Early development.** Basalt Proxy is not ready for any network, public or
-> private. The current listener serves status requests; native login and relay are
-> being tested with synthetic peers.
-> The status table below is
-> the honest state of the project.
+> private. It has only been exercised on Linux with offline bots and simulated
+> backends. The status table below is the honest state of the project.
 
 ## Overview
 
-Basalt Proxy is a Minecraft proxy project written in **C++23**, distributed as a
-native binary and sharing [Wire](https://github.com/BasaltProject/Wire) with
-[Basalt Server](https://github.com/BasaltProject/Server).
+Basalt Proxy sits in front of a set of Minecraft servers, gives players a single
+address and moves them between backends. It is written entirely in **C++23**,
+shipped as a native binary, and shares the network layer with
+[Basalt Server](https://github.com/BasaltProject/Server) through
+[Wire](https://github.com/BasaltProject/Wire).
 
-The current executable provides `--help`, `--version` and `--config`. On startup,
-it generates commented `proxy.toml` and `backends.toml` files when missing, loads
-them and validates resource limits, backend identities and routing targets.
-Existing files are preserved; invalid configuration reports its file and exits
-with code 1. The listener handles handshake, local status and ping/pong on bounded
-nonblocking I/O owners. Admission limits apply globally and per origin; incomplete
-handshakes expire. SIGINT/SIGTERM stop the runtime and release sessions. Player
-login performs the RSA/AES exchange and bounded Mojang session lookup on workers.
-Offline mode is explicit. The first verified session reserves its UUID until close; duplicate
-logins are rejected before backend resolution, and can reconnect after the first session closes.
-Accepted identities select their configured route,
-resolve destinations on bounded workers and establish a nonblocking TCP connection,
-trying the next destination after DNS or connection failure, including connection-stage
-deadlines within the absolute login deadline. Late canceled DNS results are discarded.
-For native 26.3 backends
-with explicit `none`, `velocity`, `bungeecord`, `bungeeguard` or `safenet` forwarding,
-it sends the login handshake and identity and relays
-login disconnects, decoding backend compression independently of frontend framing.
-Velocity modern queries receive signed v1/v4 identity responses; missing or duplicate forwarding
-queries are rejected. Offline bot gates against Paper and Basalt pass; real online-profile
-interoperability remains pending.
-Legacy handshakes carry the verified UUID/IP and configured token, with a bounded 32,767-byte
-host. Credential properties echoed by a backend are removed before frontend login success.
-These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
-Unknown login queries receive a matching negative response using backend compression.
-A backend may enable `bungee-messages = true` in its `backends.toml` table to use
-`GetServer`, `GetServers`, `UUID` and player-local `Connect` on `bungeecord:main`. The default is false.
-The legacy `BungeeCord` alias is recognized and replies use the native channel.
-Client control messages are discarded. Connect prepares a configured destination while the
-current backend stays in play, then commits through the public configuration ACK. Unknown,
-current and busy destinations are ignored. Preparation failure preserves the active backend;
-failure after starting public reconfiguration closes the session. Other subcommands, including
-ConnectOther and administrative actions, are currently ignored. Query responses use bounded
-session buffers and the verified player UUID. Runtime fixtures cover repeated A-B-A, preparation
-failure and expiry; switching between real worlds remains unvalidated.
-Login cookie requests are tracked by their backend and relayed to the client when uncached;
-matching responses are bounded to 5,120 bytes.
-Configuration/play cookie requests, responses and stores are validated before relay, with up to
-32 pending requests and 256-byte keys. Unsolicited or mismatched responses close the session.
-A session-local cookie cache retains up to 32 entries and 64 KiB of encoded content under
-buffer quotas. Known login cookie queries are answered from it; an older client response
-cannot overwrite a newer backend Store. Unknown, absent and empty cookies remain distinct.
-Native resource-pack UUIDs are mapped to session-local public IDs, with at most 32 retained
-packs under buffer quotas. Responses restore the originating backend UUID; responses for
-retired IDs are ignored. Individual/all-pack removals retire those mappings. Internal change
-fixtures remove old packs before new configuration, including when both backends reuse a UUID.
-Pack contents, downloads and application by a graphical client remain unvalidated.
-Incoming transfer handshakes require `network.accept-transfers = true` and still authenticate
-normally. Backend transfers validate the destination and drain before closing the old connection;
-they reconnect the client and do not perform an internal backend switch.
-Native LoginFinished/ACK and configuration/play transitions relay small packets in
-synthetic tests, retaining the verified frontend UUID. Reconfiguration waits for the client
-ACK before decoding buffered configuration traffic; repeated cycles have synthetic coverage.
-The latest client settings from configuration or play are retained under session quotas
-and replayed in configuration form after the reconfiguration ACK.
-The login timeout bounds initial setup through the first configuration acknowledgement;
-backend traffic and read suspension do not extend that absolute budget.
-Configuration/play buffers grow
-within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backend login
-packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is
-negotiated before login success and remains
-independent of backend compression. Directional high/low watermarks pause producers
-while the receiving endpoint drains. An independent Swarm bot has reached play through the proxy
-on real offline vanilla, Paper and Basalt 26.3 backends; a frontend recorder verified registry/chunk traffic,
-UUID, teleport confirmation and keepalive round trips. Paper modern forwarding also rejected
-a mismatched secret and absent forwarding, as did Basalt. Graphical clients and online profiles
-remain unvalidated.
+The native core requires no external JVM. Future Java plugin compatibility will
+use [Shim](https://github.com/BasaltProject/Shim), a JVM implemented in C++, once
+that project is complete.
+
+Two goals drive every decision:
+
+- **Any backend.** The proxy speaks the standard protocol with whatever is behind
+  it: vanilla, Paper, Spigot, Fabric or Basalt. A Basalt Server behind it is the
+  best case, never a requirement.
+- **A plugin platform worth switching to.** Native plugins are written in Lua and
+  packaged as `.bppkg`, following the server's API conventions for shared concepts.
+  Velocity and BungeeCord adapters will come later, on top of Shim.
+
+| | |
+|---|---|
+| Language | C++23 native core; no external JVM required |
+| Target version | Minecraft 26.3 (protocol 777) |
+| Distribution | Native binaries per platform |
+| Backends | Any Minecraft server; native 26.3 backends today |
+| Plugin API | Lua, `.bppkg` packages (not implemented yet) |
+| Configuration | A `proxy.toml` and a `backends.toml`, generated with comments |
+| License | GPL-3.0 |
+
+## Configuration
+
+On first start the proxy writes commented defaults into `./config/`, or into the
+directory given with `--config <dir>`:
+
+```
+config/
+  proxy.toml      network, runtime limits, admission, translation
+  backends.toml   routing, forced hosts, and one table per backend
+```
+
+Existing files are never overwritten. A malformed file is reported by name and the
+proxy exits with code 1. A backend looks like this:
+
+```toml
+[routing]
+default = ["lobby"]
+
+[backends.lobby]
+host = "127.0.0.1"
+port = 25566
+protocol = 777
+forwarding = "velocity"
+secret = "change-me"
+bungee-messages = false
+```
+
+Keep `backends.toml` private: it holds forwarding secrets.
 
 ## Console
 
 Commands are `help`, `servers`, `status`, `send <player> <backend>` and `stop`.
 Player names match the verified name exactly, including case. A successful `send`
-acknowledges preparation; the destination may still reject login. It uses the same
-owner-controlled change as an authorized Bungee Connect request and does not require plugins.
-Console commands do not intercept player chat or modify the client's command tree.
+acknowledges preparation, and the destination may still reject the login. It uses
+the same change a Bungee `Connect` does and needs no plugins. Console commands do
+not intercept player chat or touch the client's command tree.
 
 Input accepts an optional leading slash, CRLF and a final line at EOF. EOF leaves
-the proxy running for headless services. Lines longer than 4096 bytes are discarded
-through their delimiter. Shutdown does not wait for an incomplete line on Linux.
-The executable gate is `python3 tools/verify-console.py --binary <proxy-binary>`.
-
-## Product goals
-
-The intended proxy will route players between Minecraft backends, including
-servers other than Basalt, and support Java and Bedrock through Wire. Version
-translation will be configurable and delegated to a capable Basalt backend when
-negotiated. Routing, forwarding, translation and plugins are under development.
-
-Native plugins will use Lua and `.bppkg` packages, following the server's API
-conventions for shared concepts. Future Velocity and BungeeCord adapters will
-belong to Proxy, after [Shim](https://github.com/BasaltProject/Shim) is complete.
-Shim provides Java bytecode execution through a JVM implemented in C++; the
-adapters provide the plugin APIs. No external JVM installation is required.
+the proxy running, for headless services. Lines longer than 4096 bytes are
+discarded through their delimiter.
 
 ## Building
 
@@ -133,8 +103,8 @@ with the server and pulled in as a submodule, so clone with it:
 git clone --recurse-submodules https://github.com/BasaltProject/Proxy.git
 ```
 
-In an existing clone, `git submodule update --init` does the same thing. Without
-it the build fails immediately: most of the modules are missing.
+In an existing clone, `git submodule update --init` does the same. Without it the
+build fails immediately: most of the modules are missing.
 
 You need CMake 3.28 or newer, Ninja and Clang. Then two commands, the same on
 macOS, Linux and Windows:
@@ -152,75 +122,29 @@ build/release/bin/BasaltProxy-26.3.14-Linux-x64
 build/release/bin/BasaltProxy-26.3.14-Windows-x64.exe
 ```
 
-The version is `<minecraft>.<build>`: which Minecraft the proxy speaks natively,
-and how far along that line the build is. A build made outside the CI has no
-build number, so it is `.0-dev`.
+The version is `<minecraft>.<build>`. A build made outside the CI has no build
+number, so it is `.0-dev`. `ccache` is optional, but the build is much faster
+with it.
 
-## Testing
+The tests run with `ctest --preset debug`, and `--preset asan` builds the same
+tree under the address and undefined sanitizers.
 
-```bash
-# Everything CI runs
-cmake --preset debug && cmake --build build/debug
-ctest --preset debug
-
-# A single suite
-./build/debug/proxy-runtime/proxy-runtime-cli-test
-```
-
-`--preset asan` builds the same tree under the address and undefined sanitizers.
-
-An optional independent bot gate uses an already running offline vanilla 26.3 server
-on loopback and a separately built Swarm binary:
-
-```bash
-python3 tools/verify-native-backend.py \
-  --proxy build/debug/bin/BasaltProxy-26.3.0-dev-Linux-x64 \
-  --swarm ../Swarm/build/debug/bin/BasaltSwarm-26.3.0-dev-Linux-x64 \
-  --backend-port 25566 --output build/native-gate
-```
-
-It creates an isolated proxy configuration, records frontend frames independently of Wire,
-and writes `result.json` and process logs. It requires a 22-second session, verified offline
-UUID, registries, play/chunk packets and matching teleport/keepalive responses. It does not
-validate chunk semantics, graphical clients or online authentication.
-
-For a Paper backend configured for Velocity modern forwarding and offline proxy identities,
-add `--forwarding velocity --secret-file <file>` with its matching secret. The generated backend
-configuration is private; reports contain no secret. `--expect-login-rejection` instead requires
-a login disconnect with no accepted profile or play traffic, for negative forwarding checks.
-Swarm diagnostics remain visible in `bot_diagnostics`; Paper's `paper:raw` registry entry
-currently produces one. This transport gate does not certify registry semantics.
-
-
-## Requirements
-
-| Component | Requirement |
-|---|---|
-| CMake | 3.28 or newer |
-| Generator | Ninja |
-| Compiler | Clang, with C++23 support |
-| ccache | Optional, but the build is much faster with it |
-
-## Development Status
+## Status
 
 | Area | Status |
 |---|---|
 | Build, module layout and cross-platform CI | Configured; platform validation pending |
 | Command line: `--help`, `--version`, `--config` | Working |
-| Network layer, shared with the server | Inherited from Wire |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
-| Initial login crypto and session verification | Implemented; simulated-endpoint tests |
-| Native backend login, configuration and play relay | Offline vanilla/Paper/Basalt 26.3 bot gates pass; graphical client pending |
-| Backend connections and server switching | TCP connection implemented; switching pending |
-| Player forwarding to the backend | Velocity modern tested with offline Paper/Basalt 26.3; legacy/token modes have fixture coverage |
-| Configuration files | Generated, loaded and validated at startup |
+| Login crypto and session verification | Implemented; simulated-endpoint tests |
+| Native backend login, configuration and play relay | Offline vanilla, Paper and Basalt 26.3 bot gates pass; graphical client pending |
+| Server switching | Implemented against simulated backends; real worlds unvalidated |
+| Player forwarding | Velocity modern tested with offline Paper and Basalt; legacy modes have fixture coverage |
+| Online profiles and graphical clients | Not validated |
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |
 | Plugins and the Lua runtime | Not started |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
-
-Tests use synthetic clients and backends on Linux. No full registry/chunk sequence
-or real game client has been validated.
 
 ## Related repositories
 
@@ -228,6 +152,7 @@ or real game client has been validated.
 |---|---|
 | [Server](https://github.com/BasaltProject/Server) | The Minecraft server itself, in C++23 |
 | [Wire](https://github.com/BasaltProject/Wire) | The network layer both this and the server build on |
+| [Shim](https://github.com/BasaltProject/Shim) | A JVM implemented in C++, for future Java plugin compatibility |
 | [Website](https://github.com/BasaltProject/Website) | The project site, at [basaltmc.org](https://basaltmc.org) |
 
 ## License
