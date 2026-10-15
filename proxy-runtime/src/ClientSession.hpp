@@ -1,5 +1,8 @@
 #pragma once
 
+#include "IdentityRegistry.hpp"
+#include "PendingCookies.hpp"
+
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/io/BudgetMemoryResource.hpp>
@@ -44,7 +47,7 @@ public:
                   std::span<const std::uint8_t> authFailure, AuthenticationStart authenticate,
                   const BackendRoutes& routes, ResolutionStart resolve,
                   const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                  std::int32_t compressionThreshold);
+                  std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities);
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -52,6 +55,7 @@ public:
     [[nodiscard]] bool resolved(std::size_t target, std::vector<wire::io::TcpAddress> addresses,
                                 wire::io::ResourceBudget::Reservation storage);
     [[nodiscard]] bool backendReady(const wire::io::IoReady& event);
+    [[nodiscard]] bool timedOut(Clock::time_point now);
     [[nodiscard]] std::int64_t backendHandle() const;
     [[nodiscard]] wire::io::IoInterest backendInterest() const;
 
@@ -95,6 +99,9 @@ private:
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;
+    PendingCookies pendingCookies_;
+    IdentityRegistry& identities_;
+    bool identityClaimed_ = false;
     bool allocationReady_ = false;
     wire::io::TcpConnection connection_;
     const config::RuntimeConfig& settings_;
@@ -102,6 +109,7 @@ private:
     std::span<const std::uint8_t> unavailable_;
     bool online_;
     bool checkAddress_;
+    bool acceptTransfers_;
     std::int32_t compressionThreshold_;
     std::optional<std::int32_t> compression_;
     std::span<const std::uint8_t> publicKey_;
@@ -122,6 +130,7 @@ private:
     Clock::time_point backendWriteDeadline_ = Clock::time_point::max();
     Clock::time_point backendReadDeadline_ = Clock::time_point::max();
     bool finishingConfiguration_ = false;
+    bool startingConfiguration_ = false;
     std::optional<std::string> cookie_;
     bool velocityForwarded_ = false;
     Clock::time_point connectDeadline_;

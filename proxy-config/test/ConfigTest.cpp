@@ -29,6 +29,7 @@ TEST_CASE("commented defaults produce online authentication, bounded owners "
     const auto defaults = decode(defaultProxyToml());
     REQUIRE(defaults);
     CHECK(defaults->network.onlineMode);
+    CHECK_FALSE(defaults->network.acceptTransfers);
     CHECK(defaults->runtime.ioLoops > 1);
     CHECK(defaults->runtime.maxBufferedBytes >= defaults->runtime.sessionBufferBytes);
     CHECK(defaults->translation == TranslationMode::Auto);
@@ -141,4 +142,12 @@ TEST_CASE("loading creates domain files and preserves explicit offline "
     const auto broken = load(root.string());
     REQUIRE_FALSE(broken);
     CHECK(broken.error().find("backends.toml is not valid TOML") != std::string::npos);
+}
+
+TEST_CASE("incoming transfers require an explicit boolean network option") {
+    const auto enabled = decode("[network]\naccept-transfers = true");
+    REQUIRE(enabled);
+    CHECK(enabled->network.acceptTransfers);
+    CHECK(enabled->network.onlineMode);
+    CHECK_FALSE(decode("[network]\naccept-transfers = 'true'"));
 }

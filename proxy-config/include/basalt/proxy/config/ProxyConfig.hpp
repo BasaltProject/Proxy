@@ -22,6 +22,7 @@ struct NetworkConfig {
     std::uint16_t port = 25565;
     bool dualStack = false;
     bool onlineMode = true;
+    bool acceptTransfers = false;
     bool preventClientProxyConnections = false;
     std::int32_t compressionThreshold = 256;
 };

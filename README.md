@@ -38,9 +38,13 @@ with code 1. The listener handles handshake, local status and ping/pong on bound
 nonblocking I/O owners. Admission limits apply globally and per origin; incomplete
 handshakes expire. SIGINT/SIGTERM stop the runtime and release sessions. Player
 login performs the RSA/AES exchange and bounded Mojang session lookup on workers.
-Offline mode is explicit. Accepted identities select their configured route,
+Offline mode is explicit. The first verified session reserves its UUID until close; duplicate
+logins are rejected before backend resolution, and can reconnect after the first session closes.
+Accepted identities select their configured route,
 resolve destinations on bounded workers and establish a nonblocking TCP connection,
-trying the next destination after DNS or connection failure. For native 26.3 backends
+trying the next destination after DNS or connection failure, including connection-stage
+deadlines within the absolute login deadline. Late canceled DNS results are discarded.
+For native 26.3 backends
 with explicit `none`, `velocity`, `bungeecord`, `bungeeguard` or `safenet` forwarding,
 it sends the login handshake and identity and relays
 login disconnects, decoding backend compression independently of frontend framing.
@@ -51,8 +55,15 @@ host. Credential properties echoed by a backend are removed before frontend logi
 These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
 Unknown login queries receive a matching negative response using backend compression.
 Login cookie requests are relayed to the client; matching responses are bounded to 5,120 bytes.
+Configuration/play cookie requests, responses and stores are validated before relay, with up to
+32 pending requests and 256-byte keys. Unsolicited or mismatched responses close the session.
+Incoming transfer handshakes require `network.accept-transfers = true` and still authenticate
+normally. Backend transfers validate the destination and drain before closing the old connection;
+they reconnect the client and do not perform an internal backend switch.
 Native LoginFinished/ACK and configuration/play transitions relay small packets in
-synthetic tests, retaining the verified frontend UUID. Configuration/play buffers grow
+synthetic tests, retaining the verified frontend UUID. Reconfiguration waits for the client
+ACK before decoding buffered configuration traffic; repeated cycles have synthetic coverage.
+Configuration/play buffers grow
 within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backend login
 packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is
 negotiated before login success and remains

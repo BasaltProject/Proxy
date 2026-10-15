@@ -94,7 +94,8 @@ struct ProxyRuntime::Impl {
                 [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
                 runtime.routes,
                 [this, id](std::size_t target, Clock::time_point deadline) { return resolve(id, target, deadline); },
-                runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold);
+                runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold,
+                runtime.config.network.acceptTransfers, runtime.identities);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -245,8 +246,25 @@ struct ProxyRuntime::Impl {
                         (*task)();
                     }
                     const auto now = Clock::now();
-                    for (const auto& timer : timers.expire(now))
-                        close(timer.token);
+                    for (const auto& timer : timers.expire(now)) {
+                        const auto found = sessions.find(timer.token);
+                        if (found == sessions.end())
+                            continue;
+                        auto& session = *found->second;
+                        loop.unwatch(session.backendHandle());
+                        if (!session.timedOut(now)) {
+                            close(timer.token);
+                            continue;
+                        }
+                        auto replacement = timers.schedule(session.deadline(), timer.token);
+                        if (!replacement) {
+                            close(timer.token);
+                            continue;
+                        }
+                        session.timer = *replacement;
+                        if (!refresh(timer.token, session))
+                            close(timer.token);
+                    }
                     auto events = loop.wait(timers.nextTimeout(now));
                     if (!events)
                         throw std::runtime_error("readiness wait failed");
@@ -263,7 +281,10 @@ struct ProxyRuntime::Impl {
                             continue;
                         auto& session = *found->second;
                         bool healthy = false;
-                        if (event.handle == session.handle()) {
+                        if (Clock::now() >= session.deadline()) {
+                            loop.unwatch(session.backendHandle());
+                            healthy = session.timedOut(Clock::now());
+                        } else if (event.handle == session.handle()) {
                             healthy = session.ready(event);
                         } else if (event.handle == session.backendHandle()) {
                             loop.unwatch(event.handle);
@@ -304,6 +325,7 @@ struct ProxyRuntime::Impl {
     RuntimeServices services;
     std::optional<wire::auth::SessionKeyPair> key;
     std::optional<wire::io::WorkerPool> workers;
+    detail::IdentityRegistry identities;
     std::vector<std::unique_ptr<Owner>> owners;
     std::vector<std::jthread> threads;
     std::atomic<bool> stopped{false};
@@ -314,7 +336,8 @@ struct ProxyRuntime::Impl {
 
     explicit Impl(config::ProxyConfig settings)
         : config(std::move(settings)), admission(config.admission), slots(config.runtime.maxSessions),
-          buffers(config.runtime.maxBufferedBytes), handoffs(config.runtime.maxPendingWork) {}
+          buffers(config.runtime.maxBufferedBytes), handoffs(config.runtime.maxPendingWork),
+          identities(config.runtime.maxSessions) {}
 
     void stop() {
         stopped.store(true);

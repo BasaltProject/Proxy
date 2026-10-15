@@ -130,8 +130,8 @@ inline std::uint32_t integer(const std::vector<std::uint8_t>& bytes, std::size_t
     throw std::runtime_error("fixture response had an oversized VarInt");
 }
 
-inline void loginStart(io::TcpConnection& client, std::uint16_t port) {
-    const auto hello = handshake(port, 2);
+inline void loginStart(io::TcpConnection& client, std::uint16_t port, std::uint8_t intent = 2) {
+    const auto hello = handshake(port, intent);
     if (!client.writeSome(hello))
         throw std::runtime_error("fixture login handshake failed");
     std::array<std::uint8_t, 25> login{};

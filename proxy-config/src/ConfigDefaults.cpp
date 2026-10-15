@@ -11,6 +11,8 @@ port = 25565
 dual-stack = false
 # Authenticate Java players with Mojang. Disabling this explicitly permits offline identities.
 online-mode = true
+# Accept incoming transfer handshakes. Transfers still authenticate normally; cookies do not prove identity.
+accept-transfers = false
 # Include the player's public IP in the Mojang session check when enabled.
 prevent-client-proxy-connections = false
 # -1 disables client compression; 0 compresses every packet.
