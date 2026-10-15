@@ -66,10 +66,7 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
             backpressure();
             return true;
         }
-        if (!queuePacket(*packet))
-            return false;
-        state_ = State::kCookieResponse;
-        return true;
+        return publishCookieRequest(*backend());
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (id < 0)
@@ -100,12 +97,22 @@ bool ClientSession::backendReady(const wire::io::IoReady& event) {
         } else if (state_ == State::kConfiguration && finishingConfiguration_) {
             return false;
         }
+        if (id == (state_ == State::kConfiguration ? 0x01 : 0x18)) {
+            const auto result = pluginMessage(true);
+            if (result != PluginMessageResult::kRelay) {
+                if (result == PluginMessageResult::kInvalid)
+                    return false;
+                backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+                return true;
+            }
+        }
         const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
         const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
         if (id == cookieRequestId) {
             auto request = wire::protocol::cookie::RequestPacket::read(frame_);
             if (!request || frame_.readableBytes() != 0 ||
-                !pendingCookies_.add(request->key, cookieCache_.lookup(request->key).storeRevision))
+                !pendingCookies_.add(request->key, cookieCache_.lookup(request->key).storeRevision,
+                                     backend()->attempt()))
                 return false;
         } else if (id == cookieStoreId) {
             auto store = wire::protocol::cookie::StorePacket::read(frame_);

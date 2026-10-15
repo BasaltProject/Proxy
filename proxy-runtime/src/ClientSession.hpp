@@ -95,14 +95,19 @@ private:
     };
     enum class ConnectionStage { kIdle, kResolving, kConnecting };
 
+    enum class PluginMessageResult { kRelay, kConsumed, kInvalid };
+    [[nodiscard]] PluginMessageResult pluginMessage(bool fromBackend);
     [[nodiscard]] bool decode();
     [[nodiscard]] bool packet();
+    [[nodiscard]] bool publishCookieRequest(BackendLogin& source);
+    [[nodiscard]] bool cookieResponse();
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
     [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool route();
     [[nodiscard]] bool dial();
     [[nodiscard]] BackendLogin* backend() const;
+    [[nodiscard]] BackendLogin* backendFor(BackendAttempt attempt) const;
     [[nodiscard]] Clock::time_point backendDeadline() const;
     void cancelConnectionAttempt();
     void closeBackends();

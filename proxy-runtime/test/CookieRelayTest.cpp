@@ -147,3 +147,55 @@ TEST_CASE("configuration and play cookies are bounded and correlated before rela
         CHECK(proxy.runtime.bufferedBytes() == 0);
     }
 }
+
+TEST_CASE("a login cookie response cannot authorize a later unsolicited play response") {
+    const auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    const auto port = listener->localPort();
+    REQUIRE(port);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.backends = {{.name = "cookies", .host = "127.0.0.1", .port = *port}};
+    config.defaultRoute = {"cookies"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    const auto ready = loop.wait(2000);
+    REQUIRE(ready);
+    REQUIRE_FALSE(ready->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    constexpr std::string_view key = "fixture:test";
+    const auto request = cookieFrame(5, key);
+    REQUIRE(backend->write(request));
+    REQUIRE(receive(client, request.size()) == request);
+    const std::array<std::uint8_t, 1> absent{0};
+    const auto response = cookieFrame(4, key, absent);
+    REQUIRE(client.write(response));
+    REQUIRE(receive(*backend, response.size()) == response);
+    std::vector<std::uint8_t> finished{41,   2,    0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d,
+                                       0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
+    finished.insert(finished.end(), 16, 0);
+    REQUIRE(backend->write(finished));
+    REQUIRE(receive(client, finished.size()) == finished);
+    const std::vector<std::uint8_t> ack{1, 3};
+    REQUIRE(client.write(ack));
+    REQUIRE(receive(*backend, ack.size()) == ack);
+    REQUIRE(backend->write(ack));
+    REQUIRE(receive(client, ack.size()) == ack);
+    REQUIRE(client.write(ack));
+    REQUIRE(receive(*backend, ack.size()) == ack);
+    REQUIRE(client.write(cookieFrame(0x15, key, absent)));
+    CHECK(receive(client, 0, true).empty());
+    CHECK(receive(*backend, 0, true).empty());
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}

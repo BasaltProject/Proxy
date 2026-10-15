@@ -16,10 +16,15 @@ constexpr std::size_t kCookieKeyLimit = 256;
 std::expected<void, BackendLoginError> BackendLogin::queueCookie(std::string_view key,
                                                                  std::optional<std::span<const std::uint8_t>> payload) {
     namespace protocol = wire::protocol;
+    if ((phase_ != Phase::kLogin && phase_ != Phase::kConfiguration && phase_ != Phase::kPlay) || key.empty() ||
+        key.size() > kCookieKeyLimit || (payload && payload->size() > protocol::cookie::kMaxPayloadBytes))
+        return std::unexpected(BackendLoginError::kMalformed);
+    const auto id = phase_ == Phase::kLogin ? protocol::cookie::ResponsePacket::kLoginId
+                                            : (phase_ == Phase::kConfiguration ? 0x01 : 0x15);
     frame_.clear();
     if (!frame_.tryReserve(kCookiePacketLimit))
         return std::unexpected(BackendLoginError::kLimit);
-    protocol::varInt::write(frame_, protocol::cookie::ResponsePacket::kLoginId);
+    protocol::varInt::write(frame_, id);
     protocol::writeString(frame_, key);
     protocol::writeBoolean(frame_, payload.has_value());
     if (payload)
@@ -52,16 +57,32 @@ std::expected<void, BackendLoginError> BackendLogin::answerCookie(wire::io::Byte
     if (phase_ != Phase::kLogin || !hasCookieRequest() || packet.readableBytes() > kCookiePacketLimit)
         return std::unexpected(BackendLoginError::kMalformed);
     auto response = wire::protocol::cookie::ResponsePacket::read(packet);
-    if (!response || packet.readableBytes() != 0 || !std::ranges::equal(cookieKey_.readable(), response->key))
+    if (!response || packet.readableBytes() != 0)
+        return std::unexpected(BackendLoginError::kMalformed);
+    return answerCookie(*response, cache);
+}
+
+std::expected<void, BackendLoginError>
+BackendLogin::answerCookie(const wire::protocol::cookie::ResponsePacket& response, CookieCache& cache) {
+    if (phase_ != Phase::kLogin || !hasCookieRequest() || !std::ranges::equal(cookieKey_.readable(), response.key) ||
+        (response.payload && response.payload->size() > wire::protocol::cookie::kMaxPayloadBytes))
         return std::unexpected(BackendLoginError::kMalformed);
     const auto payload =
-        response->payload ? std::optional{std::span<const std::uint8_t>{*response->payload}} : std::nullopt;
-    if (cache.lookup(response->key).storeRevision == cookieRevision_ && !cache.remember(response->key, payload))
+        response.payload ? std::optional{std::span<const std::uint8_t>{*response.payload}} : std::nullopt;
+    if (cache.lookup(response.key).storeRevision == cookieRevision_ && !cache.remember(response.key, payload))
         return std::unexpected(BackendLoginError::kLimit);
-    if (auto reply = queueCookie(response->key, payload); !reply)
+    if (auto reply = queueCookie(response.key, payload); !reply)
         return reply;
     cookieKey_.clear();
     return {};
+}
+
+std::expected<void, BackendLoginError>
+BackendLogin::relayCookie(const wire::protocol::cookie::ResponsePacket& response) {
+    if (phase_ != Phase::kConfiguration && phase_ != Phase::kPlay)
+        return std::unexpected(BackendLoginError::kMalformed);
+    return queueCookie(response.key, response.payload ? std::optional{std::span<const std::uint8_t>{*response.payload}}
+                                                      : std::nullopt);
 }
 
 } // namespace basalt::proxy::runtime::detail

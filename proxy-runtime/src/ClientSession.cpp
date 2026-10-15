@@ -146,15 +146,8 @@ bool ClientSession::packet() {
     const auto id = protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
-    if (state_ == State::kCookieResponse) {
-        if (id != protocol::cookie::ResponsePacket::kLoginId || !backend() ||
-            !backend()->answerCookie(frame_, cookieCache_))
-            return false;
-        state_ = State::kBackendLogin;
-        backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
-        backpressure();
-        return true;
-    }
+    if (state_ == State::kCookieResponse)
+        return id == protocol::cookie::ResponsePacket::kLoginId && cookieResponse();
     if (state_ == State::kLoginAck) {
         if (id != protocol::login::kLoginAcknowledgedId || frame_.readableBytes() != 0 ||
             output_.readableBytes() != 0 || !backend())
@@ -173,23 +166,17 @@ bool ClientSession::packet() {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (!backend() || id < 0)
             return false;
+        if (id == (state_ == State::kConfiguration ? 0x02 : 0x16)) {
+            const auto result = pluginMessage(false);
+            if (result != PluginMessageResult::kRelay)
+                return result == PluginMessageResult::kConsumed;
+        }
         const auto settingsId = state_ == State::kConfiguration ? 0x00 : 0x0e;
         if (id == settingsId && !rememberSettings(raw))
             return false;
         const auto cookieResponseId = state_ == State::kConfiguration ? 0x01 : 0x15;
-        if (id == cookieResponseId) {
-            auto response = protocol::cookie::ResponsePacket::read(frame_);
-            if (!response || frame_.readableBytes() != 0)
-                return false;
-            const auto revision = pendingCookies_.consume(response->key);
-            if (!revision)
-                return false;
-            if (cookieCache_.lookup(response->key).storeRevision == *revision &&
-                !cookieCache_.remember(
-                    response->key, response->payload ? std::optional{std::span<const std::uint8_t>{*response->payload}}
-                                                     : std::nullopt))
-                return false;
-        }
+        if (id == cookieResponseId)
+            return cookieResponse();
         bool enterPlay = false;
         bool enterConfiguration = false;
         if (state_ == State::kPlay && id == kConfigurationAcknowledgedId) {
@@ -558,6 +545,13 @@ bool ClientSession::dial() {
 BackendLogin* ClientSession::backend() const {
     // Frontend traffic remains attached to the active backend during candidate preparation.
     return activeBackend_ ? activeBackend_.get() : candidateBackend_.get();
+}
+
+BackendLogin* ClientSession::backendFor(BackendAttempt attempt) const {
+    for (auto* endpoint : {activeBackend_.get(), candidateBackend_.get()})
+        if (endpoint && endpoint->attempt() == attempt)
+            return endpoint;
+    return nullptr;
 }
 
 ClientSession::Clock::time_point ClientSession::backendDeadline() const {
