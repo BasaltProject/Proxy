@@ -19,7 +19,8 @@
 </p>
 
 > ⚠️ **Early development.** Basalt Proxy is not ready for any network, public or
-> private. Today the binary starts, prints and exits. The status table below is
+> private. The current listener serves status requests and rejects player login.
+> The status table below is
 > the honest state of the project.
 
 ## Overview
@@ -28,9 +29,14 @@ Basalt Proxy is a Minecraft proxy project written in **C++23**, distributed as a
 native binary and sharing [Wire](https://github.com/BasaltProject/Wire) with
 [Basalt Server](https://github.com/BasaltProject/Server).
 
-The current executable provides `--help`, `--version` and `--config`. It prints
-its startup banner and exits. The config argument selects a directory; this
-build does not create or read configuration files or accept player connections.
+The current executable provides `--help`, `--version` and `--config`. On startup,
+it generates commented `proxy.toml` and `backends.toml` files when missing, loads
+them and validates resource limits, backend identities and routing targets.
+Existing files are preserved; invalid configuration reports its file and exits
+with code 1. The listener handles handshake, local status and ping/pong on bounded
+nonblocking I/O owners. Admission limits apply globally and per origin; incomplete
+handshakes expire. SIGINT/SIGTERM stop the runtime and release sessions. Player
+login is explicitly rejected until authentication and backend routing are integrated.
 
 ## Product goals
 
@@ -106,10 +112,11 @@ ctest --preset debug
 | Build, module layout and cross-platform CI | Working |
 | Command line: `--help`, `--version`, `--config` | Working |
 | Network layer, shared with the server | Inherited from Wire |
-| Listener, handshake and player routing | Not started |
+| Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
+| Authentication and player routing | Not started |
 | Backend connections and server switching | Not started |
 | Player forwarding to the backend | Not started |
-| Configuration files | Not started |
+| Configuration files | Generated, loaded and validated at startup |
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |
 | Plugins and the Lua runtime | Not started |

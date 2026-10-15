@@ -10,3 +10,7 @@
 /build/
 .cache/
 compile_commands.json
+
+# Operator configuration and process state
+/config/
+/.basalt/

@@ -30,8 +30,7 @@ struct Invalid {
 
 } // namespace cliCommand
 
-using CliCommand =
-    std::variant<cliCommand::ShowHelp, cliCommand::ShowVersion, cliCommand::Run, cliCommand::Invalid>;
+using CliCommand = std::variant<cliCommand::ShowHelp, cliCommand::ShowVersion, cliCommand::Run, cliCommand::Invalid>;
 
 namespace cli {
 

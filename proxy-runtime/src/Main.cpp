@@ -1,13 +1,19 @@
+#include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
+#include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/common/logging/LogOutput.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/common/logging/Panic.hpp>
 #include <basalt/wire/io/Platform.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 using namespace basalt;
@@ -21,6 +27,11 @@ constexpr int kUsageExitCode = 2;
 /// Where a crash report goes. The proxy's own: the server has its own tracker and its own half of
 /// the code.
 constexpr std::string_view kIssuesUrl = "https://github.com/BasaltProject/Proxy/issues";
+
+static_assert(std::atomic<bool>::is_always_lock_free);
+std::atomic<bool> signalStop{false};
+
+void stopSignal(int) { signalStop.store(true, std::memory_order_relaxed); }
 
 // Raw string, and deliberately not indented: the art is full of backslashes, and every leading
 // space in it is significant.
@@ -43,7 +54,45 @@ int run(const cliCommand::Run& command) {
 
     const wire::common::Logger logger{"Proxy"};
     logger.info([&command] { return "Reading configuration from " + command.configDirectory + "."; });
-    logger.warn([] { return std::string{"Nothing is implemented yet: this build starts, prints and exits."}; });
+    const auto configuration = proxy::config::load(command.configDirectory);
+    if (!configuration) {
+        logger.error([&configuration] { return configuration.error(); });
+        return 1;
+    }
+    logger.info([&configuration] {
+        return "Configuration validated: " + std::to_string(configuration->backends.size()) + " backend(s).";
+    });
+    auto runtime = ProxyRuntime::create(*configuration);
+    if (!runtime) {
+        logger.error([&runtime] { return runtime.error(); });
+        return 1;
+    }
+    signalStop.store(false);
+    const auto oldInterrupt = std::signal(SIGINT, stopSignal);
+    const auto oldTerminate = std::signal(SIGTERM, stopSignal);
+    if (oldInterrupt == SIG_ERR || oldTerminate == SIG_ERR) {
+        logger.error([] { return std::string{"Could not install shutdown signal handlers."}; });
+        return 1;
+    }
+    std::stop_source stopping;
+    std::jthread signals{[&](std::stop_token stop) {
+        while (!stop.stop_requested() && !signalStop.load(std::memory_order_relaxed))
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        if (signalStop.load(std::memory_order_relaxed))
+            stopping.request_stop();
+    }};
+    logger.info([&runtime] { return "Listening on port " + std::to_string(runtime->port()) + "."; });
+    logger.warn([] { return std::string{"Status is available; player routing is not available in this build."}; });
+    const auto result = runtime->run(stopping.get_token());
+    signals.request_stop();
+    signals.join();
+    std::signal(SIGINT, oldInterrupt);
+    std::signal(SIGTERM, oldTerminate);
+    if (!result) {
+        logger.error([&result] { return result.error(); });
+        return 1;
+    }
+    logger.info([] { return std::string{"Proxy stopped."}; });
     return 0;
 }
 

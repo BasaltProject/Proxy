@@ -1,7 +1,11 @@
 basalt_module(proxy-runtime-core
     SOURCES
         src/Cli.cpp
-    DEPENDS basalt::wire-common basalt::wire-io basalt::wire-multiversion
+        src/Admission.cpp
+        src/ClientSession.cpp
+        src/ProxyRuntime.cpp
+    DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
+            basalt::wire-multiversion
 )
 
 target_compile_definitions(proxy-runtime-core PUBLIC BASALT_VERSION="${BASALT_VERSION}")
@@ -39,3 +43,16 @@ basalt_test(proxy-runtime-network-test
         test/NetworkTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-protocol
 )
+
+basalt_test(proxy-runtime-admission-test
+    SOURCES test/AdmissionTest.cpp
+    DEPENDS basalt::proxy-runtime-core
+)
+
+basalt_test(proxy-runtime-session-test
+    SOURCES test/RuntimeTest.cpp
+    DEPENDS basalt::proxy-runtime-core
+)
+if(BASALT_BUILD_TESTS)
+    set_tests_properties(proxy-runtime-session-test PROPERTIES TIMEOUT 30)
+endif()
