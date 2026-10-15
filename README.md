@@ -56,10 +56,15 @@ host. Credential properties echoed by a backend are removed before frontend logi
 These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
 Unknown login queries receive a matching negative response using backend compression.
 A backend may enable `bungee-messages = true` in its `backends.toml` table to use
-`GetServer`, `GetServers` and `UUID` on `bungeecord:main`. The default is false.
+`GetServer`, `GetServers`, `UUID` and player-local `Connect` on `bungeecord:main`. The default is false.
 The legacy `BungeeCord` alias is recognized and replies use the native channel.
-Client control messages are discarded. Other subcommands, including administrative actions,
-are currently ignored. Responses use bounded session buffers and the verified player UUID.
+Client control messages are discarded. Connect prepares a configured destination while the
+current backend stays in play, then commits through the public configuration ACK. Unknown,
+current and busy destinations are ignored. Preparation failure preserves the active backend;
+failure after starting public reconfiguration closes the session. Other subcommands, including
+ConnectOther and administrative actions, are currently ignored. Query responses use bounded
+session buffers and the verified player UUID. Runtime fixtures cover repeated A-B-A, preparation
+failure and expiry; switching between real worlds remains unvalidated.
 Login cookie requests are tracked by their backend and relayed to the client when uncached;
 matching responses are bounded to 5,120 bytes.
 Configuration/play cookie requests, responses and stores are validated before relay, with up to
@@ -67,6 +72,11 @@ Configuration/play cookie requests, responses and stores are validated before re
 A session-local cookie cache retains up to 32 entries and 64 KiB of encoded content under
 buffer quotas. Known login cookie queries are answered from it; an older client response
 cannot overwrite a newer backend Store. Unknown, absent and empty cookies remain distinct.
+Native resource-pack UUIDs are mapped to session-local public IDs, with at most 32 retained
+packs under buffer quotas. Responses restore the originating backend UUID; responses for
+retired IDs are ignored. Individual/all-pack removals retire those mappings. Internal change
+fixtures remove old packs before new configuration, including when both backends reuse a UUID.
+Pack contents, downloads and application by a graphical client remain unvalidated.
 Incoming transfer handshakes require `network.accept-transfers = true` and still authenticate
 normally. Backend transfers validate the destination and drain before closing the old connection;
 they reconnect the client and do not perform an internal backend switch.
@@ -87,6 +97,19 @@ on real offline vanilla, Paper and Basalt 26.3 backends; a frontend recorder ver
 UUID, teleport confirmation and keepalive round trips. Paper modern forwarding also rejected
 a mismatched secret and absent forwarding, as did Basalt. Graphical clients and online profiles
 remain unvalidated.
+
+## Console
+
+Commands are `help`, `servers`, `status`, `send <player> <backend>` and `stop`.
+Player names match the verified name exactly, including case. A successful `send`
+acknowledges preparation; the destination may still reject login. It uses the same
+owner-controlled change as an authorized Bungee Connect request and does not require plugins.
+Console commands do not intercept player chat or modify the client's command tree.
+
+Input accepts an optional leading slash, CRLF and a final line at EOF. EOF leaves
+the proxy running for headless services. Lines longer than 4096 bytes are discarded
+through their delimiter. Shutdown does not wait for an incomplete line on Linux.
+The executable gate is `python3 tools/verify-console.py --binary <proxy-binary>`.
 
 ## Product goals
 

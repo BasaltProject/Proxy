@@ -37,11 +37,11 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities)
     : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
       memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), cookieCache_(memory_),
-      identities_(identities), connection_(std::move(connection)), settings_(settings), status_(status),
-      unavailable_(unavailable), online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
-      compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
-      authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)), backends_(backends),
-      clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
+      resourcePacks_(memory_), identities_(identities), connection_(std::move(connection)), settings_(settings),
+      status_(status), unavailable_(unavailable), online_(online), checkAddress_(checkAddress),
+      acceptTransfers_(acceptTransfers), compressionThreshold_(compressionThreshold), publicKey_(publicKey),
+      authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(routes), resolve_(std::move(resolve)),
+      backends_(backends), clientSettings_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
       readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}) {
     buffers.reset();
     allocationReady_ =
@@ -49,18 +49,22 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
 }
 
 ClientSession::~ClientSession() {
+    closeBackends();
     if (identityClaimed_)
         identities_.release(profile_->id);
     if (authentication_)
         authentication_->request_stop();
-    if (resolution_)
-        resolution_->request_stop();
+}
+
+std::string_view ClientSession::playerName() const {
+    return profile_ ? std::string_view{profile_->name} : std::string_view{};
 }
 
 bool ClientSession::accounted() const {
     return allocationReady_ && input_.capacity() + frame_.capacity() + output_.capacity() +
                                        pendingCookies_.allocated() + cookieCache_.allocated() +
-                                       clientSettings_.capacity() + (activeBackend_ ? activeBackend_->allocated() : 0) +
+                                       resourcePacks_.allocated() + clientSettings_.capacity() +
+                                       (activeBackend_ ? activeBackend_->allocated() : 0) +
                                        (candidateBackend_ ? candidateBackend_->allocated() : 0) <=
                                    localBuffers_.used();
 }
@@ -164,7 +168,7 @@ bool ClientSession::packet() {
         return true;
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
-        if (!backend() || id < 0)
+        if (!backend() || id < 0 || (state_ == State::kConfiguration && id == kConfigurationAcknowledgedId))
             return false;
         if (id == (state_ == State::kConfiguration ? 0x02 : 0x16)) {
             const auto result = pluginMessage(false);
@@ -177,11 +181,15 @@ bool ClientSession::packet() {
         const auto cookieResponseId = state_ == State::kConfiguration ? 0x01 : 0x15;
         if (id == cookieResponseId)
             return cookieResponse();
+        if (id == (state_ == State::kConfiguration ? 0x06 : 0x32))
+            return resourcePackResponse();
         bool enterPlay = false;
         bool enterConfiguration = false;
         if (state_ == State::kPlay && id == kConfigurationAcknowledgedId) {
             if (!startingConfiguration_ || frame_.readableBytes() != 0 || output_.readableBytes() != 0)
                 return false;
+            if (switchingBackend_)
+                return acknowledgePreparedChange();
             startingConfiguration_ = false;
             finishingConfiguration_ = false;
             state_ = State::kConfiguration;
@@ -386,7 +394,7 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
         }
     }
     backpressure();
-    return accounted() && (!closing_ || output_.readableBytes() != 0);
+    return accounted() && (!closing_ || output_.readableBytes() != 0) && advancePreparedChange();
 }
 
 bool ClientSession::authenticated(
@@ -430,6 +438,13 @@ bool ClientSession::timedOut(Clock::time_point now) {
         now >= connectDeadline_ && now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ &&
         now < backendDeadline())
         return route();
+    if (!closing_ && activeBackend_ && state_ == State::kPlay && !startingConfiguration_ &&
+        (candidateBackend_ || connectionStage_ != ConnectionStage::kIdle) &&
+        now < (frontendPaused_ ? Clock::time_point::max() : readDeadline_) && now < writeDeadline_ &&
+        now < activeBackend_->deadline(backendPaused_)) {
+        discardCandidate();
+        return true;
+    }
     return false;
 }
 
@@ -446,6 +461,16 @@ void ClientSession::cancelConnectionAttempt() {
 }
 
 bool ClientSession::route() {
+    if (routeNext())
+        return true;
+    if (activeBackend_ && state_ == State::kPlay && !closing_) {
+        discardCandidate();
+        return true;
+    }
+    return false;
+}
+
+bool ClientSession::routeNext() {
     cancelConnectionAttempt();
     if (Clock::now() >= loginDeadline_)
         return false;
@@ -464,6 +489,10 @@ bool ClientSession::route() {
         identityClaimed_ = true;
     }
     if (nextTarget_ == targets_.size()) {
+        if (activeBackend_ && state_ == State::kPlay) {
+            discardCandidate();
+            return true;
+        }
         closing_ = true;
         return queue(unavailable_);
     }
@@ -530,6 +559,10 @@ bool ClientSession::dial() {
     dialAttempt_.reset();
     if (!profile_ || !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_,
                                                virtualPort_, connection_.remoteAddress())) {
+        if (activeBackend_ && state_ == State::kPlay) {
+            discardCandidate();
+            return true;
+        }
         closeBackends();
         closing_ = true;
         return queue(unavailable_);
@@ -579,10 +612,12 @@ std::array<ClientSession::BackendWatch, 3> ClientSession::backendWatches() const
         if (!endpoint)
             continue;
         const bool selected = endpoint == backend();
-        const bool read = selected && !backendPaused_ && !endpoint->hasCookieRequest() && state_ != State::kLoginAck &&
+        const bool preparing = activeBackend_ && endpoint == candidateBackend_.get() && state_ == State::kPlay;
+        const bool read = (selected || (preparing && endpoint->phase() == BackendLogin::Phase::kLogin)) &&
+                          !backendPaused_ && !endpoint->hasCookieRequest() && state_ != State::kLoginAck &&
                           state_ != State::kCookieResponse && !startingConfiguration_;
         const auto interest = endpoint->interest(read);
-        if ((selected && !backendPaused_) || interest.readable || interest.writable)
+        if ((selected && !backendPaused_) || preparing || interest.readable || interest.writable)
             result[i + 1] = {endpoint->handle(), interest};
     }
     return result;

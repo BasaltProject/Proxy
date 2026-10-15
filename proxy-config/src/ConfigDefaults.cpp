@@ -71,7 +71,7 @@ protocol = 777
 # none is viable for an offline vanilla backend; it does not forward premium UUID/properties.
 # The backend must use a matching scheme. No fallback to weaker identity on security failure.
 forwarding = "none"
-# Allow read-only GetServer, GetServers and UUID queries on bungeecord:main from this backend.
+# Allow GetServer, GetServers, UUID and player-local Connect on bungeecord:main from this backend.
 # Client-originated control messages are always discarded. Other subcommands are unsupported.
 bungee-messages = false
 # Shared secret for velocity or token for bungeeguard/safenet. Keep this file private.

@@ -1,3 +1,5 @@
+#include "Console.hpp"
+
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
@@ -85,7 +87,11 @@ int run(const cliCommand::Run& command) {
     logger.warn([] {
         return std::string{"Proxy is under development; only verified protocol/backend combinations are supported."};
     });
+    std::jthread console{
+        [&](std::stop_token stop) { detail::runConsole(*runtime, configuration->backends, stopping, stop); }};
     const auto result = runtime->run(stopping.get_token());
+    console.request_stop();
+    console.join();
     signals.request_stop();
     signals.join();
     std::signal(SIGINT, oldInterrupt);

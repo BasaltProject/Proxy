@@ -1,3 +1,4 @@
+#include "BackendChangeState.hpp"
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
 
@@ -344,6 +345,7 @@ struct ProxyRuntime::Impl {
     ResourceBudget slots;
     ResourceBudget buffers;
     ResourceBudget handoffs;
+    ResourceBudget controls;
     std::optional<ResourceBudget::Reservation> bootstrapBuffers;
     wire::io::TcpListener listener;
     std::uint16_t port = 0;
@@ -357,6 +359,7 @@ struct ProxyRuntime::Impl {
     std::vector<std::unique_ptr<Owner>> owners;
     std::vector<std::jthread> threads;
     std::atomic<bool> stopped{false};
+    std::shared_ptr<std::atomic<bool>> controlStopped = std::make_shared<std::atomic<bool>>(false);
     std::atomic<bool> failed{false};
     std::atomic<bool> started{false};
     std::atomic<std::uint64_t> nextId{1};
@@ -365,10 +368,11 @@ struct ProxyRuntime::Impl {
     explicit Impl(config::ProxyConfig settings)
         : config(std::move(settings)), admission(config.admission), slots(config.runtime.maxSessions),
           buffers(config.runtime.maxBufferedBytes), handoffs(config.runtime.maxPendingWork),
-          identities(config.runtime.maxSessions) {}
+          controls(config.runtime.maxPendingWork), identities(config.runtime.maxSessions) {}
 
     void stop() {
         stopped.store(true);
+        controlStopped->store(true, std::memory_order_release);
         if (workers)
             workers->requestStop();
         for (const auto& owner : owners)
@@ -497,6 +501,56 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
     if (impl_->failed.load())
         return std::unexpected("runtime stopped after an owner failure");
     return {};
+}
+
+std::expected<BackendChangeRequest, BackendChangeError> ProxyRuntime::sendPlayer(std::string_view player,
+                                                                                 std::string_view backend) {
+    if (!impl_->started.load() || impl_->stopped.load())
+        return std::unexpected(BackendChangeError::kNotRunning);
+    if (!wire::auth::validLoginName(player))
+        return std::unexpected(BackendChangeError::kInvalidPlayer);
+    const auto target = std::ranges::find(impl_->config.backends, backend, &config::BackendConfig::name);
+    if (target == impl_->config.backends.end())
+        return std::unexpected(BackendChangeError::kUnknownBackend);
+    auto control = impl_->controls.acquire(1);
+    auto storage = impl_->buffers.acquire(1024 + impl_->owners.size() * 128);
+    if (!control || !storage)
+        return std::unexpected(BackendChangeError::kBusy);
+    auto request = std::make_shared<detail::BackendChangeState>(std::move(*control), std::move(*storage));
+    request->player = player;
+    request->target = static_cast<std::size_t>(target - impl_->config.backends.begin());
+    request->remaining.store(impl_->owners.size(), std::memory_order_relaxed);
+    request->stopped = impl_->controlStopped;
+    std::lock_guard publication{request->publication};
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, request] {
+                {
+                    std::lock_guard published{request->publication};
+                    if (!request->admitted)
+                        return;
+                }
+                for (auto& [id, session] : destination->sessions) {
+                    if (session->playerName() != request->player)
+                        continue;
+                    if (request->claimed.exchange(true, std::memory_order_relaxed))
+                        break;
+                    const bool accepted = session->requestBackendChange(request->target);
+                    auto result = accepted ? BackendChangeResult::kAccepted : BackendChangeResult::kUnavailable;
+                    if (accepted && !destination->refresh(id, *session)) {
+                        destination->close(id);
+                        result = BackendChangeResult::kUnavailable;
+                    }
+                    request->outcome.store(result, std::memory_order_relaxed);
+                    break;
+                }
+                request->remaining.fetch_sub(1, std::memory_order_acq_rel);
+            }))
+            return std::unexpected(BackendChangeError::kBusy);
+        (void)destination->loop.wake();
+    }
+    request->admitted = true;
+    return BackendChangeRequest{std::move(request)};
 }
 
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }

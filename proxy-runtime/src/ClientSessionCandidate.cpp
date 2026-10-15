@@ -1,0 +1,148 @@
+#include "BackendLogin.hpp"
+#include "ClientSession.hpp"
+
+#include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/cookie/CookiePackets.hpp>
+#include <basalt/wire/protocol/login/LoginPackets.hpp>
+#include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
+
+#include <utility>
+
+namespace basalt::proxy::runtime::detail {
+
+bool ClientSession::prepareBackend(std::size_t target) {
+    if (closing_ || state_ != State::kPlay || Clock::now() >= deadline() || !activeBackend_ || candidateBackend_ ||
+        startingConfiguration_ || connectionStage_ != ConnectionStage::kIdle || target >= backends_.size() ||
+        target == activeBackend_->attempt().target)
+        return false;
+    requestedTarget_[0] = target;
+    targets_ = requestedTarget_;
+    nextTarget_ = 0;
+    loginDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.loginTimeoutMs};
+    if (!route())
+        return false;
+    return connectionStage_ != ConnectionStage::kIdle || candidateBackend_ != nullptr;
+}
+
+bool ClientSession::requestBackendChange(std::size_t target) {
+    if (!prepareBackend(target))
+        return false;
+    changeWhenPrepared_ = true;
+    return true;
+}
+
+bool ClientSession::advancePreparedChange() {
+    if (!changeWhenPrepared_ || startingConfiguration_ || frontendPaused_ || !candidatePrepared())
+        return true;
+    return beginPreparedChange();
+}
+
+bool ClientSession::candidatePrepared() const {
+    return !closing_ && state_ == State::kPlay && activeBackend_ && candidateBackend_ &&
+           candidateBackend_->phase() == BackendLogin::Phase::kLoginAccepted && Clock::now() < deadline();
+}
+
+bool ClientSession::beginPreparedChange() {
+    if (!candidatePrepared() || startingConfiguration_ || frontendPaused_)
+        return false;
+    constexpr std::array<std::uint8_t, 1> start{0x78};
+    if (!queuePacket(start))
+        return false;
+    startingConfiguration_ = true;
+    switchingBackend_ = true;
+    return true;
+}
+
+bool ClientSession::acknowledgePreparedChange() {
+    if (!switchingBackend_ || !startingConfiguration_ || !candidatePrepared() || output_.readableBytes() != 0)
+        return false;
+    constexpr std::array<std::uint8_t, 1> ack{wire::protocol::login::kLoginAcknowledgedId};
+    if (!candidateBackend_->queue(ack) || !candidateBackend_->acknowledgeLogin() ||
+        (clientSettings_.readableBytes() != 0 && !candidateBackend_->queue(clientSettings_.readable())))
+        return false;
+    constexpr std::array<std::uint8_t, 2> removePacks{0x08, 0};
+    constexpr std::array<std::uint8_t, 2> clearReportDetails{0x10, 0};
+    constexpr std::array<std::uint8_t, 2> clearServerLinks{0x11, 0};
+    constexpr std::array<std::uint8_t, 1> clearDialog{0x12};
+    if (!queuePacket(removePacks) || !queuePacket(clearReportDetails) || !queuePacket(clearServerLinks) ||
+        !queuePacket(clearDialog))
+        return false;
+    // The public configuration ACK commits ownership of subsequent traffic.
+    resourcePacks_.clear();
+    activeBackend_.reset();
+    activeBackend_ = std::move(candidateBackend_);
+    cancelConnectionAttempt();
+    targets_ = {};
+    nextTarget_ = 0;
+    startingConfiguration_ = false;
+    switchingBackend_ = false;
+    changeWhenPrepared_ = false;
+    finishingConfiguration_ = false;
+    frontendPaused_ = false;
+    backendPaused_ = false;
+    state_ = State::kConfiguration;
+    readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+    activeBackend_->expectReadUntil(readDeadline_);
+    activeBackend_->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    backpressure();
+    return true;
+}
+
+void ClientSession::discardCandidate() {
+    changeWhenPrepared_ = false;
+    cancelConnectionAttempt();
+    candidateBackend_.reset();
+    targets_ = {};
+    nextTarget_ = 0;
+}
+
+bool ClientSession::candidateReady(const wire::io::IoReady& event) {
+    const auto reject = [this] {
+        if (switchingBackend_)
+            return false;
+        discardCandidate();
+        return true;
+    };
+    if (state_ != State::kPlay || !activeBackend_ || !candidateBackend_)
+        return false;
+    if (event.closed)
+        return reject();
+    auto& endpoint = *candidateBackend_;
+    const auto packet = endpoint.ready(event, !backendPaused_ && endpoint.phase() == BackendLogin::Phase::kLogin &&
+                                                  !endpoint.hasCookieRequest());
+    if (!packet)
+        return reject();
+    if (packet->empty())
+        return true;
+    frame_.clear();
+    if (!frame_.tryReserve(packet->size()))
+        return reject();
+    frame_.writeBytes(*packet);
+    const auto id = wire::protocol::varInt::read(frame_);
+    if (frame_.failed())
+        return reject();
+    if (id == wire::protocol::cookie::RequestPacket::kLoginId) {
+        const auto action = endpoint.requestCookie(frame_, cookieCache_);
+        if (!action)
+            return reject();
+        if (*action == BackendLogin::CookieAction::kRequestClient) {
+            const auto publication = publishCookieRequest(endpoint);
+            if (publication == CookiePublication::kUnavailable)
+                return reject();
+            return publication == CookiePublication::kPublished;
+        }
+    } else if (id == wire::protocol::login::LoginPluginRequestPacket::kId) {
+        if (!endpoint.answerPluginQuery(frame_))
+            return reject();
+    } else if (id == wire::protocol::login::LoginFinishedPacket::kId) {
+        if (!endpoint.acceptLogin(frame_))
+            return reject();
+    } else {
+        return reject();
+    }
+    endpoint.expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    return true;
+}
+
+} // namespace basalt::proxy::runtime::detail

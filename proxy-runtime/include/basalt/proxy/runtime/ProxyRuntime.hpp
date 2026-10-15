@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/proxy/runtime/BackendChangeRequest.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
@@ -39,6 +40,9 @@ public:
 
     /// Coordinator only; starts owners and joins them after stop or a fatal transport failure.
     [[nodiscard]] std::expected<void, std::string> run(std::stop_token stop);
+    /// Thread-safe; matches the verified name exactly. Ticket retains bounded resources until released.
+    [[nodiscard]] std::expected<BackendChangeRequest, BackendChangeError> sendPlayer(std::string_view player,
+                                                                                     std::string_view backend);
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

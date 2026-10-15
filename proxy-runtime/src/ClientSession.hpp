@@ -4,6 +4,7 @@
 #include "CookieCache.hpp"
 #include "IdentityRegistry.hpp"
 #include "PendingCookies.hpp"
+#include "ResourcePacks.hpp"
 
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
@@ -21,6 +22,7 @@
 #include <optional>
 #include <span>
 #include <stop_token>
+#include <string_view>
 #include <vector>
 
 namespace basalt::proxy::config {
@@ -57,6 +59,12 @@ public:
                   wire::io::ResourceBudget::Reservation storage);
     [[nodiscard]] bool resolved(BackendAttempt attempt, std::vector<wire::io::TcpAddress> addresses,
                                 wire::io::ResourceBudget::Reservation storage);
+    /// Owner only. Preparation preserves the frontend play state.
+    [[nodiscard]] bool prepareBackend(std::size_t target);
+    [[nodiscard]] bool requestBackendChange(std::size_t target);
+    [[nodiscard]] std::string_view playerName() const;
+    [[nodiscard]] bool candidatePrepared() const;
+    [[nodiscard]] bool beginPreparedChange();
     [[nodiscard]] bool backendReady(const wire::io::IoReady& event);
     [[nodiscard]] bool timedOut(Clock::time_point now);
 
@@ -99,12 +107,21 @@ private:
     [[nodiscard]] PluginMessageResult pluginMessage(bool fromBackend);
     [[nodiscard]] bool decode();
     [[nodiscard]] bool packet();
-    [[nodiscard]] bool publishCookieRequest(BackendLogin& source);
+    enum class CookiePublication { kPublished, kUnavailable, kFatal };
+    [[nodiscard]] CookiePublication publishCookieRequest(BackendLogin& source);
     [[nodiscard]] bool cookieResponse();
+    [[nodiscard]] bool backendResourcePack(bool push);
+    [[nodiscard]] bool resourcePackResponse();
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
     [[nodiscard]] bool queuePacket(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool route();
+    [[nodiscard]] bool routeNext();
+    [[nodiscard]] bool candidateReady(const wire::io::IoReady& event);
+    [[nodiscard]] bool backendEvent(const wire::io::IoReady& event);
+    [[nodiscard]] bool advancePreparedChange();
+    void discardCandidate();
+    [[nodiscard]] bool acknowledgePreparedChange();
     [[nodiscard]] bool dial();
     [[nodiscard]] BackendLogin* backend() const;
     [[nodiscard]] BackendLogin* backendFor(BackendAttempt attempt) const;
@@ -118,6 +135,7 @@ private:
     wire::io::BudgetMemoryResource memory_;
     PendingCookies pendingCookies_;
     CookieCache cookieCache_;
+    ResourcePacks resourcePacks_;
     IdentityRegistry& identities_;
     bool identityClaimed_ = false;
     bool allocationReady_ = false;
@@ -137,6 +155,7 @@ private:
     std::string virtualHost_;
     std::uint16_t virtualPort_ = 0;
     std::span<const std::size_t> targets_;
+    std::array<std::size_t, 1> requestedTarget_{};
     ResolutionStart resolve_;
     std::size_t nextTarget_ = 0;
     BackendAttempts attempts_;
@@ -151,6 +170,8 @@ private:
     std::unique_ptr<BackendLogin> candidateBackend_;
     bool finishingConfiguration_ = false;
     bool startingConfiguration_ = false;
+    bool switchingBackend_ = false;
+    bool changeWhenPrepared_ = false;
     Clock::time_point connectDeadline_;
     std::array<std::uint8_t, 4> challenge_{};
     std::string name_;
