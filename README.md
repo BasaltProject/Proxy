@@ -68,7 +68,11 @@ within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backe
 packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is
 negotiated before login success and remains
 independent of backend compression. Directional high/low watermarks pause producers
-while the receiving endpoint drains. Real registry/chunk traffic remains unvalidated.
+while the receiving endpoint drains. An independent Swarm bot has reached play through the proxy
+on real offline vanilla, Paper and Basalt 26.3 backends; a frontend recorder verified registry/chunk traffic,
+UUID, teleport confirmation and keepalive round trips. Paper modern forwarding also rejected
+a mismatched secret and absent forwarding, as did Basalt. Graphical clients and online profiles
+remain unvalidated.
 
 ## Product goals
 
@@ -128,6 +132,29 @@ ctest --preset debug
 
 `--preset asan` builds the same tree under the address and undefined sanitizers.
 
+An optional independent bot gate uses an already running offline vanilla 26.3 server
+on loopback and a separately built Swarm binary:
+
+```bash
+python3 tools/verify-native-backend.py \
+  --proxy build/debug/bin/BasaltProxy-26.3.0-dev-Linux-x64 \
+  --swarm ../Swarm/build/debug/bin/BasaltSwarm-26.3.0-dev-Linux-x64 \
+  --backend-port 25566 --output build/native-gate
+```
+
+It creates an isolated proxy configuration, records frontend frames independently of Wire,
+and writes `result.json` and process logs. It requires a 22-second session, verified offline
+UUID, registries, play/chunk packets and matching teleport/keepalive responses. It does not
+validate chunk semantics, graphical clients or online authentication.
+
+For a Paper backend configured for Velocity modern forwarding and offline proxy identities,
+add `--forwarding velocity --secret-file <file>` with its matching secret. The generated backend
+configuration is private; reports contain no secret. `--expect-login-rejection` instead requires
+a login disconnect with no accepted profile or play traffic, for negative forwarding checks.
+Swarm diagnostics remain visible in `bot_diagnostics`; Paper's `paper:raw` registry entry
+currently produces one. This transport gate does not certify registry semantics.
+
+
 ## Requirements
 
 | Component | Requirement |
@@ -146,9 +173,9 @@ ctest --preset debug
 | Network layer, shared with the server | Inherited from Wire |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
 | Initial login crypto and session verification | Implemented; simulated-endpoint tests |
-| Native backend login, configuration and play relay | Large-payload fixtures pass; real game traffic pending |
+| Native backend login, configuration and play relay | Offline vanilla/Paper/Basalt 26.3 bot gates pass; graphical client pending |
 | Backend connections and server switching | TCP connection implemented; switching pending |
-| Player forwarding to the backend | Initial Velocity modern v1/v4 and legacy/token modes; real backend validation pending |
+| Player forwarding to the backend | Velocity modern tested with offline Paper/Basalt 26.3; legacy/token modes have fixture coverage |
 | Configuration files | Generated, loaded and validated at startup |
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |

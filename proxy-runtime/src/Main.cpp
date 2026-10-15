@@ -82,7 +82,9 @@ int run(const cliCommand::Run& command) {
             stopping.request_stop();
     }};
     logger.info([&runtime] { return "Listening on port " + std::to_string(runtime->port()) + "."; });
-    logger.warn([] { return std::string{"Status is available; player routing is not available in this build."}; });
+    logger.warn([] {
+        return std::string{"Proxy is under development; only verified protocol/backend combinations are supported."};
+    });
     const auto result = runtime->run(stopping.get_token());
     signals.request_stop();
     signals.join();
