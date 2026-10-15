@@ -68,16 +68,14 @@ bool ClientSession::accounted() const {
 ClientSession::Clock::time_point ClientSession::deadline() const {
     auto result = closing_ ? writeDeadline_
                            : std::min(frontendPaused_ ? Clock::time_point::max() : readDeadline_, writeDeadline_);
-    if (!closing_ && (state_ == State::kResolving || state_ == State::kConnecting))
+    if (!closing_ &&
+        (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting))
         result = std::min(result, connectDeadline_);
-    return closing_ ? result
-                    : std::min({result, backendWriteDeadline_,
-                                backendPaused_ ? Clock::time_point::max() : backendReadDeadline_});
+    return closing_ ? result : std::min(result, backendDeadline());
 }
 
 wire::io::IoInterest ClientSession::interest() const {
-    return {!closing_ && !frontendPaused_ && state_ != State::Authenticating && state_ != State::kResolving &&
-                state_ != State::kConnecting && state_ != State::kBackendLogin,
+    return {!closing_ && !frontendPaused_ && state_ != State::Authenticating && state_ != State::kBackendLogin,
             output_.readableBytes() != 0 || (!frontendPaused_ && bufferedPacket())};
 }
 
@@ -153,8 +151,7 @@ bool ClientSession::packet() {
             !backend()->answerCookie(frame_, cookieCache_))
             return false;
         state_ = State::kBackendLogin;
-        backendWriteDeadline_ =
-            std::min(backendWriteDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
         backpressure();
         return true;
     }
@@ -168,9 +165,9 @@ bool ClientSession::packet() {
         if (!backend()->acknowledgeLogin())
             return false;
         state_ = State::kConfiguration;
-        readDeadline_ = backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
-        backendWriteDeadline_ =
-            std::min(backendWriteDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+        readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+        backend()->expectReadUntil(readDeadline_);
+        backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
         return true;
     }
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
@@ -221,8 +218,7 @@ bool ClientSession::packet() {
             state_ = State::kPlay;
         }
         backpressure();
-        if (backendWriteDeadline_ == Clock::time_point::max())
-            backendWriteDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
+        backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
         readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
         return true;
     }
@@ -325,7 +321,7 @@ bool ClientSession::packet() {
 
 bool ClientSession::decode() {
     while (input_.readableBytes() != 0 && !closing_ && !frontendPaused_ && state_ != State::Authenticating &&
-           state_ != State::kResolving && state_ != State::kConnecting && state_ != State::kBackendLogin) {
+           state_ != State::kBackendLogin) {
         const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
         const auto hint = wire::protocol::packetFraming::inspectFrame(
             input_.readable(), compression_.has_value(),
@@ -361,8 +357,7 @@ bool ClientSession::decode() {
 bool ClientSession::ready(const wire::io::IoReady& event) {
     if (Clock::now() >= deadline())
         return false;
-    const bool waiting = state_ == State::Authenticating || state_ == State::kResolving ||
-                         state_ == State::kConnecting || state_ == State::kBackendLogin;
+    const bool waiting = state_ == State::Authenticating || state_ == State::kBackendLogin;
     if (waiting && event.closed)
         return false;
     if (frontendPaused_ && event.closed)
@@ -443,14 +438,16 @@ bool ClientSession::authenticated(
 bool ClientSession::timedOut(Clock::time_point now) {
     if (now < deadline())
         return true;
-    if (!closing_ && (state_ == State::kResolving || state_ == State::kConnecting) && now >= connectDeadline_ &&
-        now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ && now < backendWriteDeadline_ &&
-        now < backendReadDeadline_)
+    if (!closing_ &&
+        (connectionStage_ == ConnectionStage::kResolving || connectionStage_ == ConnectionStage::kConnecting) &&
+        now >= connectDeadline_ && now < loginDeadline_ && now < readDeadline_ && now < writeDeadline_ &&
+        now < backendDeadline())
         return route();
     return false;
 }
 
-bool ClientSession::route() {
+void ClientSession::cancelConnectionAttempt() {
+    connectionStage_ = ConnectionStage::kIdle;
     attempts_.clear();
     dial_.reset();
     dialAttempt_.reset();
@@ -459,6 +456,10 @@ bool ClientSession::route() {
     if (resolution_)
         resolution_->request_stop();
     resolution_.reset();
+}
+
+bool ClientSession::route() {
+    cancelConnectionAttempt();
     if (Clock::now() >= loginDeadline_)
         return false;
     if (!profile_)
@@ -492,14 +493,16 @@ bool ClientSession::route() {
     resolution_ = resolve_(*attempt, connectDeadline_);
     if (!resolution_)
         return false;
-    state_ = State::kResolving;
+    connectionStage_ = ConnectionStage::kResolving;
+    if (!activeBackend_)
+        state_ = State::kBackendLogin;
     return true;
 }
 
 bool ClientSession::resolved(BackendAttempt attempt, std::vector<wire::io::TcpAddress> addresses,
                              wire::io::ResourceBudget::Reservation storage) {
     // A canceled lookup can finish after the same backend has been selected again.
-    if (state_ != State::kResolving || !attempts_.matches(attempt))
+    if (closing_ || connectionStage_ != ConnectionStage::kResolving || !attempts_.matches(attempt))
         return true;
     if (Clock::now() >= deadline())
         return timedOut(Clock::now());
@@ -517,7 +520,7 @@ bool ClientSession::resolved(BackendAttempt attempt, std::vector<wire::io::TcpAd
     resolutionStorage_ = std::move(storage);
     dialAttempt_ = attempt;
     dial_ = std::make_unique<BackendDial>(std::move(addresses), connectDeadline_);
-    state_ = State::kConnecting;
+    connectionStage_ = ConnectionStage::kConnecting;
     return dial();
 }
 
@@ -531,6 +534,7 @@ bool ClientSession::dial() {
     if (!connected)
         return route();
     dial_.reset();
+    connectionStage_ = ConnectionStage::kIdle;
     resolutionStorage_.reset();
     resolutionLocal_.reset();
     if (!dialAttempt_ || dialAttempt_->target >= backends_.size())
@@ -543,9 +547,11 @@ bool ClientSession::dial() {
         closing_ = true;
         return queue(unavailable_);
     }
-    state_ = State::kBackendLogin;
-    backendWriteDeadline_ =
-        std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    if (!activeBackend_)
+        state_ = State::kBackendLogin;
+    candidateBackend_->boundPreparation(loginDeadline_);
+    candidateBackend_->expectWriteUntil(
+        std::min(loginDeadline_, Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs}));
     return true;
 }
 
@@ -554,7 +560,17 @@ BackendLogin* ClientSession::backend() const {
     return activeBackend_ ? activeBackend_.get() : candidateBackend_.get();
 }
 
+ClientSession::Clock::time_point ClientSession::backendDeadline() const {
+    auto result = Clock::time_point::max();
+    const std::array endpoints{activeBackend_.get(), candidateBackend_.get()};
+    for (const auto* endpoint : endpoints)
+        if (endpoint)
+            result = std::min(result, endpoint->deadline(endpoint == backend() && backendPaused_));
+    return result;
+}
+
 void ClientSession::closeBackends() {
+    cancelConnectionAttempt();
     candidateBackend_.reset();
     activeBackend_.reset();
 }
@@ -591,7 +607,8 @@ void ClientSession::backpressure() {
     else if (backendPaused_ && output_.readableBytes() <= settings_.lowWaterBytes) {
         backendPaused_ = false;
         if (state_ == State::kConfiguration || state_ == State::kPlay)
-            backendReadDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+            if (backend())
+                backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
     }
 }
 

@@ -69,6 +69,8 @@ synthetic tests, retaining the verified frontend UUID. Reconfiguration waits for
 ACK before decoding buffered configuration traffic; repeated cycles have synthetic coverage.
 The latest client settings from configuration or play are retained under session quotas
 and replayed in configuration form after the reconfiguration ACK.
+The login timeout bounds initial setup through the first configuration acknowledgement;
+backend traffic and read suspension do not extend that absolute budget.
 Configuration/play buffers grow
 within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backend login
 packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is

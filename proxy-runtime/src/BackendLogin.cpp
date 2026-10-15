@@ -69,8 +69,27 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()))
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
+    backendConfig_ = &backend;
+    profile_ = &profile;
+    remoteAddress_ = remoteAddress;
     phase_ = Phase::kLogin;
     return {};
+}
+
+BackendLogin::Clock::time_point BackendLogin::deadline(bool readingPaused) const {
+    return std::min({preparationDeadline_, writeDeadline_, readingPaused ? Clock::time_point::max() : readDeadline_});
+}
+
+void BackendLogin::expectWriteUntil(Clock::time_point deadline) {
+    if (hasOutput())
+        writeDeadline_ = std::min(writeDeadline_, deadline);
+}
+
+void BackendLogin::expectReadUntil(Clock::time_point deadline) { readDeadline_ = deadline; }
+
+void BackendLogin::boundPreparation(Clock::time_point deadline) {
+    if (phase_ == Phase::kLogin)
+        preparationDeadline_ = std::min(preparationDeadline_, deadline);
 }
 
 bool BackendLogin::inLogin() const { return phase_ == Phase::kLogin || phase_ == Phase::kLoginAccepted; }
@@ -82,11 +101,23 @@ bool BackendLogin::advance(Phase from, Phase to) {
     return true;
 }
 
-bool BackendLogin::acknowledgeLogin() { return advance(Phase::kLoginAccepted, Phase::kConfiguration); }
+bool BackendLogin::acknowledgeLogin() {
+    if (!advance(Phase::kLoginAccepted, Phase::kConfiguration))
+        return false;
+    backendConfig_ = nullptr;
+    profile_ = nullptr;
+    remoteAddress_ = {};
+    return true;
+}
 
 bool BackendLogin::beginConfiguration() { return advance(Phase::kPlay, Phase::kConfiguration); }
 
-bool BackendLogin::finishConfiguration() { return advance(Phase::kConfiguration, Phase::kPlay); }
+bool BackendLogin::finishConfiguration() {
+    if (!advance(Phase::kConfiguration, Phase::kPlay))
+        return false;
+    preparationDeadline_ = Clock::time_point::max();
+    return true;
+}
 
 std::size_t BackendLogin::allocated() const {
     return cookieKey_.capacity() + input_.capacity() + output_.capacity() + frame_.capacity();
@@ -138,8 +169,10 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
             return std::unexpected(BackendLoginError::kIo);
         if (written)
             output_.skip(*written);
-        if (output_.readableBytes() == 0)
+        if (output_.readableBytes() == 0) {
             output_.clear();
+            writeDeadline_ = Clock::time_point::max();
+        }
     }
     if (hasCookieRequest() && event.closed)
         return std::unexpected(BackendLoginError::kIo);

@@ -87,14 +87,14 @@ private:
         LoginStart,
         Key,
         Authenticating,
-        kResolving,
-        kConnecting,
         kBackendLogin,
         kCookieResponse,
         kLoginAck,
         kConfiguration,
         kPlay
     };
+    enum class ConnectionStage { kIdle, kResolving, kConnecting };
+
     [[nodiscard]] bool decode();
     [[nodiscard]] bool packet();
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
@@ -103,6 +103,8 @@ private:
     [[nodiscard]] bool route();
     [[nodiscard]] bool dial();
     [[nodiscard]] BackendLogin* backend() const;
+    [[nodiscard]] Clock::time_point backendDeadline() const;
+    void cancelConnectionAttempt();
     void closeBackends();
     void backpressure();
     [[nodiscard]] bool bufferedPacket() const;
@@ -133,6 +135,7 @@ private:
     ResolutionStart resolve_;
     std::size_t nextTarget_ = 0;
     BackendAttempts attempts_;
+    ConnectionStage connectionStage_ = ConnectionStage::kIdle;
     std::optional<std::stop_source> resolution_;
     std::optional<wire::io::ResourceBudget::Reservation> resolutionLocal_;
     std::optional<wire::io::ResourceBudget::Reservation> resolutionStorage_;
@@ -141,8 +144,6 @@ private:
     const std::vector<config::BackendConfig>& backends_;
     std::unique_ptr<BackendLogin> activeBackend_;
     std::unique_ptr<BackendLogin> candidateBackend_;
-    Clock::time_point backendWriteDeadline_ = Clock::time_point::max();
-    Clock::time_point backendReadDeadline_ = Clock::time_point::max();
     bool finishingConfiguration_ = false;
     bool startingConfiguration_ = false;
     Clock::time_point connectDeadline_;
