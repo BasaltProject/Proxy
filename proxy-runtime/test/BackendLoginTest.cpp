@@ -459,3 +459,270 @@ TEST_CASE("frontend compression is negotiated before success independently of ba
     CHECK(proxy.runtime.sessionCount() == 0);
     CHECK(proxy.runtime.bufferedBytes() == 0);
 }
+
+TEST_CASE("backend login cookie request is matched to a bounded frontend response") {
+    auto config = settings();
+    config.network.onlineMode = false;
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "cookies", .host = "127.0.0.1", .port = *port}};
+    config.defaultRoute = {"cookies"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    const std::string key = "fixture:cookie";
+    std::vector<std::uint8_t> request{16, 5, 14};
+    request.insert(request.end(), key.begin(), key.end());
+    REQUIRE(backend->write(request));
+    CHECK(receive(client, request.size()) == request);
+    std::vector<std::uint8_t> response;
+    bool rejected = false;
+    SUBCASE("absent payload") {
+        response = {17, 4, 14};
+        response.insert(response.end(), key.begin(), key.end());
+        response.push_back(0);
+    }
+    SUBCASE("maximum payload crosses the bootstrap buffer") {
+        response = {0x93, 0x28, 4, 14};
+        response.insert(response.end(), key.begin(), key.end());
+        response.insert(response.end(), {1, 0x80, 0x28});
+        response.insert(response.end(), 5120, 42);
+    }
+    SUBCASE("unrelated key cannot answer the pending query") {
+        const std::string other = "fixture:other";
+        response = {16, 4, 13};
+        response.insert(response.end(), other.begin(), other.end());
+        response.push_back(0);
+        rejected = true;
+    }
+    REQUIRE(client.write(response));
+    if (rejected)
+        CHECK(receive(client, 0, true).empty());
+    else
+        CHECK(receive(*backend, response.size()) == response);
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("Velocity modern forwarding signs verified identity and requires query before success") {
+    auto config = settings();
+    config.network.onlineMode = false;
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    config.backends = {{.name = "modern",
+                        .host = "127.0.0.1",
+                        .port = *port,
+                        .forwarding = basalt::wire::auth::forwarding::ForwardingMode::Velocity,
+                        .secret = "fixture-secret"}};
+    config.defaultRoute = {"modern"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    REQUIRE(receive(*backend, 42).size() == 42);
+    unsigned requested = 4;
+    bool missing = false;
+    bool duplicate = false;
+    bool malformed = false;
+    bool largeProfile = false;
+    bool excessiveProperties = false;
+    SUBCASE("profile properties larger than bootstrap are relayed") { largeProfile = true; }
+    SUBCASE("excessive profile collection is rejected before allocation") { excessiveProperties = true; }
+    SUBCASE("v4") {}
+    SUBCASE("v1") { requested = 1; }
+    SUBCASE("native clients negotiate v1 when v3 signing keys are requested") { requested = 3; }
+    SUBCASE("success without required forwarding is rejected") { missing = true; }
+    SUBCASE("duplicate forwarding query is rejected") { duplicate = true; }
+    SUBCASE("zero forwarding version is rejected") {
+        malformed = true;
+        requested = 0;
+    }
+    std::vector<std::uint8_t> finished{41,   2,    0xf3, 0xd2, 0x8c, 0xb0, 0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d,
+                                       0xad, 0xd2, 0xbe, 0x89, 0xae, 6,    'T',  'e',  's',  't',  'e',  'r',  0};
+    finished.insert(finished.end(), 15, 0);
+    finished.push_back(1);
+    if (!missing) {
+        const std::string channel = "velocity:player_info";
+        std::vector<std::uint8_t> request{24, 4, 42, 20};
+        request.insert(request.end(), channel.begin(), channel.end());
+        request.push_back(static_cast<std::uint8_t>(requested));
+        REQUIRE(backend->write(request));
+        if (malformed) {
+            CHECK(receive(client, 0, true).empty());
+            proxy.stop();
+            CHECK(proxy.runtime.sessionCount() == 0);
+            CHECK(proxy.runtime.bufferedBytes() == 0);
+            return;
+        }
+        std::vector<std::uint8_t> expected{70, 2, 42, 1};
+        const std::vector<std::uint8_t> tag =
+            requested >= 4 ? std::vector<std::uint8_t>{142, 62,  4,   137, 254, 120, 108, 171, 34,  177, 250,
+                                                       233, 252, 216, 113, 254, 106, 58,  150, 181, 83,  64,
+                                                       213, 80,  37,  87,  7,   11,  36,  27,  86,  70}
+                           : std::vector<std::uint8_t>{54,  0,   252, 43,  139, 165, 238, 43,  253, 5,   4,
+                                                       56,  226, 217, 177, 170, 252, 101, 221, 237, 181, 205,
+                                                       102, 255, 219, 194, 158, 151, 136, 101, 106, 110};
+        expected.insert(expected.end(), tag.begin(), tag.end());
+        expected.insert(expected.end(), {static_cast<std::uint8_t>(requested >= 4 ? 4 : 1), 9});
+        const std::string ip = "127.0.0.1";
+        expected.insert(expected.end(), ip.begin(), ip.end());
+        expected.insert(expected.end(), finished.begin() + 2, finished.begin() + 18);
+        expected.insert(expected.end(), {6, 'T', 'e', 's', 't', 'e', 'r', 0});
+        CHECK(receive(*backend, expected.size()) == expected);
+        if (duplicate) {
+            REQUIRE(backend->write(request));
+            CHECK(receive(client, 0, true).empty());
+            proxy.stop();
+            CHECK(proxy.runtime.sessionCount() == 0);
+            CHECK(proxy.runtime.bufferedBytes() == 0);
+            return;
+        }
+    }
+    if (excessiveProperties)
+        finished[25] = 65;
+    if (largeProfile) {
+        // Independent wire vector: one unsigned textures property with a 2 KiB value.
+        finished.erase(finished.begin(), finished.begin() + 1);
+        finished[24] = 1;
+        finished.insert(finished.begin() + 25, {8, 't', 'e', 'x', 't', 'u', 'r', 'e', 's', 0x80, 0x10});
+        finished.insert(finished.begin() + 36, 2048, 'a');
+        finished.insert(finished.begin() + 2084, 0);
+        const auto size = finished.size();
+        finished.insert(finished.begin(),
+                        {static_cast<std::uint8_t>((size & 127) | 128), static_cast<std::uint8_t>(size >> 7)});
+    }
+    REQUIRE(backend->write(finished));
+    if (missing || excessiveProperties)
+        CHECK(receive(client, 0, true).empty());
+    else
+        CHECK(receive(client, finished.size()) == finished);
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}
+
+TEST_CASE("legacy forwarding handshakes carry the configured identity and token") {
+    using Mode = basalt::wire::auth::forwarding::ForwardingMode;
+    auto mode = Mode::BungeeCord;
+    std::string property;
+    std::string token = "fixture-secret";
+    SUBCASE("BungeeCord") {}
+    SUBCASE("BungeeGuard") {
+        mode = Mode::BungeeGuard;
+        property = "bungeeguard-token";
+    }
+    SUBCASE("SafeNET custom property") {
+        mode = Mode::SafeNet;
+        property = "fixture_token";
+    }
+    SUBCASE("BungeeGuard token exceeds bootstrap capacity") {
+        mode = Mode::BungeeGuard;
+        property = "bungeeguard-token";
+        token.assign(2048, 'x');
+    }
+    auto address = io::TcpAddress::literal("127.0.0.1", 0);
+    REQUIRE(address);
+    auto listener = io::TcpListener::bind(*address);
+    REQUIRE(listener);
+    REQUIRE(listener->setNonBlocking());
+    auto port = listener->localPort();
+    REQUIRE(port);
+    auto config = settings();
+    config.network.onlineMode = false;
+    config.backends = {{.name = "legacy",
+                        .host = "127.0.0.1",
+                        .port = *port,
+                        .forwarding = mode,
+                        .secret = property.empty() ? "" : token,
+                        .propertyName = property.empty() ? "safe_net_passphrase" : property}};
+    config.defaultRoute = {"legacy"};
+    Running proxy{std::move(config)};
+    auto client = proxy.connect();
+    loginStart(client, proxy.runtime.port());
+    io::EventLoop loop;
+    REQUIRE(loop.watch(listener->nativeHandle(), {true, false}, 1));
+    auto events = loop.wait(2000);
+    REQUIRE(events);
+    REQUIRE_FALSE(events->empty());
+    auto backend = listener->accept();
+    REQUIRE(backend);
+    REQUIRE(backend->setNonBlocking());
+    std::string host = "localhost";
+    host.push_back('\0');
+    host += "127.0.0.1";
+    host.push_back('\0');
+    host += "f3d28cb072253cb1baeb2dadd2be89ae";
+    host.push_back('\0');
+    host +=
+        property.empty() ? "[]" : "[{\"name\":\"" + property + "\",\"value\":\"" + token + "\",\"signature\":\"\"}]";
+    const auto appendInteger = [](std::vector<std::uint8_t>& bytes, std::size_t value) {
+        do {
+            auto byte = static_cast<std::uint8_t>(value & 127);
+            value >>= 7;
+            bytes.push_back(static_cast<std::uint8_t>(byte | (value ? 128 : 0)));
+        } while (value);
+    };
+    std::vector<std::uint8_t> body{0, 0x89, 0x06};
+    appendInteger(body, host.size());
+    body.insert(body.end(), host.begin(), host.end());
+    body.insert(body.end(), {static_cast<std::uint8_t>(proxy.runtime.port() >> 8),
+                             static_cast<std::uint8_t>(proxy.runtime.port() & 255), 2});
+    std::vector<std::uint8_t> expected;
+    appendInteger(expected, body.size());
+    expected.insert(expected.end(), body.begin(), body.end());
+    expected.insert(expected.end(), {24,   0,    6,    'T',  'e',  's',  't',  'e',  'r',  0xf3, 0xd2, 0x8c, 0xb0,
+                                     0x72, 0x25, 0x3c, 0xb1, 0xba, 0xeb, 0x2d, 0xad, 0xd2, 0xbe, 0x89, 0xae});
+    CHECK(receive(*backend, expected.size()) == expected);
+    std::vector<std::uint8_t> finished{2};
+    finished.insert(finished.end(), expected.end() - 16, expected.end());
+    finished.insert(finished.end(), {6, 'T', 'e', 's', 't', 'e', 'r', 0});
+    finished.insert(finished.end(), 16, 0);
+    std::vector<std::uint8_t> frontend{41};
+    frontend.insert(frontend.end(), finished.begin(), finished.end());
+    if (!property.empty()) {
+        finished[24] = 1;
+        std::vector<std::uint8_t> entry;
+        appendInteger(entry, property.size());
+        entry.insert(entry.end(), property.begin(), property.end());
+        appendInteger(entry, token.size());
+        entry.insert(entry.end(), token.begin(), token.end());
+        entry.push_back(0);
+        finished.insert(finished.begin() + 25, entry.begin(), entry.end());
+    }
+    std::vector<std::uint8_t> response;
+    appendInteger(response, finished.size());
+    response.insert(response.end(), finished.begin(), finished.end());
+    REQUIRE(backend->write(response));
+    // A backend echo of the credential property must be removed from frontend LoginFinished.
+    CHECK(receive(client, frontend.size()) == frontend);
+    proxy.stop();
+    CHECK(proxy.runtime.sessionCount() == 0);
+    CHECK(proxy.runtime.bufferedBytes() == 0);
+}

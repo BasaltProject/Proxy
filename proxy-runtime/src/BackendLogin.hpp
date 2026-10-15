@@ -26,14 +26,17 @@ class BackendLogin {
 public:
     static constexpr std::size_t kCapacity = 1024;
     static constexpr std::size_t kBytes = 3 * kCapacity;
+    static constexpr std::size_t kLoginPacketLimit = 64 * 1024;
     BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory);
     [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
                                                                const wire::auth::SessionProfile& profile,
-                                                               std::string_view virtualHost, std::uint16_t virtualPort);
+                                                               std::string_view virtualHost, std::uint16_t virtualPort,
+                                                               std::string_view remoteAddress);
     /// Returned packet view expires on the next call. No frontend framing/cipher state is shared.
     [[nodiscard]] std::expected<std::span<const std::uint8_t>, BackendLoginError> ready(const wire::io::IoReady& event,
                                                                                         bool read = true);
-    [[nodiscard]] std::expected<void, BackendLoginError> queue(std::span<const std::uint8_t> packet);
+    [[nodiscard]] std::expected<void, BackendLoginError> queue(std::span<const std::uint8_t> packet,
+                                                               std::size_t loginLimit = kCapacity);
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 

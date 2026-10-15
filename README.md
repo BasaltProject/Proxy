@@ -41,13 +41,21 @@ login performs the RSA/AES exchange and bounded Mojang session lookup on workers
 Offline mode is explicit. Accepted identities select their configured route,
 resolve destinations on bounded workers and establish a nonblocking TCP connection,
 trying the next destination after DNS or connection failure. For native 26.3 backends
-with forwarding set to `none`, it sends the login handshake and identity and relays
+with explicit `none`, `velocity`, `bungeecord`, `bungeeguard` or `safenet` forwarding,
+it sends the login handshake and identity and relays
 login disconnects, decoding backend compression independently of frontend framing.
+Velocity modern queries receive signed v1/v4 identity responses; missing or duplicate forwarding
+queries are rejected. This path has synthetic coverage, not a verified Paper interoperability gate.
+Legacy handshakes carry the verified UUID/IP and configured token, with a bounded 32,767-byte
+host. Credential properties echoed by a backend are removed before frontend login success.
+These handshakes require a private backend link; legacy forwarding does not encrypt credentials.
 Unknown login queries receive a matching negative response using backend compression.
+Login cookie requests are relayed to the client; matching responses are bounded to 5,120 bytes.
 Native LoginFinished/ACK and configuration/play transitions relay small packets in
 synthetic tests, retaining the verified frontend UUID. Configuration/play buffers grow
-within session/global quotas; bidirectional 512 KiB payload fixtures pass. Login keeps
-bootstrap limits. Frontend compression is negotiated before login success and remains
+within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backend login
+packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is
+negotiated before login success and remains
 independent of backend compression. Directional high/low watermarks pause producers
 while the receiving endpoint drains. Real registry/chunk traffic remains unvalidated.
 
@@ -129,7 +137,7 @@ ctest --preset debug
 | Initial login crypto and session verification | Implemented; simulated-endpoint tests |
 | Native backend login, configuration and play relay | Large-payload fixtures pass; real game traffic pending |
 | Backend connections and server switching | TCP connection implemented; switching pending |
-| Player forwarding to the backend | Not started |
+| Player forwarding to the backend | Initial Velocity modern v1/v4 and legacy/token modes; real backend validation pending |
 | Configuration files | Generated, loaded and validated at startup |
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |

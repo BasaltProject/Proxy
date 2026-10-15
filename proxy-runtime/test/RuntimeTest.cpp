@@ -474,7 +474,7 @@ TEST_CASE("backend login rejects oversized frames and malformed disconnects with
     REQUIRE(backend->setNonBlocking());
     REQUIRE(receive(*backend, 42).size() == 42);
     std::vector<std::uint8_t> invalid;
-    SUBCASE("declared body exceeds bootstrap quota before any body arrives") { invalid = {0xff, 0x7f}; }
+    SUBCASE("declared body exceeds login quota before any body arrives") { invalid = {0xff, 0xff, 0x07}; }
     SUBCASE("invalid JSON cannot become a disconnect component") { invalid = {3, 0, 1, '{'}; }
     SUBCASE("a disconnect cannot hide another field") { invalid = {5, 0, 2, '{', '}', 1}; }
     REQUIRE(backend->write(invalid));
