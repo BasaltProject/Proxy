@@ -8,9 +8,6 @@
 
 namespace basalt::proxy::runtime::test {
 
-/// Real loopback backend with an OS-assigned port. Tests control every byte and
-/// can stall, fragment responses or disconnect; no Minecraft service or shared
-/// protocol encoder is needed.
 class BackendFixture {
 public:
     [[nodiscard]] static std::expected<BackendFixture, wire::io::SocketError> listen() {

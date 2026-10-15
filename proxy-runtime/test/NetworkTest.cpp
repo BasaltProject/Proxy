@@ -13,8 +13,7 @@
 using namespace basalt;
 using proxy::runtime::test::BackendFixture;
 
-TEST_CASE("a controlled backend delivers a fragmented independent protocol 777 "
-          "handshake") {
+TEST_CASE("a controlled backend delivers a fragmented independent protocol 777 handshake") {
     auto backend = BackendFixture::listen();
     REQUIRE(backend);
     wire::io::EventLoop loop;
@@ -30,8 +29,7 @@ TEST_CASE("a controlled backend delivers a fragmented independent protocol 777 "
     REQUIRE(loop.watch(peer->nativeHandle(), {true, false}, 2));
     loop.unwatch(backend->handle());
 
-    // Synthetic bytes independent of Wire's writer: length, id, protocol 777,
-    // host, port, status.
+    // Independent vector: length, id, protocol 777, host, port, status.
     const std::array<std::uint8_t, 17> handshake = {16,  0,   0x89, 0x06, 9,   'l',  'o',  'c', 'a',
                                                     'l', 'h', 'o',  's',  't', 0x63, 0xDD, 1};
     REQUIRE(client->write(std::span{handshake}.first(2)));

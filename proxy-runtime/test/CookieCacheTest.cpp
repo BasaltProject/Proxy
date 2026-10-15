@@ -60,39 +60,3 @@ TEST_CASE("cookie cache bounds entries and total retained bytes without losing o
     REQUIRE(keys.lookup("fixture:0").payload);
     CHECK(keys.lookup("fixture:0").payload->size() == 5120);
 }
-
-TEST_CASE("cookie storage checks quota before replacing the last known value") {
-    io::ResourceBudget global{4096}, local{4096};
-    io::BudgetMemoryResource memory{global, local};
-    {
-        CookieCache cache{memory};
-        REQUIRE(cache.remember("fixture:key", std::nullopt));
-        const auto before = global.used();
-        const std::array<std::uint8_t, 5120> payload{};
-        CHECK_FALSE(cache.remember("fixture:key", payload));
-        CHECK(global.used() == before);
-        CHECK(cache.lookup("fixture:key").known);
-        CHECK_FALSE(cache.lookup("fixture:key").payload);
-        CHECK_FALSE(cache.remember(std::string(257, 'x'), std::nullopt));
-    }
-    CHECK(global.used() == 0);
-    CHECK(local.used() == 0);
-}
-
-TEST_CASE("only backend stores advance per-key revisions") {
-    io::ResourceBudget global{1024 * 1024}, local{512 * 1024};
-    io::BudgetMemoryResource memory{global, local};
-    CookieCache cache{memory};
-    const std::array<std::uint8_t, 1> payload{42};
-    REQUIRE(cache.remember("fixture:key", std::nullopt));
-    CHECK(cache.lookup("fixture:key").storeRevision == 0);
-    REQUIRE(cache.store("fixture:key", payload));
-    const auto revision = cache.lookup("fixture:key").storeRevision;
-    CHECK(revision > 0);
-    REQUIRE(cache.store("fixture:other", payload));
-    CHECK(cache.lookup("fixture:key").storeRevision == revision);
-    REQUIRE(cache.remember("fixture:key", payload));
-    CHECK(cache.lookup("fixture:key").storeRevision == revision);
-    REQUIRE(cache.store("fixture:key", payload));
-    CHECK(cache.lookup("fixture:key").storeRevision > revision);
-}

@@ -7,10 +7,7 @@
 
 namespace basalt::proxy::runtime::buildInfo {
 
-/// What this build is, for the banner and `--version`.
-///
-/// The version comes from the build (`BASALT_VERSION`, which also names the binary), so a release
-/// and what it says about itself cannot drift apart.
+/// The version comes from the build (`BASALT_VERSION`), so a release and its banner cannot drift apart.
 
 #ifndef BASALT_VERSION
 #define BASALT_VERSION "0.0.0-dev"
