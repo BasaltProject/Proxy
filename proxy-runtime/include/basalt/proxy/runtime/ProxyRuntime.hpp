@@ -1,11 +1,18 @@
 #pragma once
 
+#include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/io/DnsResolver.hpp>
+#include <basalt/wire/io/TcpSocket.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <stop_token>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace basalt::proxy::config {
 struct ProxyConfig;
@@ -13,9 +20,17 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
+struct RuntimeServices {
+    wire::auth::AuthenticationFetch authentication;
+    std::function<std::expected<std::vector<wire::io::TcpAddress>, wire::io::DnsError>(std::string_view, std::uint16_t,
+                                                                                       const wire::io::DnsOptions&)>
+        resolution = {};
+};
+
 class ProxyRuntime {
 public:
-    [[nodiscard]] static std::expected<ProxyRuntime, std::string> create(config::ProxyConfig config);
+    [[nodiscard]] static std::expected<ProxyRuntime, std::string> create(config::ProxyConfig config,
+                                                                         RuntimeServices services = {});
     ProxyRuntime(ProxyRuntime&&) noexcept;
     ProxyRuntime& operator=(ProxyRuntime&&) noexcept;
     ~ProxyRuntime();

@@ -36,7 +36,12 @@ Existing files are preserved; invalid configuration reports its file and exits
 with code 1. The listener handles handshake, local status and ping/pong on bounded
 nonblocking I/O owners. Admission limits apply globally and per origin; incomplete
 handshakes expire. SIGINT/SIGTERM stop the runtime and release sessions. Player
-login is explicitly rejected until authentication and backend routing are integrated.
+login performs the RSA/AES exchange and bounded Mojang session lookup on workers.
+Offline mode is explicit. Accepted identities select their configured route,
+resolve destinations on bounded workers and establish a nonblocking TCP connection,
+trying the next destination after DNS or connection failure. For native 26.3 backends
+with forwarding set to `none`, it sends the login handshake and identity and relays
+login disconnects. Successful login, compression, configuration and play remain pending.
 
 ## Product goals
 
@@ -113,7 +118,8 @@ ctest --preset debug
 | Command line: `--help`, `--version`, `--config` | Working |
 | Network layer, shared with the server | Inherited from Wire |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
-| Authentication and player routing | Not started |
+| Initial login crypto and session verification | Implemented; simulated-endpoint tests |
+| Backend login and player routing | Not started |
 | Backend connections and server switching | Not started |
 | Player forwarding to the backend | Not started |
 | Configuration files | Generated, loaded and validated at startup |

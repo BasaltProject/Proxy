@@ -1,13 +1,16 @@
+#include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/Admission.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/wire/auth/SessionKeyPair.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TaskQueue.hpp>
 #include <basalt/wire/io/TimerQueue.hpp>
+#include <basalt/wire/io/WorkerPool.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
@@ -35,6 +38,16 @@ struct Incoming {
     wire::io::TcpConnection connection;
     Clock::time_point acceptedAt;
 };
+
+struct AuthenticationReply {
+    ResourceBudget::Reservation storage;
+    std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result;
+};
+
+struct ResolutionReply {
+    ResourceBudget::Reservation storage;
+    std::vector<wire::io::TcpAddress> addresses;
+};
 } // namespace
 
 struct ProxyRuntime::Impl {
@@ -58,6 +71,7 @@ struct ProxyRuntime::Impl {
             if (found == sessions.end())
                 return;
             loop.unwatch(found->second->handle());
+            loop.unwatch(found->second->backendHandle());
             (void)timers.cancel(found->second->timer);
             sessions.erase(found);
         }
@@ -68,14 +82,21 @@ struct ProxyRuntime::Impl {
                 Clock::now() >=
                     incoming->acceptedAt + std::chrono::milliseconds{runtime.config.runtime.handshakeTimeoutMs})
                 return;
-            auto session = std::make_unique<Session>(std::move(incoming->connection), std::move(incoming->slot),
-                                                     std::move(incoming->buffers), runtime.config.runtime,
-                                                     runtime.status, runtime.unavailable, incoming->acceptedAt);
-            if (!session->accounted())
-                return;
             const auto id = runtime.nextId.fetch_add(1);
             if (id == 0)
                 throw std::runtime_error("session identity exhausted");
+            auto session = std::make_unique<Session>(
+                std::move(incoming->connection), std::move(incoming->slot), std::move(incoming->buffers),
+                runtime.config.runtime, runtime.status, runtime.unavailable, incoming->acceptedAt,
+                runtime.config.network.onlineMode, runtime.config.network.preventClientProxyConnections,
+                runtime.key ? runtime.key->publicKeyDer() : std::span<const std::uint8_t>{},
+                runtime.authenticationFailure,
+                [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
+                runtime.routes,
+                [this, id](std::size_t target, Clock::time_point deadline) { return resolve(id, target, deadline); },
+                runtime.config.backends);
+            if (!session->accounted())
+                return;
             auto timer = timers.schedule(session->deadline(), id);
             if (!timer)
                 return;
@@ -86,6 +107,98 @@ struct ProxyRuntime::Impl {
                 return;
             }
             sessions.emplace(id, std::move(session));
+        }
+
+        void publishAuthentication(std::uint64_t id, std::shared_ptr<AuthenticationReply> reply) {
+            auto permit = runtime.handoffs.acquire(1);
+            if (!permit)
+                return;
+            auto ticket = std::make_shared<ResourceBudget::Reservation>(std::move(*permit));
+            auto posted = mailbox.push([this, id, reply, ticket] {
+                ticket->reset();
+                const auto found = sessions.find(id);
+                if (found == sessions.end())
+                    return;
+                auto& session = *found->second;
+                if (!session.authenticated(std::move(reply->result), std::move(reply->storage)) ||
+                    !refresh(id, session))
+                    close(id);
+            });
+            if (posted)
+                (void)loop.wake();
+        }
+
+        std::optional<std::stop_source> authenticate(std::uint64_t id, wire::auth::OnlineLoginRequest request) {
+            if (!runtime.key || !runtime.workers)
+                return std::nullopt;
+            auto storage = runtime.buffers.acquire(Session::kAuthenticationBytes);
+            if (!storage)
+                return std::nullopt;
+            using Error = wire::auth::LoginAuthenticationError;
+            auto reply = std::make_shared<AuthenticationReply>(AuthenticationReply{
+                std::move(*storage), std::unexpected(wire::auth::LoginAuthenticationFailure{Error::Unavailable, {}})});
+            auto submitted = runtime.workers->submit(
+                [this, id, request = std::move(request), reply](std::stop_token stop) {
+                    reply->result =
+                        wire::auth::authenticateLogin(*runtime.key, request, stop, runtime.services.authentication);
+                    publishAuthentication(id, reply);
+                },
+                [this, id, reply](std::exception_ptr) { publishAuthentication(id, reply); },
+                [this, id, reply] {
+                    reply->result = std::unexpected(wire::auth::LoginAuthenticationFailure{Error::Canceled, {}});
+                    publishAuthentication(id, reply);
+                });
+            if (!submitted)
+                return std::nullopt;
+            return *submitted;
+        }
+
+        bool refresh(std::uint64_t id, Session& session) {
+            return timers.reschedule(session.timer, session.deadline()) &&
+                   loop.watch(session.handle(), session.interest(), id) &&
+                   (session.backendHandle() < 0 || loop.watch(session.backendHandle(), session.backendInterest(), id));
+        }
+
+        void publishResolution(std::uint64_t id, std::size_t target, std::shared_ptr<ResolutionReply> reply) {
+            auto permit = runtime.handoffs.acquire(1);
+            if (!permit)
+                return;
+            auto ticket = std::make_shared<ResourceBudget::Reservation>(std::move(*permit));
+            if (mailbox.push([this, id, target, reply, ticket] {
+                    ticket->reset();
+                    const auto found = sessions.find(id);
+                    if (found == sessions.end())
+                        return;
+                    auto& session = *found->second;
+                    if (!session.resolved(target, std::move(reply->addresses), std::move(reply->storage)) ||
+                        !refresh(id, session))
+                        close(id);
+                }))
+                (void)loop.wake();
+        }
+
+        std::optional<std::stop_source> resolve(std::uint64_t id, std::size_t target, Clock::time_point deadline) {
+            if (!runtime.workers || target >= runtime.config.backends.size())
+                return std::nullopt;
+            auto storage = runtime.buffers.acquire(Session::kResolutionBytes);
+            if (!storage)
+                return std::nullopt;
+            auto reply = std::make_shared<ResolutionReply>(ResolutionReply{std::move(*storage), {}});
+            auto submitted = runtime.workers->submit(
+                [this, id, target, deadline, reply](std::stop_token stop) {
+                    const auto& backend = runtime.config.backends[target];
+                    const wire::io::DnsOptions options{deadline, stop, {}};
+                    auto addresses = runtime.services.resolution
+                                         ? runtime.services.resolution(backend.host, backend.port, options)
+                                         : wire::io::resolveDns(backend.host, backend.port, options);
+                    if (addresses && addresses->size() <= 32 &&
+                        addresses->capacity() <= reply->storage.size() / sizeof(wire::io::TcpAddress))
+                        reply->addresses = std::move(*addresses);
+                    publishResolution(id, target, reply);
+                },
+                [this, id, target, reply](std::exception_ptr) { publishResolution(id, target, reply); },
+                [this, id, target, reply] { publishResolution(id, target, reply); });
+            return submitted ? std::optional{*submitted} : std::nullopt;
         }
 
         void accept() {
@@ -142,8 +255,16 @@ struct ProxyRuntime::Impl {
                         if (found == sessions.end())
                             continue;
                         auto& session = *found->second;
-                        if (!session.ready(event) || !timers.reschedule(session.timer, session.deadline()) ||
-                            !loop.watch(session.handle(), session.interest(), event.token))
+                        bool healthy = false;
+                        if (event.handle == session.handle()) {
+                            healthy = session.ready(event);
+                        } else if (event.handle == session.backendHandle()) {
+                            loop.unwatch(event.handle);
+                            healthy = session.backendReady(event);
+                        } else {
+                            continue;
+                        }
+                        if (!healthy || !refresh(event.token, session))
                             close(event.token);
                     }
                 }
@@ -162,6 +283,7 @@ struct ProxyRuntime::Impl {
     };
 
     config::ProxyConfig config;
+    detail::BackendRoutes routes;
     Admission admission;
     ResourceBudget slots;
     ResourceBudget buffers;
@@ -171,6 +293,10 @@ struct ProxyRuntime::Impl {
     std::uint16_t port = 0;
     std::vector<std::uint8_t> status;
     std::vector<std::uint8_t> unavailable;
+    std::vector<std::uint8_t> authenticationFailure;
+    RuntimeServices services;
+    std::optional<wire::auth::SessionKeyPair> key;
+    std::optional<wire::io::WorkerPool> workers;
     std::vector<std::unique_ptr<Owner>> owners;
     std::vector<std::jthread> threads;
     std::atomic<bool> stopped{false};
@@ -185,6 +311,8 @@ struct ProxyRuntime::Impl {
 
     void stop() {
         stopped.store(true);
+        if (workers)
+            workers->requestStop();
         for (const auto& owner : owners)
             (void)owner->loop.wake();
     }
@@ -192,6 +320,8 @@ struct ProxyRuntime::Impl {
     ~Impl() {
         stop();
         threads.clear();
+        if (workers)
+            workers->join();
     }
 };
 
@@ -202,13 +332,14 @@ ProxyRuntime& ProxyRuntime::operator=(ProxyRuntime&&) noexcept = default;
 
 ProxyRuntime::~ProxyRuntime() = default;
 
-std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfig config) {
+std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfig config, RuntimeServices services) {
     const auto& limits = config.runtime;
     if (limits.ioLoops == 0 || limits.ioLoops > 64 || limits.maxSessions == 0 || limits.maxSessions > 65536 ||
         limits.maxPendingWork == 0 || limits.maxPendingWork > 65536 ||
         limits.sessionBufferBytes < Session::kBufferBytes || limits.maxBufferedBytes < Session::kBufferBytes ||
-        limits.handshakeTimeoutMs == 0 || limits.readTimeoutMs == 0 || limits.writeTimeoutMs == 0 ||
-        limits.lowWaterBytes >= limits.highWaterBytes || limits.highWaterBytes >= limits.sessionBufferBytes)
+        limits.handshakeTimeoutMs == 0 || limits.loginTimeoutMs == 0 || limits.connectTimeoutMs == 0 ||
+        limits.readTimeoutMs == 0 || limits.writeTimeoutMs == 0 || limits.lowWaterBytes >= limits.highWaterBytes ||
+        limits.highWaterBytes >= limits.sessionBufferBytes)
         return std::unexpected("invalid runtime resource limits");
     auto address = wire::io::TcpAddress::literal(config.network.bind, config.network.port);
     if (!address)
@@ -217,6 +348,20 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         return std::unexpected("dual-stack requires an IPv6 listener");
     try {
         auto impl = std::make_unique<Impl>(std::move(config));
+        auto routes = detail::BackendRoutes::create(impl->config);
+        if (!routes)
+            return std::unexpected(routes.error());
+        impl->routes = std::move(*routes);
+        impl->services = std::move(services);
+        if (impl->config.network.onlineMode) {
+            impl->key = wire::auth::SessionKeyPair::generate();
+            if (!impl->key)
+                return std::unexpected("could not generate the login key");
+        }
+        auto workers = wire::io::WorkerPool::create(impl->config.runtime.workers, impl->config.runtime.maxPendingWork);
+        if (!workers)
+            return std::unexpected("could not start bounded runtime workers");
+        impl->workers = std::move(*workers);
         namespace protocol = wire::protocol;
         wire::io::ByteBuffer packet{1024}, frame{1024};
         protocol::status::ServerStatusPayload status{
@@ -241,9 +386,18 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         if (!protocol::packetFraming::writeUncompressed(frame, packet.readable()))
             return std::unexpected("login rejection encoding failed");
         impl->unavailable = frame.toVector();
+        packet.clear();
+        frame.clear();
+        protocol::varInt::write(packet, protocol::login::LoginDisconnectPacket::kId);
+        protocol::login::LoginDisconnectPacket{wire::text::Component::text("Login could not be completed.")}.write(
+            packet);
+        if (!protocol::packetFraming::writeUncompressed(frame, packet.readable()))
+            return std::unexpected("authentication rejection encoding failed");
+        impl->authenticationFailure = frame.toVector();
         if (impl->status.size() + 10 > Session::kBufferCapacity || impl->unavailable.size() > Session::kBufferCapacity)
             return std::unexpected("bootstrap responses exceed buffer limits");
-        impl->bootstrapBuffers = impl->buffers.acquire(impl->status.capacity() + impl->unavailable.capacity());
+        impl->bootstrapBuffers = impl->buffers.acquire(impl->status.capacity() + impl->unavailable.capacity() +
+                                                       impl->authenticationFailure.capacity());
         if (!impl->bootstrapBuffers || impl->buffers.limit() - impl->buffers.used() < Session::kBufferBytes)
             return std::unexpected("global buffer budget cannot admit a bootstrap session");
         impl->owners.reserve(impl->config.runtime.ioLoops);
@@ -276,8 +430,11 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
         impl_->stop();
     }
     impl_->threads.clear();
+    if (impl_->workers)
+        impl_->workers->join();
     std::vector<std::uint8_t>{}.swap(impl_->status);
     std::vector<std::uint8_t>{}.swap(impl_->unavailable);
+    std::vector<std::uint8_t>{}.swap(impl_->authenticationFailure);
     impl_->bootstrapBuffers.reset();
     if (impl_->failed.load())
         return std::unexpected("runtime stopped after an owner failure");
