@@ -14,7 +14,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-24.04
+            target: Linux-x64
+          - os: ubuntu-24.04-arm
+            target: Linux-arm64
+          - os: macos-15-intel
+            target: macOS-x64
+          - os: macos-15
+            target: macOS-arm64
+          - os: windows-2025
+            target: Windows-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,10 +37,10 @@ jobs:
       - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: ${{ matrix.os }}
+          key: ${{ matrix.target }}
 
       - name: Configure
-        run: cmake --preset release
+        run: cmake --preset release -DBASALT_VERSION=26.3.${{ github.run_number }}
 
       - name: Build
         # The run number is the build half of the version: 26.3.<build>.
@@ -42,7 +52,7 @@ jobs:
       - name: Upload the binary
         uses: actions/upload-artifact@v4
         with:
-          name: basalt-proxy-${{ matrix.os }}
+          name: basalt-proxy-${{ matrix.target }}
           path: build/release/bin/
 
   sanitize:
@@ -62,6 +72,20 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build/asan --output-on-failure
+
+  thread-sanitize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: lukka/get-cmake@latest
+      - name: Configure with the thread sanitizer
+        run: cmake --preset tsan
+      - name: Build
+        run: cmake --build build/tsan
+      - name: Test
+        run: ctest --test-dir build/tsan --output-on-failure
 
   format:
     runs-on: ubuntu-latest

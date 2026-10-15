@@ -5,7 +5,7 @@
 <h2 align="center">Basalt Proxy</h2>
 
 <p align="center">
-  <strong>A Minecraft proxy written from scratch in C++23. No JVM.</strong>
+  <strong>A Minecraft proxy written from scratch in C++23. No external JVM.</strong>
 </p>
 
 <p align="center">
@@ -24,99 +24,26 @@
 
 ## Overview
 
-Basalt Proxy sits in front of a set of Minecraft servers and gives players one
-address to connect to, moving them between backends without a reconnect.
+Basalt Proxy is a Minecraft proxy project written in **C++23**, distributed as a
+native binary and sharing [Wire](https://github.com/BasaltProject/Wire) with
+[Basalt Server](https://github.com/BasaltProject/Server).
 
-It is written entirely in **C++23** and ships as a native binary per
-platform. There is no JVM anywhere in the runtime: no bundled JRE, no embedded
-VM, no hidden Java process.
+The current executable provides `--help`, `--version` and `--config`. It prints
+its startup banner and exits. The config argument selects a directory; this
+build does not create or read configuration files or accept player connections.
 
-It is the proxy component of the **Basalt** project, and it shares its entire
-network layer with [Basalt Server](https://github.com/BasaltProject/Server)
-through [Wire](https://github.com/BasaltProject/Wire). One implementation of the
-protocol, used by both sides.
+## Product goals
 
-| | |
-|---|---|
-| Language | C++23, 100 %. No Java, no JVM at runtime |
-| Target version | Minecraft 26.3 (protocol 777) |
-| Distribution | Native binaries per platform |
-| Backends | Any Minecraft server, Basalt or not |
-| Plugin API | Lua, `.bppkg` packages. Velocity and BungeeCord plugins optionally, see below |
-| Message model | Adventure-style immutable components; no legacy `§` formatting |
-| License | GPL-3.0 |
+The intended proxy will route players between Minecraft backends, including
+servers other than Basalt, and support Java and Bedrock through Wire. Version
+translation will be configurable and delegated to a capable Basalt backend when
+negotiated. Routing, forwarding, translation and plugins are under development.
 
-## It is not only for Basalt Server
-
-A proxy that only works with its own server is a proxy nobody can adopt. Basalt
-Proxy speaks the standard protocol to whatever is behind it, so vanilla, Paper,
-Spigot, Fabric and anything else that accepts a Minecraft connection all work.
-
-Basalt Server behind it is the better case, not the required one:
-
-| Backend | What you get |
-|---|---|
-| Any Minecraft server | Routing, one address, moving players between backends, plugins, the whole proxy |
-| Basalt Server | The above, plus work the two can hand to each other rather than each doing it alone |
-
-## Where translation happens
-
-Older Java clients and Bedrock clients are both supported by translating at the
-edge, and both the proxy and the server carry that machinery. That is deliberate,
-not duplicated effort: **the same translation can be done in either place, and
-which one should do it depends on what is behind the proxy.**
-
-The proxy is always the one that opens the port and accepts the connection. It is
-also the process with the most connections open at once, so translating every one
-of them there is the most expensive place to do it.
-
-So the default is to push that work down when it can be pushed:
-
-| Situation | Who translates | Why |
-|---|---|---|
-| Backend is Basalt Server | The server | The proxy is the connection-heavy process. The two speak to each other well enough to hand the work over |
-| Backend is anything else | The proxy | A vanilla or Paper backend only understands its own version, so the proxy has to do it |
-
-Both halves are configurable. An operator who wants every connection translated
-at the proxy, or who wants it never translated at all, says so in the
-configuration and the proxy does that instead. The table above is the default,
-not a constraint.
-
-## Plugins
-
-### Basalt plugins
-
-The proxy has its own plugin API. Plugins are written in Lua and packaged as
-`.bppkg` files, the same shape as the server's `.bspkg`, and run in a sandbox
-with a per-tick instruction budget, so a broken plugin cannot take the proxy
-down.
-
-It is a separate format from the server's on purpose: a proxy plugin and a server
-plugin see different things, and pretending one API covers both would make the
-worse version of each.
-
-### Velocity and BungeeCord plugins
-
-The existing ecosystem is worth a great deal, and most of it is Velocity and
-BungeeCord plugins that will never be rewritten. Basalt Proxy can run them, and
-doing so is **opt-in**:
-
-- The proxy itself never requires a JVM. Its core, its network layer and its own
-  plugins are native, and a proxy started without this feature never looks for
-  Java.
-- Enabling it means the operator supplies a JVM and accepts what that costs:
-  memory and startup time far above what the native proxy uses on its own.
-- It is a trade the operator makes deliberately, in the configuration, in
-  exchange for the plugins they already depend on.
-
-## Configuration
-
-Configuration lives in a `config/` directory, one TOML file per domain, generated
-with comments and sensible defaults on first start.
-
-Anything that changes how the proxy behaves by default, including who performs
-version translation, is an explicit setting rather than something inferred and
-left unexplained.
+Native plugins will use Lua and `.bppkg` packages, following the server's API
+conventions for shared concepts. Future Velocity and BungeeCord adapters will
+belong to Proxy, after [Shim](https://github.com/BasaltProject/Shim) is complete.
+Shim provides Java bytecode execution through a JVM implemented in C++; the
+adapters provide the plugin APIs. No external JVM installation is required.
 
 ## Building
 
@@ -186,7 +113,7 @@ ctest --preset debug
 | Translation handover to a Basalt Server backend | Not started |
 | Older Java clients and Bedrock clients | Not started |
 | Plugins and the Lua runtime | Not started |
-| Velocity and BungeeCord plugin support | Not started |
+| Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
 What that adds up to today: a binary that parses its command line and exits.
 Everything below that line is still missing.
