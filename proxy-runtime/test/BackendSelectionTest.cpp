@@ -1,4 +1,5 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "../src/BackendAttempts.hpp"
 #include "../src/BackendDial.hpp"
 #include "../src/BackendRoutes.hpp"
 
@@ -102,4 +103,29 @@ TEST_CASE("backend dial honors deadline/cancellation before creating or retainin
     CHECK(canceled.handle() == -1);
     BackendDial empty{{}, BackendDial::Clock::now() + 1s};
     CHECK_FALSE(empty.advance());
+}
+
+TEST_CASE("revisiting a backend never accepts callbacks from an earlier attempt") {
+    BackendAttempts attempts;
+    const auto firstA = attempts.begin(7);
+    REQUIRE(firstA);
+    CHECK(attempts.matches(*firstA));
+    const auto b = attempts.begin(9);
+    REQUIRE(b);
+    CHECK_FALSE(attempts.matches(*firstA));
+    CHECK(attempts.matches(*b));
+    const auto secondA = attempts.begin(7);
+    REQUIRE(secondA);
+    CHECK(firstA->target == secondA->target);
+    CHECK(firstA->generation != secondA->generation);
+    CHECK_FALSE(attempts.matches(*firstA));
+    CHECK_FALSE(attempts.matches(*b));
+    CHECK_FALSE(attempts.matches({secondA->generation, b->target}));
+    CHECK(attempts.matches(*secondA));
+    attempts.clear();
+    CHECK_FALSE(attempts.matches(*secondA));
+    const auto thirdA = attempts.begin(7);
+    REQUIRE(thirdA);
+    CHECK_FALSE(attempts.matches(*secondA));
+    CHECK(attempts.matches(*thirdA));
 }

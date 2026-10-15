@@ -57,12 +57,17 @@ Unknown login queries receive a matching negative response using backend compres
 Login cookie requests are relayed to the client; matching responses are bounded to 5,120 bytes.
 Configuration/play cookie requests, responses and stores are validated before relay, with up to
 32 pending requests and 256-byte keys. Unsolicited or mismatched responses close the session.
+A session-local cookie cache retains up to 32 entries and 64 KiB of encoded content under
+buffer quotas. Known login cookie queries are answered from it; an older client response
+cannot overwrite a newer backend Store. Unknown, absent and empty cookies remain distinct.
 Incoming transfer handshakes require `network.accept-transfers = true` and still authenticate
 normally. Backend transfers validate the destination and drain before closing the old connection;
 they reconnect the client and do not perform an internal backend switch.
 Native LoginFinished/ACK and configuration/play transitions relay small packets in
 synthetic tests, retaining the verified frontend UUID. Reconfiguration waits for the client
 ACK before decoding buffered configuration traffic; repeated cycles have synthetic coverage.
+The latest client settings from configuration or play are retained under session quotas
+and replayed in configuration form after the reconfiguration ACK.
 Configuration/play buffers grow
 within session/global quotas; bidirectional 512 KiB payload fixtures pass. Backend login
 packets are bounded to 64 KiB and profiles to 64 properties. Frontend compression is

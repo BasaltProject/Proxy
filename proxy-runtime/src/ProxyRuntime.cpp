@@ -93,7 +93,9 @@ struct ProxyRuntime::Impl {
                 runtime.authenticationFailure,
                 [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
                 runtime.routes,
-                [this, id](std::size_t target, Clock::time_point deadline) { return resolve(id, target, deadline); },
+                [this, id](detail::BackendAttempt attempt, Clock::time_point deadline) {
+                    return resolve(id, attempt, deadline);
+                },
                 runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold,
                 runtime.config.network.acceptTransfers, runtime.identities);
             if (!session->accounted())
@@ -167,34 +169,36 @@ struct ProxyRuntime::Impl {
             return timers.reschedule(session.timer, session.deadline());
         }
 
-        void publishResolution(std::uint64_t id, std::size_t target, std::shared_ptr<ResolutionReply> reply) {
+        void publishResolution(std::uint64_t id, detail::BackendAttempt attempt,
+                               std::shared_ptr<ResolutionReply> reply) {
             auto permit = runtime.handoffs.acquire(1);
             if (!permit)
                 return;
             auto ticket = std::make_shared<ResourceBudget::Reservation>(std::move(*permit));
-            if (mailbox.push([this, id, target, reply, ticket] {
+            if (mailbox.push([this, id, attempt, reply, ticket] {
                     ticket->reset();
                     const auto found = sessions.find(id);
                     if (found == sessions.end())
                         return;
                     auto& session = *found->second;
-                    if (!session.resolved(target, std::move(reply->addresses), std::move(reply->storage)) ||
+                    if (!session.resolved(attempt, std::move(reply->addresses), std::move(reply->storage)) ||
                         !refresh(id, session))
                         close(id);
                 }))
                 (void)loop.wake();
         }
 
-        std::optional<std::stop_source> resolve(std::uint64_t id, std::size_t target, Clock::time_point deadline) {
-            if (!runtime.workers || target >= runtime.config.backends.size())
+        std::optional<std::stop_source> resolve(std::uint64_t id, detail::BackendAttempt attempt,
+                                                Clock::time_point deadline) {
+            if (!runtime.workers || attempt.target >= runtime.config.backends.size())
                 return std::nullopt;
             auto storage = runtime.buffers.acquire(Session::kResolutionBytes);
             if (!storage)
                 return std::nullopt;
             auto reply = std::make_shared<ResolutionReply>(ResolutionReply{std::move(*storage), {}});
             auto submitted = runtime.workers->submit(
-                [this, id, target, deadline, reply](std::stop_token stop) {
-                    const auto& backend = runtime.config.backends[target];
+                [this, id, attempt, deadline, reply](std::stop_token stop) {
+                    const auto& backend = runtime.config.backends[attempt.target];
                     const wire::io::DnsOptions options{deadline, stop, {}};
                     auto addresses = runtime.services.resolution
                                          ? runtime.services.resolution(backend.host, backend.port, options)
@@ -202,10 +206,10 @@ struct ProxyRuntime::Impl {
                     if (addresses && addresses->size() <= 32 &&
                         addresses->capacity() <= reply->storage.size() / sizeof(wire::io::TcpAddress))
                         reply->addresses = std::move(*addresses);
-                    publishResolution(id, target, reply);
+                    publishResolution(id, attempt, reply);
                 },
-                [this, id, target, reply](std::exception_ptr) { publishResolution(id, target, reply); },
-                [this, id, target, reply] { publishResolution(id, target, reply); });
+                [this, id, attempt, reply](std::exception_ptr) { publishResolution(id, attempt, reply); },
+                [this, id, attempt, reply] { publishResolution(id, attempt, reply); });
             return submitted ? std::optional{*submitted} : std::nullopt;
         }
 
