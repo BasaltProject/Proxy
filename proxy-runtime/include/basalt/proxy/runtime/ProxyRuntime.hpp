@@ -64,6 +64,10 @@ public:
     /// Connections admitted to a session owner, and those turned away by rate limits or exhausted budgets.
     [[nodiscard]] std::uint64_t acceptedConnections() const noexcept;
     [[nodiscard]] std::uint64_t rejectedConnections() const noexcept;
+    /// Packet bytes queued toward clients and toward backends since the process started (before framing toward
+    /// backends).
+    [[nodiscard]] std::uint64_t bytesTowardClients() const noexcept;
+    [[nodiscard]] std::uint64_t bytesTowardBackends() const noexcept;
 
 private:
     struct Impl;

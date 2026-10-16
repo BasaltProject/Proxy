@@ -3,6 +3,7 @@ basalt_module(proxy-runtime-core
         src/Cli.cpp
         src/Console.cpp
         src/Admission.cpp
+        src/BedrockStatus.cpp
         src/BackendChangeRequest.cpp
         src/BackendRoutes.cpp
         src/BackendAttempts.cpp
@@ -28,7 +29,7 @@ basalt_module(proxy-runtime-core
         src/IdentityRegistry.cpp
         src/ProxyRuntime.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
-            basalt::wire-multiversion basalt::wire-auth
+            basalt::wire-multiversion basalt::wire-auth basalt::wire-bedrock
 )
 
 target_compile_definitions(proxy-runtime-core PUBLIC BASALT_VERSION="${BASALT_VERSION}")

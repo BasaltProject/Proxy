@@ -63,6 +63,13 @@ keep-days = 14
 # Colour the console output: auto (only on a terminal), always or never.
 color = "auto"
 
+[bedrock]
+# Bedrock Edition listener (UDP). Today it only answers server-list pings and refuses connections as full: translating
+# Bedrock players to a Java backend is not implemented. Off by default.
+enabled = false
+port = 19132
+motd = "Basalt Proxy"
+
 [translation]
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.

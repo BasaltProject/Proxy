@@ -4,6 +4,7 @@
 #include "BackendLogin.hpp"
 #include "BackendRoutes.hpp"
 #include "NativeForwarding.hpp"
+#include "RelayCounters.hpp"
 #include "RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
@@ -109,6 +110,7 @@ bool ClientSession::queue(std::span<const std::uint8_t> bytes) {
         writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
     const auto offset = output_.writerIndex();
     output_.writeBytes(bytes);
+    relayCounters().towardClients.fetch_add(output_.writerIndex() - offset, std::memory_order_relaxed);
     if (encryptor_)
         encryptor_->encrypt(output_.mutableSpan(offset));
     if (output_.readableBytes() >= settings_.highWaterBytes)
@@ -209,6 +211,7 @@ bool ClientSession::queueNative(std::span<const std::uint8_t> packet) {
                                 : wire::protocol::packetFraming::writeUncompressed(output_, packet);
     if (!encoded)
         return false;
+    relayCounters().towardClients.fetch_add(output_.writerIndex() - offset, std::memory_order_relaxed);
     if (encryptor_)
         encryptor_->encrypt(output_.mutableSpan(offset));
     if (output_.readableBytes() >= settings_.highWaterBytes)

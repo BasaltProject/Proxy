@@ -90,6 +90,14 @@ struct PluginsConfig {
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };
 
+struct BedrockConfig {
+    bool enabled = false;
+    std::uint16_t port = 19132;
+    std::string motd = "Basalt Proxy";
+
+    friend bool operator==(const BedrockConfig&, const BedrockConfig&) = default;
+};
+
 struct BackendConfig {
     bool bungeeMessages = false;
     std::string name;
@@ -113,6 +121,7 @@ struct ProxyConfig {
     ForwardingConfig forwarding;
     LoggingConfig logging;
     PluginsConfig plugins;
+    BedrockConfig bedrock;
     TranslationMode translation = TranslationMode::Auto;
     std::vector<BackendConfig> backends;
     std::vector<std::string> defaultRoute;
