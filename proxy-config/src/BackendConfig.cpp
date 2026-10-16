@@ -57,7 +57,14 @@ std::expected<void, std::string> readBackends(ProxyConfig& config, const TomlTab
             reader.scalar(table, "bungee-messages", backend.bungeeMessages, prefix);
             reader.scalar(table, "host", backend.host, prefix);
             reader.integer(table, "port", backend.port, 1, 65535, prefix);
-            reader.integer(table, "protocol", backend.protocol, 1, std::numeric_limits<std::int32_t>::max(), prefix);
+            if (const auto* declared = table->find("protocol"); declared && declared->get<std::string>()) {
+                if (*declared->get<std::string>() != "client")
+                    reader.fail(prefix + "protocol", "must be a protocol number or \"client\"");
+                backend.protocol = BackendConfig::kClientProtocol;
+            } else {
+                reader.integer(table, "protocol", backend.protocol, 1, std::numeric_limits<std::int32_t>::max(),
+                               prefix);
+            }
             reader.scalar(table, "secret", backend.secret, prefix);
             reader.scalar(table, "property-name", backend.propertyName, prefix);
             std::string forwarding = "none";

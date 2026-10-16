@@ -112,7 +112,9 @@ struct BackendConfig {
     std::string name;
     std::string host;
     std::uint16_t port = 25566;
+    /// The backend's protocol, or kClientProtocol when it speaks whatever version the player connects with.
     std::int32_t protocol = 777;
+    static constexpr std::int32_t kClientProtocol = 0;
     wire::auth::forwarding::ForwardingMode forwarding = wire::auth::forwarding::ForwardingMode::None;
     std::string secret;
     std::string propertyName{wire::auth::forwarding::ProxyForwarding::kSafeNetProperty};

@@ -162,7 +162,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         } else if (state_ == State::kConfiguration && finishingConfiguration_) {
             return false;
         }
-        if (state_ == State::kConfiguration && translation_ &&
+        if (state_ == State::kConfiguration && translation_ && !rawNow() &&
             clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5 &&
             id == wire::protocol::configuration::SelectKnownPacksPacket::kClientboundId)
             return answerKnownPacks();
@@ -223,7 +223,7 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         if (compressionThreshold_ >= 0) {
             wire::protocol::varInt::write(frame_, wire::protocol::login::LoginCompressionPacket::kId);
             wire::protocol::login::LoginCompressionPacket{compressionThreshold_}.write(frame_);
-            if (!queuePacket(frame_.readable()))
+            if (!queueLoginPacket(frame_.readable()))
                 return false;
             compression_ = compressionThreshold_;
             frame_.clear();
@@ -239,13 +239,13 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         finished->write(frame_);
         auto encoded = frame_.readable();
         std::vector<std::uint8_t> older;
-        if (ids_ && !translation_ && loginFinishedTail(clientProtocol_) != LoginFinishedTail::kSessionId) {
+        if (rawNow() && loginFinishedTail(clientProtocol_) != LoginFinishedTail::kSessionId) {
             older.assign(encoded.begin(), encoded.end() - 16);
             if (loginFinishedTail(clientProtocol_) == LoginFinishedTail::kStrictErrorsFlag)
                 older.push_back(1);
             encoded = older;
         }
-        if (!queuePacket(encoded))
+        if (!queueLoginPacket(encoded))
             return false;
         state_ = State::kLoginAck;
         if (legacyClient())

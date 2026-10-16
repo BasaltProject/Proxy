@@ -36,7 +36,9 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     translatedClientVerified(hello->protocolVersion) || backendVerified(hello->protocolVersion))) {
             const auto candidates = routes_.select(hello->hostName);
             if (!candidates.empty() && std::ranges::none_of(candidates, [&](std::size_t target) {
-                    return resolveRoute(hello->protocolVersion, backends_[target].protocol).has_value();
+                    return resolveRoute(hello->protocolVersion,
+                                        effectiveProtocol(backends_[target].protocol, hello->protocolVersion))
+                        .has_value();
                 }))
                 return false;
             if (hello->protocolVersion != buildInfo::kProtocolVersion) {
@@ -44,15 +46,22 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                 auto chain = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
                 if (!chain)
                     return false;
-                if (backendVerified(hello->protocolVersion) && std::ranges::any_of(candidates, [&](std::size_t target) {
-                        return backends_[target].protocol == hello->protocolVersion;
-                    })) {
+                const auto reaches = [&](std::int32_t protocol) {
+                    return std::ranges::any_of(candidates, [&](std::size_t target) {
+                        return speaksTo(backends_[target].protocol, hello->protocolVersion) == protocol;
+                    });
+                };
+                const bool rawRoute = backendVerified(hello->protocolVersion) && reaches(hello->protocolVersion);
+                const bool translatedRoute = reaches(buildInfo::kProtocolVersion);
+                if (rawRoute) {
                     ids_ = std::make_unique<IdRenumbering>(std::move(chain));
                     if (hello->protocolVersion < wire::multiversion::protocolVersions::kV1_20_2) {
                         translation_ = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
                         legacyRaw_ = translation_ != nullptr;
                         if (!legacyRaw_)
                             return false;
+                    } else if (translatedRoute && translatedClientVerified(hello->protocolVersion)) {
+                        translation_ = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
                     }
                 } else {
                     translation_ = std::move(chain);

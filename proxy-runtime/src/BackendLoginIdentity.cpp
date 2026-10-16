@@ -27,8 +27,8 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
         return std::unexpected(BackendLoginError::kMalformed);
     std::span<const std::uint8_t> body = packet.readable();
     std::vector<std::uint8_t> converted;
-    if (backend.protocol < wire::multiversion::protocolVersions::kV1_20_2) {
-        auto native = loginFinishedToNative(backend.protocol, body);
+    if (protocol_ < wire::multiversion::protocolVersions::kV1_20_2) {
+        auto native = loginFinishedToNative(protocol_, body);
         if (!native)
             return std::unexpected(BackendLoginError::kMalformed);
         converted = std::move(*native);
@@ -49,7 +49,7 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
         return std::unexpected(BackendLoginError::kLimit);
     if (!frame_.tryReserve(body.size() + 16))
         return std::unexpected(BackendLoginError::kLimit);
-    const auto tail = converted.empty() ? loginFinishedTail(backend.protocol) : LoginFinishedTail::kSessionId;
+    const auto tail = converted.empty() ? loginFinishedTail(protocol_) : LoginFinishedTail::kSessionId;
     frame_.writeBytes(tail == LoginFinishedTail::kStrictErrorsFlag && !body.empty() ? body.first(body.size() - 1)
                                                                                     : body);
     if (tail != LoginFinishedTail::kSessionId)
