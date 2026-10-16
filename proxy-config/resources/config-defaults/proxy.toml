@@ -1,9 +1,4 @@
-#include <basalt/proxy/config/ProxyConfig.hpp>
-
-namespace basalt::proxy::config {
-
-std::string_view defaultProxyToml() noexcept {
-    return R"(# Public listener and authentication. Backends are configured in backends.toml.
+# Public listener and authentication. Backends are configured in backends.toml.
 [network]
 # Literal IPv4 or IPv6 bind address. IPv6 dual-stack must be requested explicitly.
 bind = "0.0.0.0"
@@ -80,56 +75,3 @@ interval-ms = 2000
 # auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
 # proxy: force translation here. off: require compatible client/backend protocols.
 mode = "auto"
-)";
-}
-
-std::string_view defaultPluginsToml() noexcept {
-    return R"(# Lua plugins, packages (.bppkg) under directory, each with a plugin.toml and a main script. Off by default.
-enabled = false
-directory = "plugins"
-# The proxy's own SQLite file for plugin data. It is state, not configuration, and is never shared with a server.
-database = ".basalt/proxy.db"
-# Instruction budget for one run of a plugin handler, and the ceiling for one plugin's Lua memory.
-instructions-per-turn = 250000
-memory-mib = 32
-# Events waiting for the plugin thread. A full queue drops the newest event and counts it.
-queue-size = 256
-
-# Players who may run a plugin command that is declared with a permission, by name.
-# operators = ["Steve"]
-
-# What each plugin may do beyond logging, listening, registering commands and reading the server list. A plugin whose plugin.toml
-# asks for more than is granted here does not load. Permissions: commands (run console commands), network, packets.
-# Plugin data needs `storage = true` or `players_data = true` under [capabilities] in the plugin's own manifest, no grant.
-# [allow]
-# my_plugin = ["commands"]
-)";
-}
-
-std::string_view defaultBackendsToml() noexcept {
-    return R"(# Ordered routing targets. Names must refer to entries in [backends].
-[routing]
-default = ["lobby"]
-
-# Optional virtual-host routes, for example: "play.example.org" = ["lobby"]
-[forced-hosts]
-
-[backends.lobby]
-host = "127.0.0.1"
-port = 25566
-# Backend Java protocol, or "client" for a backend that speaks whatever version each player connects with, as a Basalt Server does
-# for the older versions it translates itself. Compatibility is checked for the client/backend pair.
-protocol = 777
-# none, basalt, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
-# none is viable for an offline vanilla backend; it does not forward premium UUID/properties.
-# The backend must use a matching scheme. No fallback to weaker identity on security failure.
-forwarding = "none"
-# Allow GetServer, GetServers, UUID and player-local Connect on bungeecord:main from this backend.
-# Client-originated control messages are always discarded. Other subcommands are unsupported.
-bungee-messages = false
-# Shared secret for velocity or token for bungeeguard/safenet. Keep this file private.
-secret = ""
-)";
-}
-
-} // namespace basalt::proxy::config

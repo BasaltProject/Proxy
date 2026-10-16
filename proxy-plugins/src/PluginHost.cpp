@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
+#include <cstdlib>
 #include <filesystem>
 
 namespace basalt::proxy::plugins {

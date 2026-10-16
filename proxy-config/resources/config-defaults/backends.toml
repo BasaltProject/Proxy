@@ -1,0 +1,22 @@
+# Ordered routing targets. Names must refer to entries in [backends].
+[routing]
+default = ["lobby"]
+
+# Optional virtual-host routes, for example: "play.example.org" = ["lobby"]
+[forced-hosts]
+
+[backends.lobby]
+host = "127.0.0.1"
+port = 25566
+# Backend Java protocol, or "client" for a backend that speaks whatever version each player connects with, as a Basalt Server does
+# for the older versions it translates itself. Compatibility is checked for the client/backend pair.
+protocol = 777
+# none, basalt, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
+# none is viable for an offline vanilla backend; it does not forward premium UUID/properties.
+# The backend must use a matching scheme. No fallback to weaker identity on security failure.
+forwarding = "none"
+# Allow GetServer, GetServers, UUID and player-local Connect on bungeecord:main from this backend.
+# Client-originated control messages are always discarded. Other subcommands are unsupported.
+bungee-messages = false
+# Shared secret for velocity or token for bungeeguard/safenet. Keep this file private.
+secret = ""

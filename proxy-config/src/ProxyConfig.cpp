@@ -1,5 +1,6 @@
 #include "ConfigReader.hpp"
 
+#include <basalt/proxy/config/ConfigDefaults.hpp>
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/io/ConfigFiles.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
@@ -173,13 +174,13 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
 }
 
 std::expected<ProxyConfig, std::string> load(std::string_view directory) {
-    auto proxy = wire::io::configFiles::loadToml(directory, "proxy.toml", defaultProxyToml());
+    auto proxy = wire::io::configFiles::loadToml(directory, "proxy.toml", kProxyDefaultToml);
     if (!proxy)
         return std::unexpected(proxy.error());
-    auto backends = wire::io::configFiles::loadToml(directory, "backends.toml", defaultBackendsToml());
+    auto backends = wire::io::configFiles::loadToml(directory, "backends.toml", kBackendsDefaultToml);
     if (!backends)
         return std::unexpected(backends.error());
-    auto plugins = wire::io::configFiles::loadToml(directory, "plugins.toml", defaultPluginsToml());
+    auto plugins = wire::io::configFiles::loadToml(directory, "plugins.toml", kPluginsDefaultToml);
     if (!plugins)
         return std::unexpected(plugins.error());
     return fromToml(proxy->values, backends->values, directory, &plugins->values);
