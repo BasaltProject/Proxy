@@ -1,5 +1,6 @@
 #include "BackendLogin.hpp"
 
+#include "LoginShapes.hpp"
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
 #include "RouteVersions.hpp"
@@ -33,7 +34,7 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     namespace protocol = wire::protocol;
     if (!allocationReady_)
         return std::unexpected(BackendLoginError::kLimit);
-    if (phase_ != Phase::kUnstarted || !resolveRoute(buildInfo::kProtocolVersion, backend.protocol) ||
+    if (phase_ != Phase::kUnstarted || !resolveRoute(backend.protocol, backend.protocol) ||
         (backend.forwarding != wire::auth::forwarding::ForwardingMode::None &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Velocity &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Basalt &&
@@ -74,11 +75,12 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
     protocol::varInt::write(frame_, protocol::login::LoginStartPacket::kId);
-    protocol::login::LoginStartPacket{profile.name, profile.id}.write(frame_);
+    writeLoginStart(frame_, backend.protocol, profile.name, profile.id);
     if (!protocol::packetFraming::writeUncompressed(output_, frame_.readable()))
         return std::unexpected(BackendLoginError::kLimit);
     frame_.clear();
     backendConfig_ = &backend;
+    protocol_ = backend.protocol;
     profile_ = &profile;
     remoteAddress_ = remoteAddress;
     remotePort_ = remotePort;

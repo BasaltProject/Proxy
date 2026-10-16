@@ -3,12 +3,15 @@
 #include "../src/BackendDial.hpp"
 #include "../src/BackendLogin.hpp"
 #include "../src/BackendRoutes.hpp"
+#include "../src/IdRenumbering.hpp"
 #include "../src/PendingResponses.hpp"
+#include "../src/RouteVersions.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/io/BudgetMemoryResource.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 
 #include <doctest.h>
@@ -157,4 +160,21 @@ TEST_CASE("clearing keepalives cannot alias a later backend's token") {
     CHECK(origin->token == -42);
     CHECK(origin->backend == replacement);
     CHECK_FALSE(pending.consume(*second));
+}
+
+TEST_CASE("a 26.2 backend and client share ids that renumber to the session numbering and back") {
+    namespace multiversion = basalt::wire::multiversion;
+    constexpr auto kPlay = basalt::wire::protocol::ProtocolState::Play;
+    IdRenumbering ids{multiversion::java::javaTranslators::chainFor(multiversion::protocolVersions::kV26_2)};
+    const std::array<std::uint8_t, 4> keepAlive{0x2c, 0, 0, 7};
+    io::ByteBuffer session;
+    io::ByteBuffer back;
+    REQUIRE(ids.apply(IdRenumbering::Flow::kBackendToSession, kPlay, keepAlive, session) ==
+            IdRenumbering::Outcome::kRenumbered);
+    CHECK(session.readable()[0] == 0x2d);
+    REQUIRE(ids.apply(IdRenumbering::Flow::kSessionToClient, kPlay, session.readable(), back) ==
+            IdRenumbering::Outcome::kRenumbered);
+    CHECK(std::ranges::equal(back.readable(), keepAlive));
+    CHECK(resolveRoute(multiversion::protocolVersions::kV26_2, multiversion::protocolVersions::kV26_2));
+    CHECK_FALSE(resolveRoute(multiversion::protocolVersions::kV26_1, multiversion::protocolVersions::kV26_2));
 }

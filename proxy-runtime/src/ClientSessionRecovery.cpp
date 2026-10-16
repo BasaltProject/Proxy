@@ -3,6 +3,7 @@
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 
@@ -31,9 +32,12 @@ bool ClientSession::recoveryFailed() {
     closeBackends();
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::play::PlayDisconnectPacket::kId);
-    wire::protocol::play::PlayDisconnectPacket{
-        wire::text::Component::text("No backend is available. Please reconnect later.")}
-        .write(frame_);
+    if (legacyRaw_)
+        wire::protocol::writeString(frame_, R"({"text":"No backend is available. Please reconnect later."})");
+    else
+        wire::protocol::play::PlayDisconnectPacket{
+            wire::text::Component::text("No backend is available. Please reconnect later.")}
+            .write(frame_);
     return queuePacket(frame_.readable());
 }
 

@@ -54,6 +54,8 @@ bool ClientSession::candidatePrepared() const {
 bool ClientSession::beginPreparedChange() {
     if (!candidatePrepared() || startingConfiguration_ || frontendPaused_)
         return false;
+    if (legacyRaw_)
+        return commitLegacyChange();
     constexpr std::array<std::uint8_t, 1> start{0x78};
     if (!queuePacket(start))
         return false;
@@ -63,13 +65,38 @@ bool ClientSession::beginPreparedChange() {
     return !legacyClient() || synthesizeClientPacket(kConfigurationAcknowledgedId);
 }
 
+bool ClientSession::commitLegacyChange() {
+    if (!candidateBackend_->acknowledgeLogin() || !candidateBackend_->finishConfiguration())
+        return false;
+    resourcePacks_.clear();
+    pendingKeepAlives_.clear();
+    pendingPings_.clear();
+    activeBackend_.reset();
+    activeBackend_ = std::move(candidateBackend_);
+    cancelConnectionAttempt();
+    targets_ = {};
+    nextTarget_ = 0;
+    changeWhenPrepared_ = false;
+    if (!recovering_)
+        recoveryVisited_.reset();
+    recovering_ = false;
+    backendPaused_ = false;
+    awaitingJoin_ = true;
+    frontendPaused_ = true;
+    readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+    activeBackend_->expectReadUntil(readDeadline_);
+    activeBackend_->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
+    backpressure();
+    return true;
+}
+
 bool ClientSession::acknowledgePreparedChange() {
     if (!switchingBackend_ || !startingConfiguration_ || !candidatePrepared() ||
         (output_.readableBytes() != 0 && !synthesizing_))
         return false;
     constexpr std::array<std::uint8_t, 1> ack{wire::protocol::login::kLoginAcknowledgedId};
-    if (!candidateBackend_->queue(ack) || !candidateBackend_->acknowledgeLogin() ||
-        (clientSettings_.readableBytes() != 0 && !candidateBackend_->queue(clientSettings_.readable())))
+    if (!toBackend(*candidateBackend_, ack) || !candidateBackend_->acknowledgeLogin() ||
+        (clientSettings_.readableBytes() != 0 && !toBackend(*candidateBackend_, clientSettings_.readable())))
         return false;
     state_ = State::kConfiguration;
     constexpr std::array<std::uint8_t, 2> removePacks{0x08, 0};

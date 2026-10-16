@@ -9,7 +9,9 @@
 namespace basalt::proxy::runtime::detail {
 
 bool ClientSession::backendChallenge(bool ping) {
-    const auto token = ping ? frame_.readInt() : frame_.readLong();
+    const auto token = ping                ? frame_.readInt()
+                       : keepAliveVarInt() ? wire::protocol::varInt::read(frame_)
+                                           : frame_.readLong();
     if (frame_.failed() || frame_.readableBytes() != 0)
         return false;
     const auto published = (ping ? pendingPings_ : pendingKeepAlives_).publish(token, backend()->attempt());
@@ -22,6 +24,8 @@ bool ClientSession::backendChallenge(bool ping) {
                                               : wire::protocol::play::PlayKeepAlivePacket::kClientboundId);
     if (ping)
         frame_.writeInt(static_cast<std::int32_t>(*published));
+    else if (keepAliveVarInt())
+        wire::protocol::varInt::write(frame_, static_cast<std::int32_t>(*published));
     else
         frame_.writeLong(*published);
     if (!queuePacket(frame_.readable()))
@@ -32,7 +36,9 @@ bool ClientSession::backendChallenge(bool ping) {
 }
 
 bool ClientSession::challengeResponse(bool pong) {
-    const auto token = pong ? frame_.readInt() : frame_.readLong();
+    const auto token = pong                ? frame_.readInt()
+                       : keepAliveVarInt() ? wire::protocol::varInt::read(frame_)
+                                           : frame_.readLong();
     if (frame_.failed() || frame_.readableBytes() != 0)
         return false;
     const auto origin = (pong ? pendingPings_ : pendingKeepAlives_).consume(token);
@@ -45,9 +51,11 @@ bool ClientSession::challengeResponse(bool pong) {
                                               : wire::protocol::play::PlayKeepAlivePacket::kServerboundId);
     if (pong)
         frame_.writeInt(static_cast<std::int32_t>(origin->token));
+    else if (keepAliveVarInt())
+        wire::protocol::varInt::write(frame_, static_cast<std::int32_t>(origin->token));
     else
         frame_.writeLong(origin->token);
-    if (!backend()->queue(frame_.readable()))
+    if (!toBackend(*backend(), frame_.readable()))
         return false;
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
