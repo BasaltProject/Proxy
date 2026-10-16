@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/wire/plugins/PluginText.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
@@ -31,6 +32,7 @@ struct PluginHost::Plugin {
     std::vector<wire::lua::LuaRef> onDisable;
     wire::lua::LuaRef playerMeta;
     wire::lua::LuaRef consoleMeta;
+    std::unique_ptr<wire::plugins::PluginText> text;
     bool storage = false;
     bool playersData = false;
     int strikes = 0;
@@ -66,6 +68,10 @@ inline constexpr std::string_view kEnableEvent = "plugin.enable";
 inline constexpr std::string_view kDisableEvent = "plugin.disable";
 inline constexpr std::string_view kJoinEvent = "player.join";
 inline constexpr std::string_view kQuitEvent = "player.quit";
+inline constexpr std::string_view kChatEvent = "player.chat";
+inline constexpr std::string_view kKickEvent = "player.kick";
+inline constexpr std::string_view kPingEvent = "server.ping";
+inline constexpr std::string_view kLoginEvent = "player.login";
 inline constexpr std::string_view kServerChangeEvent = "player.server_change";
 
 } // namespace basalt::proxy::plugins

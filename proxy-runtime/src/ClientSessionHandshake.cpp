@@ -29,6 +29,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             hello->hostName.find('\0') != std::string::npos)
             return false;
         if (hello->intent == protocol::handshake::ClientIntent::Status) {
+            virtualHost_ = hello->hostName;
+            statusProtocol_ = hello->protocolVersion;
             state_ = State::StatusRequest;
         } else if ((hello->intent == protocol::handshake::ClientIntent::Login ||
                     (acceptTransfers_ && hello->intent == protocol::handshake::ClientIntent::Transfer)) &&
@@ -87,6 +89,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
         name_ = std::move(*loginName);
         if (!online_) {
             profile_ = wire::auth::SessionProfile{wire::common::Uuid::offlinePlayer(name_), name_, {}};
+            if (playerLogin_)
+                playerLogin_(profile_->name, profile_->id.toString());
             return route();
         }
         if (settings_.sessionBufferBytes < kBufferBytes + kAuthenticationBytes || publicKey_.empty() ||
@@ -133,6 +137,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
     } else if (state_ == State::StatusRequest) {
         if (id != protocol::status::kStatusRequestId || frame_.readableBytes() != 0 || !queue(status_))
             return false;
+        if (statusPing_)
+            statusPing_(virtualHost_, statusProtocol_);
         state_ = State::Ping;
     } else {
         if (id != protocol::status::PingPacket::kId)

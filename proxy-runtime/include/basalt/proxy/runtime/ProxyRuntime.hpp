@@ -22,7 +22,7 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
-enum class PlayerEventKind { kJoin, kLeave, kSwitch };
+enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin };
 
 struct PlayerEvent {
     PlayerEventKind kind;
@@ -30,7 +30,7 @@ struct PlayerEvent {
     /// The backend the player is on; for a leave, the one it left from.
     std::string backend;
     std::string uuid;
-    /// The backend a switch came from.
+    /// The backend a switch came from; for a chat, the message.
     std::string from;
 };
 
@@ -60,6 +60,14 @@ struct RuntimeServices {
     /// Offered every command a player types in play (without the slash). True consumes it: it is not sent to the
     /// backend. Called on session owner threads; must return quickly and never block.
     std::function<bool(std::string_view player, std::string_view command)> playerCommand = {};
+    /// Told every chat message a player sends, after the fact. Called on session owner threads; must not block.
+    std::function<void(std::string_view player, std::string_view message)> playerChat = {};
+    /// Told, with its plain text, why a backend disconnected a player in play. Called on session owner threads.
+    std::function<void(std::string_view player, std::string_view reason)> playerKick = {};
+    /// Told the host and protocol of every server-list request answered. Called on session owner threads.
+    std::function<void(std::string_view host, std::int32_t protocol)> statusPing = {};
+    /// Told a player's name and uuid once they are authenticated, before any backend is chosen.
+    std::function<void(std::string_view player, std::string_view uuid)> playerLogin = {};
     /// Those commands, added to every command tree the proxy relays so clients know them and complete their arguments.
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {};
 };

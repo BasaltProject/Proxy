@@ -218,6 +218,8 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     plugin->host = this;
     plugin->storage = manifest.capabilities.storage;
     plugin->playersData = manifest.capabilities.playersData;
+    plugin->text = std::make_unique<wire::plugins::PluginText>(settings_.directory + "/" + id, "en_us");
+    plugin->text->load();
     plugin->sandbox = wire::lua::LuaSandbox::create(
         id, settings_.limits, 0,
         [package, lenders](std::string_view module) -> std::optional<std::vector<std::uint8_t>> {
@@ -472,7 +474,8 @@ void PluginHost::callEvent(Plugin& plugin, const std::string& name, const Player
                 return wanted == handler.filters.end() || sameName(wanted->second, value);
             };
             if (!matches("player_name", subject->name) || !matches("player_uuid", subject->uuid) ||
-                !matches("server", subject->server) || !matches("from_server", from))
+                !matches("server", subject->server) ||
+                (name != kChatEvent && name != kKickEvent && !matches("from_server", from)))
                 continue;
         }
         call(
@@ -490,12 +493,54 @@ void PluginHost::callEvent(Plugin& plugin, const std::string& name, const Player
                     lua.setField("server");
                     if (!from.empty()) {
                         lua.pushString(from);
-                        lua.setField("from_server");
+                        lua.setField(name == kChatEvent ? "message" : name == kKickEvent ? "reason" : "from_server");
                     }
                 }
                 return 1;
             },
             name);
+    }
+}
+
+void PluginHost::callPing(Plugin& plugin, const std::string& host, const std::string& protocol) {
+    const auto found = plugin.handlers.find(std::string{kPingEvent});
+    if (found == plugin.handlers.end())
+        return;
+    for (const Plugin::Handler& handler : found->second) {
+        if (plugin.broken)
+            return;
+        call(
+            plugin, handler.function,
+            [&](wire::lua::LuaArgs& lua) {
+                lua.pushTable();
+                lua.pushString(host);
+                lua.setField("host");
+                lua.pushInteger(std::stoll(protocol));
+                lua.setField("protocol");
+                return 1;
+            },
+            std::string{kPingEvent});
+    }
+}
+
+void PluginHost::callLogin(Plugin& plugin, const std::string& player, const std::string& uuid) {
+    const auto found = plugin.handlers.find(std::string{kLoginEvent});
+    if (found == plugin.handlers.end())
+        return;
+    for (const Plugin::Handler& handler : found->second) {
+        if (plugin.broken)
+            return;
+        call(
+            plugin, handler.function,
+            [&](wire::lua::LuaArgs& lua) {
+                lua.pushTable();
+                lua.pushString(player);
+                lua.setField("player_name");
+                lua.pushString(uuid);
+                lua.setField("player_uuid");
+                return 1;
+            },
+            std::string{kLoginEvent});
     }
 }
 
@@ -509,6 +554,20 @@ void PluginHost::deliver(const runtime::PlayerEvent& event) {
     } else if (event.kind == Kind::kSwitch) {
         name = std::string{kServerChangeEvent};
         roster_[event.player] = subject;
+    } else if (event.kind == Kind::kLogin) {
+        for (auto& plugin : plugins_)
+            if (!plugin->broken)
+                callLogin(*plugin, event.player, event.uuid);
+        return;
+    } else if (event.kind == Kind::kPing) {
+        for (auto& plugin : plugins_)
+            if (!plugin->broken)
+                callPing(*plugin, event.backend, event.from);
+        return;
+    } else if (event.kind == Kind::kChat || event.kind == Kind::kKick) {
+        name = std::string{event.kind == Kind::kChat ? kChatEvent : kKickEvent};
+        if (const auto known = roster_.find(event.player); known != roster_.end())
+            subject = known->second;
     } else {
         name = std::string{kQuitEvent};
     }

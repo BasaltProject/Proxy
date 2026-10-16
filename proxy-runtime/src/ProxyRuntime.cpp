@@ -159,7 +159,9 @@ struct ProxyRuntime::Impl {
                 },
                 snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
                 runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot,
-                runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation);
+                runtime.services.playerCommand, runtime.services.playerCommandSpecs, runtime.config.translation,
+                runtime.services.playerChat, runtime.services.playerKick, runtime.services.statusPing,
+                runtime.services.playerLogin);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);

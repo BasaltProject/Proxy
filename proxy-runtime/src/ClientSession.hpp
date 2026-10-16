@@ -68,7 +68,11 @@ public:
                   const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
                   std::function<bool(std::string_view, std::string_view)> playerCommand = {},
                   std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {},
-                  config::TranslationMode translation = config::TranslationMode::Auto);
+                  config::TranslationMode translation = config::TranslationMode::Auto,
+                  std::function<void(std::string_view, std::string_view)> playerChat = {},
+                  std::function<void(std::string_view, std::string_view)> playerKick = {},
+                  std::function<void(std::string_view, std::int32_t)> statusPing = {},
+                  std::function<void(std::string_view, std::string_view)> playerLogin = {});
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -191,6 +195,10 @@ private:
     [[nodiscard]] bool bufferedPacket() const;
     std::shared_ptr<const void> topology_;
     std::function<bool(std::string_view, std::string_view)> playerCommand_;
+    std::function<void(std::string_view, std::string_view)> playerChat_;
+    std::function<void(std::string_view, std::string_view)> playerKick_;
+    std::function<void(std::string_view, std::int32_t)> statusPing_;
+    std::function<void(std::string_view, std::string_view)> playerLogin_;
     std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
@@ -218,6 +226,7 @@ private:
     AuthenticationStart authenticate_;
     const BackendRoutes& routes_;
     std::string virtualHost_;
+    std::int32_t statusProtocol_ = 0;
     std::uint16_t virtualPort_ = 0;
     std::span<const std::size_t> targets_;
     std::array<std::size_t, 1> requestedTarget_{};

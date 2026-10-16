@@ -49,9 +49,14 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
                              std::function<bool(std::string_view, std::string_view)> playerCommand,
                              std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs,
-                             config::TranslationMode translation)
+                             config::TranslationMode translation,
+                             std::function<void(std::string_view, std::string_view)> playerChat,
+                             std::function<void(std::string_view, std::string_view)> playerKick,
+                             std::function<void(std::string_view, std::int32_t)> statusPing,
+                             std::function<void(std::string_view, std::string_view)> playerLogin)
     : translationMode_(translation), topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
-      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
+      playerChat_(std::move(playerChat)), playerKick_(std::move(playerKick)), statusPing_(std::move(statusPing)),
+      playerLogin_(std::move(playerLogin)), playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
@@ -373,6 +378,14 @@ bool ClientSession::packet() {
             if (!view.failed() && playerCommand_(profile_->name, command))
                 return true;
         }
+        if (shaped && state_ == State::kPlay && playerChat_ && profile_ &&
+            id == protocol::play::ChatMessagePacket::kId) {
+            wire::io::ByteBuffer view;
+            view.writeBytes(frame_.readable());
+            const std::string message = protocol::readString(view, protocol::play::ChatMessagePacket::kMaxLength);
+            if (!view.failed())
+                playerChat_(profile_->name, message);
+        }
         if (id == (state_ == State::kConfiguration ? protocol::configuration::KeepAlivePacket::kId
                                                    : protocol::play::PlayKeepAlivePacket::kServerboundId))
             return challengeResponse();
@@ -558,8 +571,11 @@ bool ClientSession::authenticated(
         if (!profileStorage_->resize(retained) || !profileLocal_ || !profileLocal_->resize(retained))
             return false;
     }
-    if (result)
+    if (result) {
+        if (playerLogin_)
+            playerLogin_(profile_->name, profile_->id.toString());
         return route();
+    }
     closing_ = true;
     return queue(authFailure_);
 }

@@ -221,12 +221,12 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     // The metatable every player table shares, and the one the console source has.
     lua.pushTable();
     lua.pushTable();
-    wire::lua::pushHostFunction(lua, "send", [server](LuaArgs& args) {
+    wire::lua::pushHostFunction(lua, "send", [server, self](LuaArgs& args) {
         const auto name = args.fieldAsText(1, "name");
         if (!name)
             return args.fail("send needs a player: use player:send(text)");
         if (server->hooks_.tell)
-            server->hooks_.tell(*name, args.checkString(2).substr(0, kMaxLine));
+            server->hooks_.tell(*name, self->text->resolve(args.checkString(2), &args, 3).substr(0, kMaxLine));
         return 0;
     });
     lua.setField("send");
@@ -238,12 +238,14 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 1;
     });
     lua.setField("connect");
-    wire::lua::pushHostFunction(lua, "kick", [server](LuaArgs& args) {
+    wire::lua::pushHostFunction(lua, "kick", [server, self](LuaArgs& args) {
         const auto name = args.fieldAsText(1, "name");
         if (!name)
             return args.fail("kick needs a player: use player:kick(reason)");
         if (server->hooks_.kick)
-            server->hooks_.kick(*name, args.stringOrNull(2).value_or("Disconnected").substr(0, kMaxLine));
+            server->hooks_.kick(
+                *name,
+                self->text->resolve(args.stringOrNull(2).value_or("Disconnected"), &args, 3).substr(0, kMaxLine));
         return 0;
     });
     lua.setField("kick");
@@ -254,7 +256,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     lua.pushTable();
     wire::lua::pushHostFunction(lua, "send", [server, self](LuaArgs& args) {
         if (server->hooks_.log)
-            server->hooks_.log(self->id, args.checkString(2).substr(0, kMaxLine));
+            server->hooks_.log(self->id, self->text->resolve(args.checkString(2), &args, 3).substr(0, kMaxLine));
         return 0;
     });
     lua.setField("send");
@@ -325,8 +327,14 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     lua.setField("exists");
     lua.setGlobal("servers");
 
-    wire::lua::pushHostFunction(lua, "broadcast", [server](LuaArgs& args) {
-        const std::string text = args.checkString(1).substr(0, kMaxLine);
+    wire::lua::pushHostFunction(lua, "t", [self](LuaArgs& args) {
+        args.pushString(self->text->resolve("@" + args.checkString(1), &args, 2));
+        return 1;
+    });
+    lua.setGlobal("t");
+
+    wire::lua::pushHostFunction(lua, "broadcast", [server, self](LuaArgs& args) {
+        const std::string text = self->text->resolve(args.checkString(1), &args, 2).substr(0, kMaxLine);
         if (server->hooks_.tell)
             for (const auto& [name, player] : server->roster_)
                 server->hooks_.tell(name, text);
@@ -408,10 +416,13 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                 (name == kEnableEvent ? self->onEnable : self->onDisable).push_back(LuaRef::of(args.state(), at));
                 return 0;
             }
-            if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent)
+            if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
+                name != kKickEvent && name != kPingEvent && name != kLoginEvent)
                 return args.fail("there is no event called '" + name +
                                  "'; this proxy has plugin.enable, plugin.disable, " + std::string{kJoinEvent} + ", " +
-                                 std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent});
+                                 std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} + ", " +
+                                 std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " +
+                                 std::string{kPingEvent} + ", " + std::string{kLoginEvent});
             PluginHost::Plugin::Handler handler;
             handler.function = LuaRef::of(args.state(), at);
             if (options != 0 && args.isTable(options)) {

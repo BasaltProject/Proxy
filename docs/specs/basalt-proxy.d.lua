@@ -62,16 +62,24 @@ function ConsoleSource:send(text) end
 ---@field player_uuid string
 ---@field server string
 ---@field from_server? string Only on `player.server_change`.
+---@field message? string Only on `player.chat`.
+---@field reason? string Only on `player.kick`.
+
+---@class PingEvent
+---@field host string
+---@field protocol integer
 
 ---@param event "plugin.enable"|"plugin.disable"
 ---@param handler fun(e: table)
----@overload fun(event: "player.join"|"player.quit"|"player.server_change", handler: fun(e: PlayerEvent))
----@overload fun(event: "player.join"|"player.quit"|"player.server_change", options: EventOptions, handler: fun(e: PlayerEvent))
+---@overload fun(event: "player.login", handler: fun(e: {player_name: string, player_uuid: string}))
+---@overload fun(event: "server.ping", handler: fun(e: PingEvent))
+---@overload fun(event: "player.join"|"player.quit"|"player.server_change"|"player.chat"|"player.kick", handler: fun(e: PlayerEvent))
+---@overload fun(event: "player.join"|"player.quit"|"player.server_change"|"player.chat"|"player.kick", options: EventOptions, handler: fun(e: PlayerEvent))
 function on(event, handler) end
 
----@param event "player.join"|"player.quit"|"player.server_change"
+---@param event "player.join"|"player.quit"|"player.server_change"|"player.chat"|"player.kick"
 ---@param handler fun(e: PlayerEvent)
----@overload fun(event: "player.join"|"player.quit"|"player.server_change", options: EventOptions, handler: fun(e: PlayerEvent))
+---@overload fun(event: "player.join"|"player.quit"|"player.server_change"|"player.chat"|"player.kick", options: EventOptions, handler: fun(e: PlayerEvent))
 function watch(event, handler) end
 
 ---@class CommandOptions
@@ -153,3 +161,8 @@ function Store.keys() end
 ---Needs `storage` in the manifest.
 ---@type Store
 store = {}
+
+---@param key string
+---@param arguments? table
+---@return string
+function t(key, arguments) end

@@ -17,6 +17,7 @@
 #include <basalt/wire/protocol/play/BorderPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
+#include <basalt/wire/text/Serializers.hpp>
 
 #include <algorithm>
 #include <array>
@@ -147,7 +148,14 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
                 std::ranges::any_of(destination->host, [](unsigned char c) { return c <= 32 || c == 127; }))
                 return false;
         } else if (terminal) {
-            if (shaped && (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0))
+            if (shaped && state_ == State::kPlay) {
+                const auto kicked = wire::protocol::play::PlayDisconnectPacket::read(frame_);
+                if (!kicked || frame_.readableBytes() != 0)
+                    return false;
+                if (playerKick_ && profile_)
+                    playerKick_(profile_->name, wire::text::toPlainText(kicked->reason));
+            } else if (shaped &&
+                       (!wire::protocol::play::PlayDisconnectPacket::read(frame_) || frame_.readableBytes() != 0))
                 return false;
         } else if (shaped && state_ == State::kPlay && id == kStartConfigurationId) {
             if (startingConfiguration_ || frame_.readableBytes() != 0)

@@ -78,9 +78,13 @@ fields (`player_name`, `player_uuid`, `server`, `from_server`).
 | `player.join` | `player`, `player_name`, `player_uuid`, `server`. The player is in play on their first backend. |
 | `player.quit` | The same; `server` is where they were. |
 | `player.server_change` | The same, plus `from_server`. |
+| `player.chat` | The same, plus `message`. Seen once the player sent it; it cannot be cancelled. Unsigned and signed chat both. |
+| `player.kick` | The same, plus `reason` in plain text. A backend disconnected the player in play; it cannot be cancelled. |
+| `server.ping` | `host` (what the client typed) and `protocol`. A server-list request was answered; there is no player and it cannot be cancelled. |
+| `player.login` | `player_name`, `player_uuid`. The player is authenticated and no backend has been chosen yet; it cannot be cancelled. |
 
 No event of the proxy is cancellable yet, so `on` and `watch` differ only for the `plugin.*` events.
-*Not yet:* chat, kick, login and ping events.
+*Not yet:* cancelling any event.
 
 ### Commands
 
@@ -129,7 +133,12 @@ servers.exists(name)
 ### Text
 
 `send` and `broadcast` take MiniMessage (`<gradient:aqua:green>Hi</gradient>`, `<red>`, `<click:...>`). Plain text works as is.
-Clients before 1.19 receive no plugin chat lines yet. *Not yet:* translation keys (`@key`) and `t(...)`.
+Clients before 1.19 receive no plugin chat lines yet.
+
+Lines of text live in `lang/<locale>.toml` inside the plugin (nested tables flatten with dots). A message that starts with `@`
+is a key (`player:send('@shop.bought', {item = 'apple'})`), `t('shop.bought', {item = 'apple'})` returns the line, and `{name}`
+takes a field of the table passed last. Only `en_us` is the default locale for now; `send`, `broadcast`, `kick` and the console
+`send` all resolve keys.
 
 ### Time
 
