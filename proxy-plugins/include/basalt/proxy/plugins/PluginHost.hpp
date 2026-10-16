@@ -2,6 +2,7 @@
 
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/lua/LuaSandbox.hpp>
+#include <basalt/wire/plugins/PluginPackage.hpp>
 #include <basalt/wire/sql/Sqlite.hpp>
 
 #include <atomic>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -52,7 +54,11 @@ public:
     /// True when the first word names a plugin command, which is then queued for the plugin thread; otherwise false.
     [[nodiscard]] bool command(std::string_view line);
 
-    [[nodiscard]] std::size_t loaded() const noexcept { return loaded_; }
+    /// Stops the plugin thread, drops every plugin and its commands, reads the packages again and resumes.
+    /// Events queued meanwhile are kept; per-plugin data stays in the database. Serialised with itself.
+    [[nodiscard]] std::size_t reload();
+
+    [[nodiscard]] std::size_t loaded() const noexcept { return loaded_.load(std::memory_order_relaxed); }
 
     [[nodiscard]] std::size_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
@@ -64,7 +70,9 @@ private:
 
     PluginHost(PluginSettings settings, PluginHooks hooks);
 
-    void load(const std::string& folder, const std::string& name);
+    void loadPackages();
+    void load(const std::shared_ptr<wire::plugins::PluginPackage>& package,
+              const wire::plugins::PluginManifest& manifest);
     void run(std::stop_token stop);
 
     struct CommandCall {
@@ -81,12 +89,16 @@ private:
 
     PluginSettings settings_;
     PluginHooks hooks_;
+    std::map<std::string, std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>>
+        installed_;
     std::optional<wire::sql::Database> database_;
     std::vector<std::unique_ptr<Plugin>> plugins_;
-    std::size_t loaded_ = 0;
+    std::atomic<std::size_t> loaded_{0};
     std::mutex mutex_;
     std::condition_variable_any wake_;
     std::deque<Task> queue_;
+    mutable std::shared_mutex commandsMutex_;
+    std::mutex reloadMutex_;
     std::map<std::string, std::unique_ptr<Command>, std::less<>> commands_;
     bool loading_ = true;
     std::atomic<std::size_t> dropped_{0};

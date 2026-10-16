@@ -1,6 +1,7 @@
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
+#include <basalt/wire/plugins/PluginOrder.hpp>
 #include <basalt/wire/sql/Migrations.hpp>
 
 extern "C" {
@@ -24,23 +25,6 @@ constexpr std::array<std::pair<runtime::PlayerEventKind, std::string_view>, 3> k
     {runtime::PlayerEventKind::kLeave, "leave"},
     {runtime::PlayerEventKind::kSwitch, "switch"},
 }};
-
-std::optional<std::vector<std::uint8_t>> readSource(const std::filesystem::path& path) {
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size > kMaxSourceBytes)
-        return std::nullopt;
-    std::ifstream file{path, std::ios::binary};
-    if (!file)
-        return std::nullopt;
-    return std::vector<std::uint8_t>{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-}
-
-bool safeModuleName(std::string_view name) {
-    return !name.empty() && name.size() <= 64 && name.find("..") == std::string_view::npos &&
-           std::ranges::all_of(
-               name, [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.'; });
-}
 
 } // namespace
 
@@ -97,11 +81,18 @@ struct PluginHost::Access {
         if (!valid)
             return luaL_error(state, "command names are 1..32 characters of a-z, 0-9, '_' and '-'");
         constexpr std::array<std::string_view, 6> kBuiltin = {"help", "servers", "status", "reload", "send", "stop"};
-        if (std::ranges::find(kBuiltin, label) != kBuiltin.end() || self->host->commands_.contains(label))
+        bool refused = std::ranges::find(kBuiltin, label) != kBuiltin.end();
+        if (!refused) {
+            std::unique_lock lock{self->host->commandsMutex_};
+            refused = self->host->commands_.contains(label);
+            if (!refused) {
+                lua_pushvalue(state, 2);
+                self->host->commands_.emplace(std::string{label},
+                                              std::make_unique<Command>(Command{self, wire::lua::LuaRef::take(state)}));
+            }
+        }
+        if (refused)
             return luaL_error(state, "command '%s' already exists", name);
-        lua_pushvalue(state, 2);
-        self->host->commands_.emplace(std::string{label},
-                                      std::make_unique<Command>(Command{self, wire::lua::LuaRef::take(state)}));
         return 0;
     }
 
@@ -233,40 +224,89 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
         if (const auto migrated = wire::sql::migrate(*host->database_, kMigrations); !migrated)
             return std::unexpected("plugin database " + host->settings_.database + ": " + migrated.error());
     }
-    const std::filesystem::path root{host->settings_.directory};
-    if (std::filesystem::is_directory(root, error)) {
-        std::vector<std::filesystem::path> folders;
-        for (const auto& entry : std::filesystem::directory_iterator{root, error})
-            if (entry.is_directory(error) && std::filesystem::exists(entry.path() / "main.lua", error))
-                folders.push_back(entry.path());
-        std::ranges::sort(folders);
-        for (const auto& folder : folders)
-            host->load(folder.string(), folder.filename().string());
-    }
+    host->loadPackages();
     host->loading_ = false;
     host->thread_ = std::jthread{[raw = host.get()](std::stop_token stop) { raw->run(stop); }};
     return host;
 }
 
-void PluginHost::load(const std::string& folder, const std::string& name) {
+void PluginHost::loadPackages() {
+    auto discovered = wire::plugins::discoverPackages(settings_.directory, ".bppkg");
+    if (!discovered) {
+        if (hooks_.log)
+            hooks_.log("plugins", "could not read the plugin directory: " + discovered.error().message);
+        return;
+    }
+    const auto refuse = [this](std::string_view what, std::string_view why) {
+        if (hooks_.log)
+            hooks_.log(what, "did not load: " + std::string{why});
+    };
+    std::vector<std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>> candidates;
+    for (auto& owned : *discovered) {
+        const std::shared_ptr<wire::plugins::PluginPackage> package{std::move(owned)};
+        const auto text = package->readText(wire::plugins::packageLayout::kManifest);
+        if (!text) {
+            refuse(package->origin(), "it has no plugin.toml");
+            continue;
+        }
+        auto manifest = wire::plugins::PluginManifest::parse(*text);
+        if (!manifest) {
+            refuse(package->origin(), manifest.error().message);
+            continue;
+        }
+        if (std::ranges::any_of(candidates, [&](const auto& other) { return other.second.id == manifest->id; })) {
+            refuse(package->origin(), "'" + manifest->id + "' is already installed from another package");
+            continue;
+        }
+        candidates.emplace_back(package, std::move(*manifest));
+    }
+    std::vector<wire::plugins::PluginManifest> manifests;
+    for (const auto& [package, manifest] : candidates)
+        manifests.push_back(manifest);
+    for (const auto& decision : wire::plugins::pluginOrder::resolve(manifests)) {
+        if (!decision.loads()) {
+            refuse(decision.manifest.id, decision.refusal);
+            continue;
+        }
+        const auto found = std::ranges::find_if(
+            candidates, [&](const auto& candidate) { return candidate.second.id == decision.manifest.id; });
+        load(found->first, found->second);
+    }
+}
+
+void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& package,
+                      const wire::plugins::PluginManifest& manifest) {
+    const std::string& name = manifest.id;
     const auto report = [this, &name](std::string_view line) {
         if (hooks_.log)
             hooks_.log(name, line);
     };
-    auto source = readSource(std::filesystem::path{folder} / "main.lua");
-    if (!source) {
-        report("main.lua is missing, unreadable or larger than 1 MiB; plugin skipped");
+    auto source = package->read(manifest.main);
+    if (!source || source->size() > kMaxSourceBytes) {
+        report(manifest.main + " is missing or larger than 1 MiB; plugin skipped");
         return;
     }
+    // A plugin sees its own modules first, then those a dependency that loaded before it chose to export.
+    std::vector<std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>> lenders;
+    for (const wire::plugins::PluginDependency& dependency : manifest.dependencies)
+        if (const auto lender = installed_.find(dependency.id); lender != installed_.end())
+            lenders.push_back(lender->second);
     auto plugin = std::make_unique<Plugin>();
     plugin->name = name;
     plugin->host = this;
     plugin->sandbox = wire::lua::LuaSandbox::create(
         name, settings_.limits, 0,
-        [folder](std::string_view module) -> std::optional<std::vector<std::uint8_t>> {
-            if (!safeModuleName(module))
+        [package, lenders](std::string_view module) -> std::optional<std::vector<std::uint8_t>> {
+            const auto file = wire::plugins::packageLayout::moduleFile(module);
+            if (!file)
                 return std::nullopt;
-            return readSource(std::filesystem::path{folder} / (std::string{module} + ".lua"));
+            auto bytes = package->read(*file);
+            for (std::size_t i = 0; !bytes && i < lenders.size(); ++i)
+                if (lenders[i].second.exports.exportsModule(module))
+                    bytes = lenders[i].first->read(*file);
+            if (bytes && bytes->size() > kMaxSourceBytes)
+                return std::nullopt;
+            return bytes;
         },
         [report](std::string_view line) { report(line); });
     if (!plugin->sandbox) {
@@ -295,8 +335,9 @@ void PluginHost::load(const std::string& folder, const std::string& name) {
     }
     lua_setfield(state, -2, "data");
     lua_setglobal(state, "proxy");
-    auto chunk = plugin->sandbox->compile(
-        std::string_view{reinterpret_cast<const char*>(source->data()), source->size()}, "@" + name + "/main.lua");
+    auto chunk =
+        plugin->sandbox->compile(std::string_view{reinterpret_cast<const char*>(source->data()), source->size()},
+                                 "@" + name + "/" + manifest.main);
     if (!chunk) {
         report("compile failed: " + chunk.error().message);
         return;
@@ -306,8 +347,29 @@ void PluginHost::load(const std::string& folder, const std::string& name) {
         report("failed while loading: " + ran.error().message);
         return;
     }
+    installed_.emplace(name, std::make_pair(package, manifest));
     plugins_.push_back(std::move(plugin));
     ++loaded_;
+}
+
+std::size_t PluginHost::reload() {
+    std::lock_guard serial{reloadMutex_};
+    thread_.request_stop();
+    wake_.notify_all();
+    if (thread_.joinable())
+        thread_.join();
+    {
+        std::unique_lock lock{commandsMutex_};
+        commands_.clear();
+    }
+    plugins_.clear();
+    installed_.clear();
+    loaded_.store(0, std::memory_order_relaxed);
+    loading_ = true;
+    loadPackages();
+    loading_ = false;
+    thread_ = std::jthread{[this](std::stop_token stop) { run(stop); }};
+    return loaded();
 }
 
 bool PluginHost::enqueue(Task task) {
@@ -338,8 +400,11 @@ bool PluginHost::command(std::string_view line) {
             break;
         line.remove_prefix(end);
     }
-    if (words.empty() || !commands_.contains(words.front()))
-        return false;
+    {
+        std::shared_lock lock{commandsMutex_};
+        if (words.empty() || !commands_.contains(words.front()))
+            return false;
+    }
     CommandCall call{words.front(), {words.begin() + 1, words.end()}};
     static_cast<void>(enqueue(std::move(call)));
     return true;

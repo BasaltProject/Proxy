@@ -110,7 +110,11 @@ int run(const cliCommand::Run& command) {
         auto applied = runtime->reload(std::move(*fresh));
         if (!applied)
             return "Reload rejected, nothing changed: " + applied.error();
-        return "Reloaded " + std::to_string(*applied) + " backend(s); sessions in progress keep their snapshot.";
+        std::string message =
+            "Reloaded " + std::to_string(*applied) + " backend(s); sessions in progress keep their snapshot.";
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            message += " Reloaded " + std::to_string(host->reload()) + " plugin(s).";
+        return message;
     };
     std::unique_ptr<proxy::plugins::PluginHost> plugins;
     if (configuration->plugins.enabled) {
