@@ -11,6 +11,7 @@
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
+#include <basalt/wire/common/json/Json.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -23,6 +24,8 @@
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 #include <basalt/wire/protocol/status/StatusPackets.hpp>
+#include <basalt/wire/text/ComponentJson.hpp>
+#include <basalt/wire/text/MiniMessage.hpp>
 
 #include <algorithm>
 #include <array>
@@ -45,9 +48,9 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                              const NativeForwarding* nativeForwarding, std::shared_ptr<const void> topology,
                              std::function<bool(std::string_view, std::string_view)> playerCommand,
-                             std::function<std::vector<std::string>()> playerCommandNames)
+                             std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs)
     : topology_(std::move(topology)), playerCommand_(std::move(playerCommand)),
-      playerCommandNames_(std::move(playerCommandNames)), slot_(std::move(slot)),
+      playerCommandSpecs_(std::move(playerCommandSpecs)), slot_(std::move(slot)),
       localBuffers_(settings.sessionBufferBytes), memory_(std::move(globalBuffers), localBuffers_),
       pendingCookies_(memory_), pendingKeepAlives_(memory_), pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_),
       resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
@@ -68,77 +71,6 @@ ClientSession::~ClientSession() {
         identities_.release(profile_->id);
     if (authentication_)
         authentication_->request_stop();
-}
-
-bool ClientSession::relayCommandTree(std::span<const std::uint8_t> original) {
-    namespace play = wire::protocol::play;
-    constexpr std::size_t kMaxAdded = 64;
-    std::vector<std::string> names = playerCommandNames_ ? playerCommandNames_() : std::vector<std::string>{};
-    if (names.empty())
-        return queuePacket(original);
-    wire::io::ByteBuffer view;
-    view.writeBytes(frame_.readable());
-    auto tree = play::CommandsPacket::read(view);
-    if (!tree || view.readableBytes() != 0 || tree->rootIndex < 0 ||
-        static_cast<std::size_t>(tree->rootIndex) >= tree->nodes.size())
-        return queuePacket(original);
-    auto& root = tree->nodes[static_cast<std::size_t>(tree->rootIndex)];
-    std::size_t added = 0;
-    for (const std::string& name : names) {
-        if (added == kMaxAdded)
-            break;
-        const bool known = std::ranges::any_of(root.children, [&](std::int32_t child) {
-            return child >= 0 && static_cast<std::size_t>(child) < tree->nodes.size() &&
-                   tree->nodes[static_cast<std::size_t>(child)].name == name;
-        });
-        if (known)
-            continue;
-        const auto literal = static_cast<std::int32_t>(tree->nodes.size());
-        play::CommandNodeData command;
-        command.kind = play::CommandNodeData::Kind::Literal;
-        command.executable = true;
-        command.name = name;
-        command.children = {literal + 1};
-        play::CommandNodeData arguments;
-        arguments.kind = play::CommandNodeData::Kind::Argument;
-        arguments.executable = true;
-        arguments.name = "arguments";
-        arguments.parser = play::ArgumentParser{
-            play::argumentType::kBrigadierString,
-            play::ArgumentParser::StringProperties{play::ArgumentParser::StringKind::GreedyPhrase}};
-        tree->nodes.push_back(std::move(command));
-        tree->nodes.push_back(std::move(arguments));
-        tree->nodes[static_cast<std::size_t>(tree->rootIndex)].children.push_back(literal);
-        ++added;
-    }
-    wire::io::ByteBuffer out;
-    wire::protocol::varInt::write(out, play::CommandsPacket::kId);
-    tree->write(out);
-    return queuePacket(out.readable());
-}
-
-void ClientSession::tell(std::string_view text) {
-    if (!inPlay() || text.empty())
-        return;
-    frame_.clear();
-    wire::protocol::varInt::write(frame_, wire::protocol::play::SystemChatPacket::kId);
-    if (legacyRaw_) {
-        if (clientProtocol_ < wire::multiversion::protocolVersions::kV1_19)
-            return;
-        std::string json = R"({"text":")";
-        for (const char c : text.substr(0, 1024))
-            json += c == '"' || c == '\\' ? std::string{'\\', c} : std::string{c};
-        json += R"("})";
-        wire::protocol::writeString(frame_, json);
-        if (clientProtocol_ == wire::multiversion::protocolVersions::kV1_19)
-            wire::protocol::varInt::write(frame_, 1);
-        else
-            wire::protocol::writeBoolean(frame_, false);
-    } else {
-        wire::protocol::play::SystemChatPacket{wire::text::Component::text(std::string{text.substr(0, 1024)}), false}
-            .write(frame_);
-    }
-    static_cast<void>(queuePacket(frame_.readable()));
 }
 
 bool ClientSession::inPlay() const {

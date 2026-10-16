@@ -125,8 +125,11 @@ struct ProxyRuntime::Impl {
             if (found == sessions.end())
                 return;
             if (found->second->announced && runtime.services.playerEvents)
-                runtime.services.playerEvents({PlayerEventKind::kLeave, std::string{found->second->playerName()},
-                                               found->second->announcedBackend});
+                runtime.services.playerEvents({PlayerEventKind::kLeave,
+                                               std::string{found->second->playerName()},
+                                               found->second->announcedBackend,
+                                               found->second->playerUuid(),
+                                               {}});
             loop.unwatch(found->second->handle());
             unwatchBackends(*found->second);
             (void)timers.cancel(found->second->timer);
@@ -156,7 +159,7 @@ struct ProxyRuntime::Impl {
                 },
                 snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
                 runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot,
-                runtime.services.playerCommand, runtime.services.playerCommandNames);
+                runtime.services.playerCommand, runtime.services.playerCommandSpecs);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -222,12 +225,16 @@ struct ProxyRuntime::Impl {
             if (!session.announced) {
                 session.announced = true;
                 session.announcedBackend = backend;
-                runtime.services.playerEvents(
-                    {PlayerEventKind::kJoin, std::string{session.playerName()}, session.announcedBackend});
+                runtime.services.playerEvents({PlayerEventKind::kJoin,
+                                               std::string{session.playerName()},
+                                               session.announcedBackend,
+                                               session.playerUuid(),
+                                               {}});
             } else if (backend != session.announcedBackend) {
+                const std::string from = session.announcedBackend;
                 session.announcedBackend = backend;
-                runtime.services.playerEvents(
-                    {PlayerEventKind::kSwitch, std::string{session.playerName()}, session.announcedBackend});
+                runtime.services.playerEvents({PlayerEventKind::kSwitch, std::string{session.playerName()},
+                                               session.announcedBackend, session.playerUuid(), from});
             }
         }
 
@@ -673,6 +680,31 @@ bool ProxyRuntime::tellPlayer(std::string_view player, std::string_view text) {
                     if (session->playerName() != *name)
                         continue;
                     session->tell(*line);
+                    if (!destination->refresh(id, *session))
+                        destination->close(id);
+                    break;
+                }
+            }))
+            handed = false;
+        else
+            (void)destination->loop.wake();
+    }
+    return handed;
+}
+
+bool ProxyRuntime::kickPlayer(std::string_view player, std::string_view reason) {
+    if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player))
+        return false;
+    const auto name = std::make_shared<const std::string>(player);
+    const auto text = std::make_shared<const std::string>(reason.substr(0, 1024));
+    bool handed = true;
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, name, text] {
+                for (auto& [id, session] : destination->sessions) {
+                    if (session->playerName() != *name)
+                        continue;
+                    session->kick(*text);
                     if (!destination->refresh(id, *session))
                         destination->close(id);
                     break;

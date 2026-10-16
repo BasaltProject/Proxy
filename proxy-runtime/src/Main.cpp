@@ -90,9 +90,9 @@ int run(const cliCommand::Run& command) {
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     RuntimeServices services;
-    services.playerCommandNames = [&pluginHost]() -> std::vector<std::string> {
+    services.playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
         auto* host = pluginHost.load(std::memory_order_acquire);
-        return host != nullptr ? host->playerCommandNames() : std::vector<std::string>{};
+        return host != nullptr ? host->playerCommandSpecs() : std::vector<PlayerCommandSpec>{};
     };
     services.playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
         auto* host = pluginHost.load(std::memory_order_acquire);
@@ -133,6 +133,7 @@ int run(const cliCommand::Run& command) {
         settings.directory = configuration->plugins.directory;
         settings.database = configuration->plugins.database;
         settings.allow = configuration->plugins.allow;
+        settings.operators = configuration->plugins.operators;
         settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
         settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
         settings.queueSize = configuration->plugins.queueSize;
@@ -143,6 +144,13 @@ int run(const cliCommand::Run& command) {
         };
         hooks.tell = [&runtime](std::string_view player, std::string_view text) {
             static_cast<void>(runtime->tellPlayer(player, text));
+        };
+        hooks.kick = [&runtime](std::string_view player, std::string_view reason) {
+            static_cast<void>(runtime->kickPlayer(player, reason));
+        };
+        hooks.console = [&pluginHost](std::string_view line) {
+            auto* host = pluginHost.load(std::memory_order_acquire);
+            return host != nullptr && host->command(line);
         };
         hooks.log = [](std::string_view plugin, std::string_view line) {
             wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });

@@ -10,6 +10,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -26,7 +27,27 @@ enum class PlayerEventKind { kJoin, kLeave, kSwitch };
 struct PlayerEvent {
     PlayerEventKind kind;
     std::string player;
+    /// The backend the player is on; for a leave, the one it left from.
     std::string backend;
+    std::string uuid;
+    /// The backend a switch came from.
+    std::string from;
+};
+
+/// A command a plugin registered for players: the words that name it, then typed arguments.
+struct PlayerCommandSpec {
+    enum class Kind : std::uint8_t { kWord, kText, kInt, kFloat, kBool };
+
+    struct Argument {
+        std::string name;
+        Kind kind = Kind::kWord;
+        bool optional = false;
+        std::optional<std::int64_t> min;
+        std::optional<std::int64_t> max;
+    };
+
+    std::vector<std::string> literals;
+    std::vector<Argument> arguments;
 };
 
 struct RuntimeServices {
@@ -39,8 +60,8 @@ struct RuntimeServices {
     /// Offered every command a player types in play (without the slash). True consumes it: it is not sent to the
     /// backend. Called on session owner threads; must return quickly and never block.
     std::function<bool(std::string_view player, std::string_view command)> playerCommand = {};
-    /// The names of those commands, added to every command tree the proxy relays so clients know them.
-    std::function<std::vector<std::string>()> playerCommandNames = {};
+    /// Those commands, added to every command tree the proxy relays so clients know them and complete their arguments.
+    std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {};
 };
 
 class ProxyRuntime {
@@ -65,6 +86,8 @@ public:
     /// Thread-safe. Queues a chat line to a player's client; true when handed to the session owners, not when
     /// delivered.
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
+    /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.
+    [[nodiscard]] bool kickPlayer(std::string_view player, std::string_view reason);
     [[nodiscard]] std::uint16_t port() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;

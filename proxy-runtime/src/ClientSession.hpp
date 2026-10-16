@@ -8,6 +8,7 @@
 #include "PendingResponses.hpp"
 #include "ResourcePacks.hpp"
 
+#include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/Cfb8Cipher.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/io/BudgetMemoryResource.hpp>
@@ -29,6 +30,10 @@
 #include <stop_token>
 #include <string_view>
 #include <vector>
+
+namespace basalt::proxy::runtime {
+struct PlayerCommandSpec;
+}
 
 namespace basalt::proxy::config {
 struct RuntimeConfig;
@@ -61,7 +66,7 @@ public:
                   std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
                   const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
                   std::function<bool(std::string_view, std::string_view)> playerCommand = {},
-                  std::function<std::vector<std::string>()> playerCommandNames = {});
+                  std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs = {});
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -75,12 +80,15 @@ public:
     [[nodiscard]] bool relayCommandTree(std::span<const std::uint8_t> original);
     /// Queues a system chat line; ignored unless the client is in play.
     void tell(std::string_view text);
+    /// Disconnects the player with a MiniMessage reason; ignored unless the client is in play.
+    void kick(std::string_view reason);
     [[nodiscard]] std::string_view activeBackendName() const;
     bool announced = false;
     std::string announcedBackend;
     [[nodiscard]] bool requestBackendChange(std::size_t target);
     [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
+    [[nodiscard]] std::string playerUuid() const;
     [[nodiscard]] bool candidatePrepared() const;
     [[nodiscard]] bool beginPreparedChange();
     [[nodiscard]] bool commitLegacyChange();
@@ -173,7 +181,7 @@ private:
     [[nodiscard]] bool bufferedPacket() const;
     std::shared_ptr<const void> topology_;
     std::function<bool(std::string_view, std::string_view)> playerCommand_;
-    std::function<std::vector<std::string>()> playerCommandNames_;
+    std::function<std::vector<PlayerCommandSpec>()> playerCommandSpecs_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;
