@@ -1,4 +1,5 @@
 #include "ClientSession.hpp"
+#include "NativeForwarding.hpp"
 
 #include "BackendDial.hpp"
 #include "BackendLogin.hpp"
@@ -35,10 +36,11 @@ ClientSession::ClientSession(wire::io::TcpConnection connection, wire::io::Resou
                              std::span<const std::uint8_t> publicKey, std::span<const std::uint8_t> authFailure,
                              AuthenticationStart authenticate, const BackendRoutes& routes, ResolutionStart resolve,
                              const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                             std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities)
+                             std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
+                             const NativeForwarding* nativeForwarding)
     : slot_(std::move(slot)), localBuffers_(settings.sessionBufferBytes),
       memory_(std::move(globalBuffers), localBuffers_), pendingCookies_(memory_), pendingKeepAlives_(memory_),
-      pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_), resourcePacks_(memory_), identities_(identities),
+      pendingPings_(memory_, 0x7fffffff), cookieCache_(memory_), resourcePacks_(memory_), identities_(identities), nativeForwarding_(nativeForwarding),
       connection_(std::move(connection)), settings_(settings), status_(status), unavailable_(unavailable),
       online_(online), checkAddress_(checkAddress), acceptTransfers_(acceptTransfers),
       compressionThreshold_(compressionThreshold), publicKey_(publicKey), authFailure_(authFailure),
@@ -594,7 +596,8 @@ bool ClientSession::dial() {
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
     dialAttempt_.reset();
     if (!profile_ || !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_,
-                                               virtualPort_, connection_.remoteAddress())) {
+                                               virtualPort_, connection_.remoteAddress(), connection_.remotePort(),
+                                               nativeForwarding_)) {
         if (recovering_)
             return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {

@@ -1,6 +1,8 @@
 #include "BackendChangeState.hpp"
 #include "BackendRoutes.hpp"
 #include "ClientSession.hpp"
+#include "ForwardingKey.hpp"
+#include "NativeForwarding.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/Admission.hpp>
@@ -107,7 +109,8 @@ struct ProxyRuntime::Impl {
                     return resolve(id, attempt, deadline);
                 },
                 runtime.config.backends, runtime.buffers, runtime.config.network.compressionThreshold,
-                runtime.config.network.acceptTransfers, runtime.identities);
+                runtime.config.network.acceptTransfers, runtime.identities,
+                runtime.nativeForwarding ? &*runtime.nativeForwarding : nullptr);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -354,6 +357,7 @@ struct ProxyRuntime::Impl {
     std::vector<std::uint8_t> authenticationFailure;
     RuntimeServices services;
     std::optional<wire::auth::SessionKeyPair> key;
+    std::optional<detail::NativeForwarding> nativeForwarding;
     std::optional<wire::io::WorkerPool> workers;
     detail::IdentityRegistry identities;
     std::vector<std::unique_ptr<Owner>> owners;
@@ -419,6 +423,15 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
             impl->key = wire::auth::SessionKeyPair::generate();
             if (!impl->key)
                 return std::unexpected("could not generate the login key");
+        }
+        if (std::ranges::any_of(impl->config.backends, [](const config::BackendConfig& backend) {
+                return backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+            })) {
+            auto signing = detail::loadOrCreateForwardingKey(impl->config.forwarding.keyFile);
+            if (!signing)
+                return std::unexpected(signing.error());
+            impl->nativeForwarding = detail::NativeForwarding{std::move(*signing), impl->config.forwarding.proxyId,
+                                                              impl->config.network.onlineMode};
         }
         auto workers = wire::io::WorkerPool::create(impl->config.runtime.workers, impl->config.runtime.maxPendingWork);
         if (!workers)

@@ -1,7 +1,9 @@
 #include "BackendLogin.hpp"
+#include "NativeForwarding.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
+#include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
 #include <basalt/wire/auth/forwarding/VelocityForwarding.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -26,24 +28,50 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
     const auto payload = query.readSpan(query.readableBytes());
     if (query.failed())
         return std::unexpected(BackendLoginError::kMalformed);
-    const bool forwarding = backend.forwarding == wire::auth::forwarding::ForwardingMode::Velocity &&
-                            std::ranges::equal(channel, velocity::kChannel);
+    using Mode = wire::auth::forwarding::ForwardingMode;
+    namespace basalt = wire::auth::forwarding::native;
+    const bool velocityChannel = backend.forwarding == Mode::Velocity && std::ranges::equal(channel, velocity::kChannel);
+    const bool nativeChannel = backend.forwarding == Mode::Basalt && std::ranges::equal(channel, basalt::kChannel);
+    const bool forwarding = velocityChannel || nativeChannel;
     const auto requested = payload.empty() ? 1 : payload[0];
-    if (forwarding && (velocityForwarded_ || payload.size() > 1 || requested == 0))
+    if (forwarding && forwarded_)
         return std::unexpected(BackendLoginError::kMalformed);
+    if (velocityChannel && (payload.size() > 1 || requested == 0))
+        return std::unexpected(BackendLoginError::kMalformed);
+    std::optional<basalt::Request> nativeRequest;
+    if (nativeChannel) {
+        nativeRequest = basalt::decodeRequest(payload);
+        if (!nativeRequest || !native_)
+            return std::unexpected(BackendLoginError::kMalformed);
+    }
     frame_.clear();
     if (!frame_.tryReserve(forwarding ? kForwardingPacketLimit : kCapacity))
         return std::unexpected(BackendLoginError::kLimit);
     protocol::varInt::write(frame_, protocol::login::LoginPluginResponsePacket::kId);
     protocol::varInt::write(frame_, transaction);
     protocol::writeBoolean(frame_, forwarding);
-    if (forwarding && !velocity::signInto(frame_, backend.secret, remoteAddress_, profile.id, profile.name,
-                                          profile.properties, requested >= 4 ? 4 : 1))
+    if (velocityChannel && !velocity::signInto(frame_, backend.secret, remoteAddress_, profile.id, profile.name,
+                                               profile.properties, requested >= 4 ? 4 : 1))
         return std::unexpected(BackendLoginError::kMalformed);
+    if (nativeChannel) {
+        basalt::Identity identity{.profileId = profile.id,
+                                  .name = profile.name,
+                                  .properties = profile.properties,
+                                  .address = std::string{remoteAddress_},
+                                  .port = remotePort_,
+                                  .virtualHost = std::string{virtualHost_},
+                                  .virtualPort = virtualPort_,
+                                  .onlineMode = native_->onlineMode,
+                                  .proxyId = native_->proxyId};
+        const auto response = basalt::sign(native_->key, *nativeRequest, basalt::kVersion1, identity);
+        if (response.empty())
+            return std::unexpected(BackendLoginError::kMalformed);
+        frame_.writeBytes(response);
+    }
     if (auto result = queue(frame_.readable(), forwarding ? kForwardingPacketLimit : kCapacity); !result)
         return result;
     if (forwarding)
-        velocityForwarded_ = true;
+        forwarded_ = true;
     return {};
 }
 

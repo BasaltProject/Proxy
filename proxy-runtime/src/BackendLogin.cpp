@@ -1,4 +1,5 @@
 #include "BackendLogin.hpp"
+#include "NativeForwarding.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
@@ -24,20 +25,25 @@ BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_
 std::expected<void, BackendLoginError> BackendLogin::start(const config::BackendConfig& backend,
                                                            const wire::auth::SessionProfile& profile,
                                                            std::string_view virtualHost, std::uint16_t virtualPort,
-                                                           std::string_view remoteAddress) {
+                                                           std::string_view remoteAddress, std::uint16_t remotePort,
+                                                           const NativeForwarding* native) {
     namespace protocol = wire::protocol;
     if (!allocationReady_)
         return std::unexpected(BackendLoginError::kLimit);
     if (phase_ != Phase::kUnstarted || backend.protocol != buildInfo::kProtocolVersion ||
         (backend.forwarding != wire::auth::forwarding::ForwardingMode::None &&
          backend.forwarding != wire::auth::forwarding::ForwardingMode::Velocity &&
+         backend.forwarding != wire::auth::forwarding::ForwardingMode::Basalt &&
          !wire::auth::forwarding::isLegacyForwarding(backend.forwarding)))
         return std::unexpected(BackendLoginError::kUnsupported);
     if (backend.forwarding == wire::auth::forwarding::ForwardingMode::Velocity && backend.secret.empty())
         return std::unexpected(BackendLoginError::kUnsupported);
+    if (backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt && (!native || native->proxyId.empty()))
+        return std::unexpected(BackendLoginError::kUnsupported);
     if (!wire::auth::validLoginName(profile.name) || virtualHost.empty() || virtualHost.size() > 255 ||
         virtualHost.find('\0') != std::string_view::npos)
         return std::unexpected(BackendLoginError::kMalformed);
+    const std::string_view virtualHostText = virtualHost;
     std::optional<std::string> forwardedHost;
     if (wire::auth::forwarding::isLegacyForwarding(backend.forwarding)) {
         using Mode = wire::auth::forwarding::ForwardingMode;
@@ -72,6 +78,10 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
     backendConfig_ = &backend;
     profile_ = &profile;
     remoteAddress_ = remoteAddress;
+    remotePort_ = remotePort;
+    native_ = native;
+    virtualHost_ = virtualHostText;
+    virtualPort_ = virtualPort;
     phase_ = Phase::kLogin;
     return {};
 }

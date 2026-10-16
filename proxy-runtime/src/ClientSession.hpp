@@ -37,6 +37,7 @@ namespace basalt::proxy::runtime::detail {
 class BackendRoutes;
 class BackendDial;
 class BackendLogin;
+struct NativeForwarding;
 
 class ClientSession {
 public:
@@ -54,7 +55,8 @@ public:
                   std::span<const std::uint8_t> authFailure, AuthenticationStart authenticate,
                   const BackendRoutes& routes, ResolutionStart resolve,
                   const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
-                  std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities);
+                  std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
+                  const NativeForwarding* nativeForwarding = nullptr);
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -145,6 +147,7 @@ private:
     CookieCache cookieCache_;
     ResourcePacks resourcePacks_;
     IdentityRegistry& identities_;
+    const NativeForwarding* nativeForwarding_;
     bool identityClaimed_ = false;
     bool allocationReady_ = false;
     wire::io::TcpConnection connection_;
