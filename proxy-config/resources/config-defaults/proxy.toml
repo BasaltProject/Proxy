@@ -59,8 +59,8 @@ keep-days = 14
 color = "auto"
 
 [bedrock]
-# Bedrock Edition listener (UDP). Today it only answers server-list pings and refuses connections as full: translating
-# Bedrock players to a Java backend is not implemented. Off by default.
+# Bedrock Edition listener (UDP). A Bedrock player joins the first backend of the default route as a Java client,
+# with chunks, position and chat translated; everything else is not translated yet. Off by default.
 enabled = false
 port = 19132
 motd = "Basalt Proxy"
