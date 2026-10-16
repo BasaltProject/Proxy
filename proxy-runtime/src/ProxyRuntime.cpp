@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -36,6 +37,25 @@ struct Topology {
     std::vector<config::BackendConfig> backends;
     detail::BackendRoutes routes;
     std::shared_ptr<const detail::NativeForwarding> forwarding;
+};
+
+/// libc++ has no std::atomic<std::shared_ptr>, so a mutex guards the pointer swap; readers copy it and release the
+/// lock.
+class SnapshotCell {
+public:
+    [[nodiscard]] std::shared_ptr<const Topology> load() const {
+        std::lock_guard lock{mutex_};
+        return value_;
+    }
+
+    void store(std::shared_ptr<const Topology> value) {
+        std::lock_guard lock{mutex_};
+        value_ = std::move(value);
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::shared_ptr<const Topology> value_;
 };
 
 std::expected<std::shared_ptr<const detail::NativeForwarding>, std::string>
@@ -392,7 +412,7 @@ struct ProxyRuntime::Impl {
     };
 
     config::ProxyConfig config;
-    std::atomic<std::shared_ptr<const Topology>> topology;
+    SnapshotCell topology;
     Admission admission;
     ResourceBudget slots;
     ResourceBudget buffers;
