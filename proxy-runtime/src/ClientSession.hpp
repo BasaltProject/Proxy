@@ -58,7 +58,9 @@ public:
                   const BackendRoutes& routes, ResolutionStart resolve,
                   const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
                   std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
-                  const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr);
+                  const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr,
+                  std::function<bool(std::string_view, std::string_view)> playerCommand = {},
+                  std::function<std::vector<std::string>()> playerCommandNames = {});
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -68,6 +70,10 @@ public:
     /// Owner only. Preparation preserves the frontend play state.
     [[nodiscard]] bool prepareBackend(std::size_t target);
     [[nodiscard]] bool inPlay() const;
+    /// Relays the backend's command tree with the plugins' player commands added; the tree untouched if unreadable.
+    [[nodiscard]] bool relayCommandTree(std::span<const std::uint8_t> original);
+    /// Queues a system chat line; ignored unless the client is in play.
+    void tell(std::string_view text);
     [[nodiscard]] std::string_view activeBackendName() const;
     bool announced = false;
     std::string announcedBackend;
@@ -156,6 +162,8 @@ private:
     void backpressure();
     [[nodiscard]] bool bufferedPacket() const;
     std::shared_ptr<const void> topology_;
+    std::function<bool(std::string_view, std::string_view)> playerCommand_;
+    std::function<std::vector<std::string>()> playerCommandNames_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;

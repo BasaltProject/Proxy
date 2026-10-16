@@ -77,12 +77,10 @@ public:
     relayCookie(const wire::protocol::cookie::ResponsePacket& response);
 
     /// Configuration, profile and address must remain valid until login acknowledgement or closure.
-    [[nodiscard]] std::expected<void, BackendLoginError> start(const config::BackendConfig& backend,
-                                                               const wire::auth::SessionProfile& profile,
-                                                               std::string_view virtualHost, std::uint16_t virtualPort,
-                                                               std::string_view remoteAddress,
-                                                               std::uint16_t remotePort = 0,
-                                                               const NativeForwarding* native = nullptr);
+    [[nodiscard]] std::expected<void, BackendLoginError>
+    start(const config::BackendConfig& backend, const wire::auth::SessionProfile& profile, std::string_view virtualHost,
+          std::uint16_t virtualPort, std::string_view remoteAddress, std::uint16_t remotePort = 0,
+          const NativeForwarding* native = nullptr);
     /// Query begins after its packet ID. Replies affect only this transport.
     [[nodiscard]] std::expected<void, BackendLoginError> answerPluginQuery(wire::io::ByteBuffer& query);
 

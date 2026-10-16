@@ -135,7 +135,8 @@ struct ProxyRuntime::Impl {
                     return resolve(id, attempt, deadline, snapshot);
                 },
                 snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
-                runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot);
+                runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot,
+                runtime.services.playerCommand, runtime.services.playerCommandNames);
             if (!session->accounted())
                 return;
             auto timer = timers.schedule(session->deadline(), id);
@@ -622,6 +623,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.forwarding == fresh.forwarding, "[forwarding]");
     compare(current.logging == fresh.logging, "[logging]");
     compare(current.bedrock == fresh.bedrock, "[bedrock]");
+    compare(current.reload == fresh.reload, "[reload]");
     compare(current.plugins == fresh.plugins, "plugins.toml");
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
@@ -636,6 +638,31 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     impl_->topology.store(std::make_shared<const Topology>(
         Topology{std::move(fresh.backends), std::move(*routes), std::move(*forwarding)}));
     return count;
+}
+
+bool ProxyRuntime::tellPlayer(std::string_view player, std::string_view text) {
+    if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player) || text.empty())
+        return false;
+    const auto name = std::make_shared<const std::string>(player);
+    const auto line = std::make_shared<const std::string>(text.substr(0, 1024));
+    bool handed = true;
+    for (const auto& owner : impl_->owners) {
+        auto* destination = owner.get();
+        if (!destination->mailbox.push([destination, name, line] {
+                for (auto& [id, session] : destination->sessions) {
+                    if (session->playerName() != *name)
+                        continue;
+                    session->tell(*line);
+                    if (!destination->refresh(id, *session))
+                        destination->close(id);
+                    break;
+                }
+            }))
+            handed = false;
+        else
+            (void)destination->loop.wake();
+    }
+    return handed;
 }
 
 std::vector<std::string> ProxyRuntime::backendNames() const {

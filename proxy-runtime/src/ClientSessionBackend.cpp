@@ -13,6 +13,7 @@
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
 #include <basalt/wire/protocol/play/BorderPackets.hpp>
+#include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/PlayPackets.hpp>
 
 #include <algorithm>
@@ -147,6 +148,12 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
             clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5 &&
             id == wire::protocol::configuration::SelectKnownPacksPacket::kClientboundId)
             return answerKnownPacks();
+        if (state_ == State::kPlay && playerCommandNames_ && id == wire::protocol::play::CommandsPacket::kId) {
+            if (!relayCommandTree(*packet))
+                return false;
+            backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+            return true;
+        }
         if (id == (state_ == State::kConfiguration ? 0x01 : 0x18)) {
             const auto result = pluginMessage(true);
             if (result != PluginMessageResult::kRelay) {
