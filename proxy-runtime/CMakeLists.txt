@@ -18,6 +18,9 @@ basalt_module(proxy-runtime-core
         src/ResourcePacks.cpp
         src/ClientSessionCookies.cpp
         src/ClientSessionCandidate.cpp
+        src/ClientSessionRecovery.cpp
+        src/ClientSessionKeepAlives.cpp
+        src/PendingResponses.cpp
         src/PendingCookies.cpp
         src/CookieCache.cpp
         src/IdentityRegistry.cpp

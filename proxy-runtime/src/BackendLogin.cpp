@@ -16,7 +16,7 @@ namespace basalt::proxy::runtime::detail {
 
 BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory,
                            BackendAttempt attempt)
-    : attempt_(attempt), connection_(std::move(connection)), cookieKey_(0, memory), input_(0, memory),
+    : memory_(memory), attempt_(attempt), connection_(std::move(connection)), cookieKey_(0, memory), input_(0, memory),
       output_(0, memory), frame_(0, memory) {
     allocationReady_ = input_.tryReserve(kCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
 }
@@ -77,6 +77,8 @@ std::expected<void, BackendLoginError> BackendLogin::start(const config::Backend
 }
 
 BackendLogin::Clock::time_point BackendLogin::deadline(bool readingPaused) const {
+    if (phase_ == Phase::kRetired)
+        return Clock::time_point::max();
     return std::min({preparationDeadline_, writeDeadline_, readingPaused ? Clock::time_point::max() : readDeadline_});
 }
 
@@ -90,6 +92,18 @@ void BackendLogin::expectReadUntil(Clock::time_point deadline) { readDeadline_ =
 void BackendLogin::boundPreparation(Clock::time_point deadline) {
     if (phase_ == Phase::kLogin)
         preparationDeadline_ = std::min(preparationDeadline_, deadline);
+}
+
+void BackendLogin::retire() {
+    connection_.close();
+    cookieKey_ = wire::io::ByteBuffer{0, memory_};
+    input_ = wire::io::ByteBuffer{0, memory_};
+    output_ = wire::io::ByteBuffer{0, memory_};
+    frame_ = wire::io::ByteBuffer{0, memory_};
+    phase_ = Phase::kRetired;
+    preparationDeadline_ = Clock::time_point::max();
+    readDeadline_ = Clock::time_point::max();
+    writeDeadline_ = Clock::time_point::max();
 }
 
 bool BackendLogin::inLogin() const { return phase_ == Phase::kLogin || phase_ == Phase::kLoginAccepted; }
@@ -135,13 +149,15 @@ bool BackendLogin::bufferedPacket() const {
 }
 
 wire::io::IoInterest BackendLogin::interest(bool read) const {
+    if (phase_ == Phase::kRetired)
+        return {false, false};
     read = read && !hasCookieRequest();
     return {read, hasOutput() || (read && bufferedPacket())};
 }
 
 std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::uint8_t> packet,
                                                            std::size_t loginLimit) {
-    if (phase_ == Phase::kUnstarted || packet.empty())
+    if (phase_ == Phase::kUnstarted || phase_ == Phase::kRetired || packet.empty())
         return std::unexpected(BackendLoginError::kMalformed);
     output_.discardReadBytes();
     const auto maximum = compression_ ? wire::protocol::packetFraming::kMaxUncompressedSize
@@ -161,7 +177,7 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
 
 std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::ready(const wire::io::IoReady& event,
                                                                                     bool readEnabled) {
-    if (phase_ == Phase::kUnstarted)
+    if (phase_ == Phase::kUnstarted || phase_ == Phase::kRetired)
         return std::unexpected(BackendLoginError::kMalformed);
     if (output_.readableBytes() != 0 && event.writable) {
         auto written = connection_.writeSome(output_.readable());

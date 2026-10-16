@@ -39,15 +39,34 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
          state_ != State::kConfiguration && state_ != State::kPlay) ||
         !backend() || event.handle != backend()->handle())
         return false;
-    if (backendPaused_ && event.closed && backend()->hasOutput())
+    const bool closingCookie = state_ == State::kCookieResponse && !activeBackend_ && event.closed;
+    if (backendPaused_ && event.closed && backend()->hasOutput() && !closingCookie)
         return false;
-    if ((state_ == State::kCookieResponse || state_ == State::kLoginAck || startingConfiguration_) && event.closed)
+    if ((state_ == State::kLoginAck || startingConfiguration_) && event.closed)
         return false;
-    auto packet = backend()->ready(event, !backendPaused_ && !startingConfiguration_ && state_ != State::kLoginAck &&
-                                              state_ != State::kCookieResponse);
+    auto sourceEvent = event;
+    if (closingCookie) {
+        backend()->cancelCookieRequest();
+        sourceEvent.writable = false;
+    }
+    const bool readBackend = closingCookie || (!backendPaused_ && !startingConfiguration_ &&
+                                               state_ != State::kLoginAck && state_ != State::kCookieResponse);
+    auto packet = backend()->ready(sourceEvent, readBackend);
     backpressure();
-    if (!packet)
+    if (!packet) {
+        if (closingCookie && packet.error() == BackendLoginError::kIo) {
+            candidateBackend_.reset();
+            backpressure();
+            return true;
+        }
+        if (state_ == State::kPlay && activeBackend_ && packet.error() == BackendLoginError::kIo)
+            return recoverBackend();
+        if (state_ == State::kBackendLogin && !activeBackend_ && packet.error() == BackendLoginError::kIo) {
+            candidateBackend_.reset();
+            return route();
+        }
         return false;
+    }
     if (packet->empty())
         return true;
     const bool relay = state_ == State::kConfiguration || state_ == State::kPlay;
@@ -60,7 +79,8 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     const auto id = wire::protocol::varInt::read(frame_);
     if (frame_.failed())
         return false;
-    if (state_ == State::kLoginAck)
+    if (state_ == State::kLoginAck ||
+        (state_ == State::kCookieResponse && id != wire::protocol::login::LoginDisconnectPacket::kId))
         return false;
     if (id == wire::protocol::cookie::RequestPacket::kLoginId && state_ == State::kBackendLogin) {
         auto action = backend()->requestCookie(frame_, cookieCache_);
@@ -77,6 +97,11 @@ bool ClientSession::backendEvent(const wire::io::IoReady& event) {
     if (state_ == State::kConfiguration || state_ == State::kPlay) {
         if (id < 0)
             return false;
+        if (id == (state_ == State::kConfiguration ? wire::protocol::configuration::KeepAlivePacket::kId
+                                                   : wire::protocol::play::PlayKeepAlivePacket::kClientboundId))
+            return backendChallenge();
+        if (id == (state_ == State::kConfiguration ? 0x05 : 0x3d))
+            return backendChallenge(true);
         const bool transfer =
             id == (state_ == State::kConfiguration ? 0x0c : wire::protocol::play::TransferPacket::kId);
         const bool terminal = transfer || (state_ == State::kConfiguration && id == kConfigurationDisconnectId) ||

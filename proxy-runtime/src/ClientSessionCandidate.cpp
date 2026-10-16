@@ -2,7 +2,9 @@
 #include "ClientSession.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/configuration/ConfigurationPackets.hpp>
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
@@ -12,9 +14,9 @@
 namespace basalt::proxy::runtime::detail {
 
 bool ClientSession::prepareBackend(std::size_t target) {
-    if (closing_ || state_ != State::kPlay || Clock::now() >= deadline() || !activeBackend_ || candidateBackend_ ||
-        startingConfiguration_ || connectionStage_ != ConnectionStage::kIdle || target >= backends_.size() ||
-        target == activeBackend_->attempt().target)
+    if (closing_ || recovering_ || state_ != State::kPlay || Clock::now() >= deadline() || !activeBackend_ ||
+        candidateBackend_ || startingConfiguration_ || connectionStage_ != ConnectionStage::kIdle ||
+        target >= backends_.size() || target == activeBackend_->attempt().target)
         return false;
     requestedTarget_[0] = target;
     targets_ = requestedTarget_;
@@ -68,8 +70,22 @@ bool ClientSession::acknowledgePreparedChange() {
     if (!queuePacket(removePacks) || !queuePacket(clearReportDetails) || !queuePacket(clearServerLinks) ||
         !queuePacket(clearDialog))
         return false;
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, wire::protocol::configuration::BrandPacket::kId);
+    wire::protocol::writeString(frame_, wire::protocol::configuration::BrandPacket::kChannel);
+    wire::protocol::writeString(frame_, "Basalt Proxy");
+    if (!queuePacket(frame_.readable()))
+        return false;
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, wire::protocol::configuration::UpdateEnabledFeaturesPacket::kId);
+    wire::protocol::varInt::write(frame_, 1);
+    wire::protocol::writeString(frame_, "minecraft:vanilla");
+    if (!queuePacket(frame_.readable()))
+        return false;
     // The public configuration ACK commits ownership of subsequent traffic.
     resourcePacks_.clear();
+    pendingKeepAlives_.clear();
+    pendingPings_.clear();
     activeBackend_.reset();
     activeBackend_ = std::move(candidateBackend_);
     cancelConnectionAttempt();
@@ -78,6 +94,9 @@ bool ClientSession::acknowledgePreparedChange() {
     startingConfiguration_ = false;
     switchingBackend_ = false;
     changeWhenPrepared_ = false;
+    if (!recovering_)
+        recoveryVisited_.reset();
+    recovering_ = false;
     finishingConfiguration_ = false;
     frontendPaused_ = false;
     backendPaused_ = false;
@@ -101,18 +120,32 @@ bool ClientSession::candidateReady(const wire::io::IoReady& event) {
     const auto reject = [this] {
         if (switchingBackend_)
             return false;
+        if (recovering_)
+            return recoveryFailed();
         discardCandidate();
         return true;
     };
     if (state_ != State::kPlay || !activeBackend_ || !candidateBackend_)
         return false;
-    if (event.closed)
+    if (event.closed && candidateBackend_->phase() != BackendLogin::Phase::kLogin) {
+        if (recovering_ && !switchingBackend_) {
+            candidateBackend_.reset();
+            return route();
+        }
+        return reject();
+    }
+    if (event.closed && !recovering_)
         return reject();
     auto& endpoint = *candidateBackend_;
     const auto packet = endpoint.ready(event, !backendPaused_ && endpoint.phase() == BackendLogin::Phase::kLogin &&
                                                   !endpoint.hasCookieRequest());
-    if (!packet)
+    if (!packet) {
+        if (recovering_ && !switchingBackend_ && packet.error() == BackendLoginError::kIo) {
+            candidateBackend_.reset();
+            return route();
+        }
         return reject();
+    }
     if (packet->empty())
         return true;
     frame_.clear();
@@ -138,6 +171,10 @@ bool ClientSession::candidateReady(const wire::io::IoReady& event) {
     } else if (id == wire::protocol::login::LoginFinishedPacket::kId) {
         if (!endpoint.acceptLogin(frame_))
             return reject();
+        if (event.closed && recovering_ && !switchingBackend_) {
+            candidateBackend_.reset();
+            return route();
+        }
     } else {
         return reject();
     }
