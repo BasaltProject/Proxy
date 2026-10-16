@@ -19,7 +19,7 @@ struct BackendChangeState {
     std::mutex publication;
     bool admitted = false;
     std::string player;
-    std::size_t target = 0;
+    std::string backend;
     std::atomic<std::size_t> remaining{0};
     std::atomic<bool> claimed{false};
     std::atomic<BackendChangeResult> outcome{BackendChangeResult::kPlayerNotFound};

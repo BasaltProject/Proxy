@@ -11,11 +11,13 @@
 
 namespace basalt::proxy::runtime::detail {
 namespace {
-constexpr std::string_view kHelp = "Commands: help, servers, status, send <player> <backend>, stop.";
+constexpr std::string_view kHelp = "Commands: help, servers, status, reload, send <player> <backend>, stop.";
 }
 
 ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
-                            const std::vector<config::BackendConfig>& backends, std::stop_token stop) {
+                            const std::vector<config::BackendConfig>& backends, std::stop_token stop,
+                            const std::function<std::string()>& reload) {
+    static_cast<void>(backends);
     if (line.size() > 4096 || line.find('\0') != std::string_view::npos)
         return {"Invalid console command."};
     const auto first = line.find_first_not_of(" \t\r\n");
@@ -46,13 +48,17 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
             return {"Stopping proxy.", true};
         if (words[0] == "status")
             return {"Sessions: " + std::to_string(runtime.sessionCount()) +
-                    "; retained buffer bytes: " + std::to_string(runtime.bufferedBytes()) + "."};
+                    "; retained buffer bytes: " + std::to_string(runtime.bufferedBytes()) +
+                    "; accepted: " + std::to_string(runtime.acceptedConnections()) +
+                    "; rejected: " + std::to_string(runtime.rejectedConnections()) + "."};
         if (words[0] == "servers") {
             std::string names = "Backends:";
-            for (const auto& backend : backends)
-                names += " " + backend.name;
+            for (const auto& name : runtime.backendNames())
+                names += " " + name;
             return {std::move(names)};
         }
+        if (words[0] == "reload")
+            return {reload ? reload() : "Reload is not available."};
     }
     if (count != 3 || words[0] != "send")
         return {std::string{kHelp}};
@@ -89,7 +95,7 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
 }
 
 void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>& backends, std::stop_source& stopping,
-                std::stop_token stop) {
+                std::stop_token stop, const std::function<std::string()>& reload) {
     const wire::common::Logger logger{"Console"};
     wire::io::ConsoleInput input;
     while (!stop.stop_requested() && !stopping.stop_requested()) {
@@ -101,7 +107,7 @@ void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>&
             }
             break;
         }
-        const auto reply = consoleCommand(*line, runtime, backends, stop);
+        const auto reply = consoleCommand(*line, runtime, backends, stop, reload);
         if (!reply.message.empty())
             logger.info([&] { return reply.message; });
         if (reply.stop) {

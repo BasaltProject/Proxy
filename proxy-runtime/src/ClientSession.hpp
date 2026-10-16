@@ -58,7 +58,7 @@ public:
                   const BackendRoutes& routes, ResolutionStart resolve,
                   const std::vector<config::BackendConfig>& backends, wire::io::ResourceBudget globalBuffers,
                   std::int32_t compressionThreshold, bool acceptTransfers, IdentityRegistry& identities,
-                  const NativeForwarding* nativeForwarding = nullptr);
+                  const NativeForwarding* nativeForwarding = nullptr, std::shared_ptr<const void> topology = nullptr);
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -68,6 +68,7 @@ public:
     /// Owner only. Preparation preserves the frontend play state.
     [[nodiscard]] bool prepareBackend(std::size_t target);
     [[nodiscard]] bool requestBackendChange(std::size_t target);
+    [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
     [[nodiscard]] bool candidatePrepared() const;
     [[nodiscard]] bool beginPreparedChange();
@@ -150,6 +151,7 @@ private:
     void closeBackends();
     void backpressure();
     [[nodiscard]] bool bufferedPacket() const;
+    std::shared_ptr<const void> topology_;
     wire::io::ResourceBudget::Reservation slot_;
     wire::io::ResourceBudget localBuffers_;
     wire::io::BudgetMemoryResource memory_;
