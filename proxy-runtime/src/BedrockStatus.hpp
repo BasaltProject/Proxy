@@ -10,10 +10,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace basalt::proxy::runtime::detail {
 
@@ -24,12 +26,14 @@ public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
 
     BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                  Route route = {});
+                  Route route = {}, BedrockSession::Events events = {});
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
 
     [[nodiscard]] bool start();
+    void tell(std::string_view player, std::string_view miniMessage);
+    void kick(std::string_view player, std::string_view miniMessage);
     void stop();
 
     [[nodiscard]] std::uint16_t port() const noexcept { return server_ ? server_->port() : port_; }
@@ -42,6 +46,7 @@ private:
     std::function<std::size_t()> online_;
     std::size_t max_;
     Route route_;
+    BedrockSession::Events events_;
     std::shared_ptr<const wire::bedrock::EcKeyPair> keys_;
     std::unique_ptr<wire::bedrock::RakServer> server_;
 
@@ -51,6 +56,15 @@ private:
     };
 
     std::unordered_map<wire::io::UdpEndpoint, Client> clients_;
+
+    struct Order {
+        bool kick = false;
+        std::string player;
+        std::string text;
+    };
+
+    std::mutex orders_;
+    std::vector<Order> pending_;
     std::atomic<bool> running_{false};
     std::jthread thread_;
 };

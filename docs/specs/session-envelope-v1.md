@@ -39,5 +39,6 @@ already proved. Bedrock datagrams are not Java packets: for Bedrock the data fra
 
 ## Status
 
-Codec and a round-trip/limits test are in Wire. Not done: the Open/Opened handshake in both peers, the Server adapter that runs
-translation on data frames, switching from Basalt to external backends and back, and forced-mode configuration.
+Codec, the Open/Opened state machine (`EnvelopeEndpoint`, one per peer, usable by both) and tests are in Wire. Not done: calling it from the
+Proxy and the Server at the end of login, the Server adapter that runs translation on data frames, switching from Basalt to external
+backends and back, and forced-mode configuration.

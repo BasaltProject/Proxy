@@ -11,6 +11,7 @@ namespace {
 constexpr std::string_view kGameVersion = "1.26.50";
 constexpr int kPollTimeoutMillis = 5;
 constexpr std::size_t kMaxHandshakes = 64;
+constexpr std::size_t kMaxOrders = 1024;
 constexpr std::string_view kTurnedAway = "Bedrock players cannot join this network yet.";
 
 std::uint64_t nowMillis() {
@@ -22,8 +23,9 @@ std::uint64_t nowMillis() {
 } // namespace
 
 BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                             Route route)
-    : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)) {}
+                             Route route, BedrockSession::Events events)
+    : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
+      events_(std::move(events)) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -73,7 +75,7 @@ bool BedrockStatus::start() {
                 raw.disconnect(kTurnedAway);
                 return;
             }
-            found->second.session = std::make_unique<BedrockSession>(raw, *backend, peer.toString());
+            found->second.session = std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_);
             if (!found->second.session->begin()) {
                 wire::common::Logger{"Bedrock"}.warn([] { return std::string{"The backend could not be resolved."}; });
                 found->second.session.reset();
@@ -95,6 +97,21 @@ bool BedrockStatus::start() {
     thread_ = std::jthread{[this] {
         while (running_.load()) {
             server_->poll(nowMillis(), kPollTimeoutMillis);
+            std::vector<Order> orders;
+            {
+                const std::lock_guard lock{orders_};
+                orders.swap(pending_);
+            }
+            for (const Order& order : orders) {
+                for (auto& [peer, client] : clients_) {
+                    if (!client.session || client.session->name() != order.player)
+                        continue;
+                    if (order.kick)
+                        client.session->kick(order.text);
+                    else
+                        client.session->tell(order.text);
+                }
+            }
             for (auto& [peer, client] : clients_) {
                 if (client.session)
                     client.session->pump();
@@ -102,6 +119,18 @@ bool BedrockStatus::start() {
         }
     }};
     return true;
+}
+
+void BedrockStatus::tell(std::string_view player, std::string_view miniMessage) {
+    const std::lock_guard lock{orders_};
+    if (pending_.size() < kMaxOrders)
+        pending_.push_back({false, std::string{player}, std::string{miniMessage}});
+}
+
+void BedrockStatus::kick(std::string_view player, std::string_view miniMessage) {
+    const std::lock_guard lock{orders_};
+    if (pending_.size() < kMaxOrders)
+        pending_.push_back({true, std::string{player}, std::string{miniMessage}});
 }
 
 void BedrockStatus::stop() {

@@ -90,6 +90,7 @@ int run(const cliCommand::Run& command) {
         return "Configuration validated: " + std::to_string(configuration->backends.size()) + " backend(s).";
     });
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
+    std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
     RuntimeServices services;
     services.playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
         auto* host = pluginHost.load(std::memory_order_acquire);
@@ -159,11 +160,15 @@ int run(const cliCommand::Run& command) {
         hooks.send = [&runtime](std::string_view player, std::string_view backend) {
             return runtime->sendPlayer(player, backend).has_value();
         };
-        hooks.tell = [&runtime](std::string_view player, std::string_view text) {
+        hooks.tell = [&runtime, &bedrockPlayers](std::string_view player, std::string_view text) {
             static_cast<void>(runtime->tellPlayer(player, text));
+            if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
+                bedrockSide->tell(player, text);
         };
-        hooks.kick = [&runtime](std::string_view player, std::string_view reason) {
+        hooks.kick = [&runtime, &bedrockPlayers](std::string_view player, std::string_view reason) {
             static_cast<void>(runtime->kickPlayer(player, reason));
+            if (auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire))
+                bedrockSide->kick(player, reason);
         };
         hooks.console = [&pluginHost](std::string_view line) {
             auto* host = pluginHost.load(std::memory_order_acquire);
@@ -253,6 +258,10 @@ int run(const cliCommand::Run& command) {
                 if (defaults.empty())
                     return std::nullopt;
                 return configuration->backends[defaults.front()];
+            },
+            [&pluginHost](PlayerEvent event) {
+                if (auto* host = pluginHost.load(std::memory_order_acquire))
+                    host->post(std::move(event));
             });
         if (!bedrock->start()) {
             logger.error([&configuration] {
@@ -260,6 +269,7 @@ int run(const cliCommand::Run& command) {
             });
             return 1;
         }
+        bedrockPlayers.store(bedrock.get(), std::memory_order_release);
         logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
     }
     std::jthread console{[&](std::stop_token stop) {
@@ -272,6 +282,7 @@ int run(const cliCommand::Run& command) {
     const auto result = runtime->run(stopping.get_token());
     console.request_stop();
     console.join();
+    bedrockPlayers.store(nullptr, std::memory_order_release);
     bedrock.reset();
     pluginHost.store(nullptr, std::memory_order_release);
     plugins.reset();
