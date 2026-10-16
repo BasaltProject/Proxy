@@ -49,7 +49,7 @@ endif()
 
 add_executable(basalt-proxy src/Main.cpp)
 # wire-io comes through the core already; naming it twice makes the linker say so.
-target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core)
+target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins)
 set_target_properties(basalt-proxy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     OUTPUT_NAME "BasaltProxy-${BASALT_VERSION}-${_platform}-${_arch}"

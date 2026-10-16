@@ -7,7 +7,7 @@
 namespace basalt::proxy::config {
 
 std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& backends,
-                                                 std::string_view directory) {
+                                                 std::string_view directory, const detail::TomlTable* pluginsTable) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy, {"network", "runtime", "admission", "forwarding", "logging", "translation"}, "");
@@ -118,6 +118,24 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     else
         reader.fail("translation.mode", "must be auto, proxy or off");
 
+    if (pluginsTable) {
+        detail::Reader plugins{std::string{directory} + "/plugins.toml", {}};
+        plugins.keys(pluginsTable,
+                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size"}, "");
+        plugins.scalar(pluginsTable, "enabled", result.plugins.enabled, "");
+        plugins.scalar(pluginsTable, "directory", result.plugins.directory, "");
+        plugins.scalar(pluginsTable, "database", result.plugins.database, "");
+        plugins.integer(pluginsTable, "instructions-per-turn", result.plugins.instructionsPerTurn, 1000, 1000000000,
+                        "");
+        plugins.integer(pluginsTable, "memory-mib", result.plugins.memoryMib, 1, 1024, "");
+        plugins.integer(pluginsTable, "queue-size", result.plugins.queueSize, 1, 65536, "");
+        if (result.plugins.database.empty() || result.plugins.database.size() > 4096)
+            plugins.fail("database", "must be a path of 1..4096 bytes");
+        if (result.plugins.directory.empty() || result.plugins.directory.size() > 4096)
+            plugins.fail("directory", "must be a path of 1..4096 bytes");
+        if (plugins.error)
+            return std::unexpected(*plugins.error);
+    }
     if (reader.error)
         return std::unexpected(*reader.error);
     auto parsedBackends = detail::readBackends(result, backends, std::string{directory} + "/backends.toml");
@@ -133,7 +151,10 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto backends = wire::io::configFiles::loadToml(directory, "backends.toml", defaultBackendsToml());
     if (!backends)
         return std::unexpected(backends.error());
-    return fromToml(proxy->values, backends->values, directory);
+    auto plugins = wire::io::configFiles::loadToml(directory, "plugins.toml", defaultPluginsToml());
+    if (!plugins)
+        return std::unexpected(plugins.error());
+    return fromToml(proxy->values, backends->values, directory, &plugins->values);
 }
 
 } // namespace basalt::proxy::config

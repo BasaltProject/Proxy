@@ -21,11 +21,21 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
+enum class PlayerEventKind { kJoin, kLeave, kSwitch };
+
+struct PlayerEvent {
+    PlayerEventKind kind;
+    std::string player;
+    std::string backend;
+};
+
 struct RuntimeServices {
     wire::auth::AuthenticationFetch authentication;
     std::function<std::expected<std::vector<wire::io::TcpAddress>, wire::io::DnsError>(std::string_view, std::uint16_t,
                                                                                        const wire::io::DnsOptions&)>
         resolution = {};
+    /// Called on session owner threads; must return quickly and never block.
+    std::function<void(PlayerEvent)> playerEvents = {};
 };
 
 class ProxyRuntime {

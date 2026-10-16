@@ -16,7 +16,8 @@ constexpr std::string_view kHelp = "Commands: help, servers, status, reload, sen
 
 ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
                             const std::vector<config::BackendConfig>& backends, std::stop_token stop,
-                            const std::function<std::string()>& reload) {
+                            const std::function<std::string()>& reload,
+                            const std::function<bool(std::string_view)>& pluginCommand) {
     static_cast<void>(backends);
     if (line.size() > 4096 || line.find('\0') != std::string_view::npos)
         return {"Invalid console command."};
@@ -26,6 +27,12 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
     line.remove_prefix(first);
     if (line.starts_with('/'))
         line.remove_prefix(1);
+    const auto isBuiltin = [](std::string_view word) {
+        return word == "help" || word == "servers" || word == "status" || word == "reload" || word == "send" ||
+               word == "stop";
+    };
+    if (pluginCommand && !isBuiltin(line.substr(0, line.find_first_of(" \t\r\n"))) && pluginCommand(line))
+        return {};
     std::array<std::string_view, 4> words{};
     std::size_t count = 0;
     while (!line.empty()) {
@@ -95,7 +102,8 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
 }
 
 void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>& backends, std::stop_source& stopping,
-                std::stop_token stop, const std::function<std::string()>& reload) {
+                std::stop_token stop, const std::function<std::string()>& reload,
+                const std::function<bool(std::string_view)>& pluginCommand) {
     const wire::common::Logger logger{"Console"};
     wire::io::ConsoleInput input;
     while (!stop.stop_requested() && !stopping.stop_requested()) {
@@ -107,7 +115,7 @@ void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>&
             }
             break;
         }
-        const auto reply = consoleCommand(*line, runtime, backends, stop, reload);
+        const auto reply = consoleCommand(*line, runtime, backends, stop, reload, pluginCommand);
         if (!reply.message.empty())
             logger.info([&] { return reply.message; });
         if (reply.stop) {

@@ -67,6 +67,10 @@ public:
                                 wire::io::ResourceBudget::Reservation storage);
     /// Owner only. Preparation preserves the frontend play state.
     [[nodiscard]] bool prepareBackend(std::size_t target);
+    [[nodiscard]] bool inPlay() const;
+    [[nodiscard]] std::string_view activeBackendName() const;
+    bool announced = false;
+    std::string announcedBackend;
     [[nodiscard]] bool requestBackendChange(std::size_t target);
     [[nodiscard]] bool requestBackendChange(std::string_view backend);
     [[nodiscard]] std::string_view playerName() const;
