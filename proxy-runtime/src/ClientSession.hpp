@@ -14,6 +14,8 @@
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
+#include <basalt/wire/multiversion/java/JavaTranslators.hpp>
+#include <basalt/wire/protocol/ProtocolState.hpp>
 
 #include <array>
 #include <bitset>
@@ -105,6 +107,16 @@ private:
         kConfiguration,
         kPlay
     };
+    [[nodiscard]] wire::protocol::ProtocolState protocolState() const;
+    [[nodiscard]] bool translateInbound();
+    [[nodiscard]] bool queueNative(std::span<const std::uint8_t> packet);
+    [[nodiscard]] bool queueTranslated(std::span<const std::uint8_t> packet);
+    std::unique_ptr<wire::multiversion::java::JavaChain> translation_;
+    std::int32_t clientProtocol_ = 0;
+    [[nodiscard]] bool answerKnownPacks();
+    [[nodiscard]] bool legacyClient() const;
+    [[nodiscard]] bool synthesizeClientPacket(std::int32_t id);
+    bool synthesizing_ = false;
     enum class ConnectionStage { kIdle, kResolving, kConnecting };
 
     enum class PluginMessageResult { kRelay, kConsumed, kInvalid };
