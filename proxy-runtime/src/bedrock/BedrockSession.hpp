@@ -5,8 +5,10 @@
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
+#include <basalt/wire/text/LangTable.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -24,7 +26,7 @@ public:
     using Events = std::function<void(runtime::PlayerEvent)>;
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
-                   Events events = {});
+                   Events events = {}, std::shared_ptr<const wire::text::LangTable> language = nullptr);
     ~BedrockSession();
     BedrockSession(const BedrockSession&) = delete;
     BedrockSession& operator=(const BedrockSession&) = delete;
@@ -58,6 +60,7 @@ private:
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
     void timeChanged(std::span<const std::uint8_t> body);
     void gameEvent(std::span<const std::uint8_t> body);
+    void releaseHeld();
     void sendInventory();
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
@@ -76,6 +79,7 @@ private:
     config::BackendConfig backend_;
     std::string address_;
     Events events_;
+    std::shared_ptr<const wire::text::LangTable> language_;
     std::string javaName_;
     std::string javaUuid_;
     bool announced_ = false;
@@ -90,6 +94,14 @@ private:
     std::int32_t pendingTeleport_ = -1;
     bool started_ = false;
     std::array<std::optional<wire::protocol::play::WireItemStack>, 46> inventory_{};
+
+    struct Held {
+        std::int32_t id;
+        std::vector<std::uint8_t> body;
+    };
+
+    std::vector<Held> held_;
+    std::chrono::steady_clock::time_point readyAt_{};
     std::int32_t sequence_ = 0;
     std::int32_t heldSlot_ = 0;
     bool spawned_ = false;

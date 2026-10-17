@@ -108,10 +108,11 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("logging.color", "must be auto, always or never");
 
     const auto* bedrock = reader.child(proxy, "bedrock");
-    reader.keys(bedrock, {"enabled", "port", "motd"}, "bedrock.");
+    reader.keys(bedrock, {"enabled", "port", "motd", "language"}, "bedrock.");
     reader.scalar(bedrock, "enabled", result.bedrock.enabled, "bedrock.");
     reader.integer(bedrock, "port", result.bedrock.port, 1, 65535, "bedrock.");
     reader.scalar(bedrock, "motd", result.bedrock.motd, "bedrock.");
+    reader.scalar(bedrock, "language", result.bedrock.language, "bedrock.");
     if (result.bedrock.motd.empty() || result.bedrock.motd.size() > 64 ||
         result.bedrock.motd.find(';') != std::string::npos)
         reader.fail("bedrock.motd", "must be 1..64 bytes without ';'");

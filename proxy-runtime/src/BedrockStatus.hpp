@@ -26,7 +26,8 @@ public:
     using Route = std::function<std::optional<config::BackendConfig>()>;
 
     BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
-                  Route route = {}, BedrockSession::Events events = {});
+                  Route route = {}, BedrockSession::Events events = {},
+                  std::shared_ptr<const wire::text::LangTable> language = nullptr);
     ~BedrockStatus();
     BedrockStatus(const BedrockStatus&) = delete;
     BedrockStatus& operator=(const BedrockStatus&) = delete;
@@ -47,6 +48,7 @@ private:
     std::size_t max_;
     Route route_;
     BedrockSession::Events events_;
+    std::shared_ptr<const wire::text::LangTable> language_;
     std::shared_ptr<const wire::bedrock::EcKeyPair> keys_;
     std::unique_ptr<wire::bedrock::RakServer> server_;
 

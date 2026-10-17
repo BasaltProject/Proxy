@@ -19,6 +19,7 @@
 #include <basalt/wire/protocol/play/WorldPackets.hpp>
 #include <basalt/wire/text/MiniMessage.hpp>
 #include <basalt/wire/text/Serializers.hpp>
+#include <basalt/wire/text/TranslationResolver.hpp>
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,8 @@ constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
+constexpr std::chrono::milliseconds kSettle{1500};
+constexpr std::size_t kMaxHeld = 256;
 constexpr float kMobWidth = 0.6F;
 constexpr float kMobHeight = 1.8F;
 constexpr std::size_t kCarriedSlots = 36;
@@ -64,8 +67,10 @@ constexpr std::int32_t kChatCommandId = play::ChatCommandPacket::kId;
 } // namespace
 
 BedrockSession::BedrockSession(bedrock::BedrockConnection& connection, config::BackendConfig backend,
-                               std::string address, Events events)
-    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), events_(std::move(events)) {}
+                               std::string address, Events events,
+                               std::shared_ptr<const wire::text::LangTable> language)
+    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), events_(std::move(events)),
+      language_(std::move(language)) {}
 
 BedrockSession::~BedrockSession() {
     if (announced_ && events_)
@@ -105,6 +110,7 @@ void BedrockSession::kick(std::string_view miniMessage) {
 void BedrockSession::pump() {
     if (link_ != nullptr)
         link_->pump();
+    releaseHeld();
 }
 
 void BedrockSession::leave(const std::string& reason) {
@@ -118,8 +124,24 @@ void BedrockSession::sendBedrock(BedrockPacket packet, const wire::io::ByteBuffe
 }
 
 void BedrockSession::sendJava(std::int32_t id, const wire::io::ByteBuffer& body) {
-    if (link_ != nullptr)
-        link_->send(id, body.readable());
+    if (link_ == nullptr)
+        return;
+    const auto bytes = body.readable();
+    if (std::chrono::steady_clock::now() < readyAt_ || !held_.empty()) {
+        if (held_.size() < kMaxHeld)
+            held_.push_back({id, std::vector<std::uint8_t>{bytes.begin(), bytes.end()}});
+        return;
+    }
+    link_->send(id, bytes);
+}
+
+void BedrockSession::releaseHeld() {
+    if (held_.empty() || std::chrono::steady_clock::now() < readyAt_ || link_ == nullptr)
+        return;
+    std::vector<Held> now;
+    now.swap(held_);
+    for (const Held& packet : now)
+        link_->send(packet.id, packet.body);
 }
 
 void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> body) {
@@ -256,7 +278,8 @@ void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
     }
     if (packet->entityType != play::SpawnEntityPacket::kPlayerEntityType) {
         const std::string_view path = play::javaEntityTypeName(packet->entityType);
-        const std::string_view name = bedrock::bedrockEntityName("minecraft:" + std::string{path});
+        const std::string javaType = "minecraft:" + std::string{path};
+        const std::string_view name = bedrock::bedrockEntityName(javaType);
         if (path.empty() || name.empty())
             return;
         wire::io::ByteBuffer out;
@@ -380,7 +403,8 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     const std::string_view path = play::javaItemName(item->itemId);
     if (path.empty())
         return {};
-    const bedrock::ItemName* named = bedrock::bedrockItem("minecraft:" + std::string{path});
+    const std::string javaItem = "minecraft:" + std::string{path};
+    const bedrock::ItemName* named = bedrock::bedrockItem(javaItem);
     if (named == nullptr)
         return {};
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
@@ -570,7 +594,8 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
     sendJava(play::AcceptTeleportationPacket::kId, out);
     teleported_ = true;
     out.clear();
-    sendJava(play::kPlayerLoadedId, out);
+    link_->send(play::kPlayerLoadedId, out.readable());
+    readyAt_ = std::chrono::steady_clock::now() + kSettle;
     spawn();
 }
 
@@ -594,7 +619,9 @@ void BedrockSession::chat(std::span<const std::uint8_t> body) {
     if (!packet)
         return;
     wire::io::ByteBuffer out;
-    bedrock::writeText(out, bedrock::TextType::Raw, "", wire::text::toLegacyText(packet->content), "");
+    const wire::text::Component shown =
+        language_ != nullptr ? wire::text::resolveComponent(packet->content, *language_) : packet->content;
+    bedrock::writeText(out, bedrock::TextType::Raw, "", wire::text::toLegacyText(shown), "");
     sendBedrock(BedrockPacket::Text, out);
 }
 
