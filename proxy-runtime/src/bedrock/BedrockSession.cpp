@@ -1039,10 +1039,94 @@ void BedrockSession::closeWindow(bool tellBackend) {
     window_.reset();
 }
 
-void BedrockSession::rejectStackRequest(wire::io::ByteBuffer& body) {
-    if (bedrock::readVarUInt(body) == 0)
+std::optional<std::int32_t> BedrockSession::clickSlot(const bedrock::BedrockStackSlot& slot) const {
+    using Place = bedrock::BedrockContainerSlot;
+    const auto container = static_cast<Place>(slot.container);
+    const std::int32_t slots = window_ ? static_cast<std::int32_t>(window_->slots) : 0;
+    if (container == Place::LevelEntity)
+        return window_ && slot.slot >= 0 && slot.slot < slots ? std::optional{slot.slot} : std::nullopt;
+    const bool carried =
+        container == Place::HotbarAndInventory || container == Place::Hotbar || container == Place::Inventory;
+    if (!carried || slot.slot < 0 || slot.slot >= static_cast<std::int32_t>(kCarriedSlots))
+        return std::nullopt;
+    if (!window_)
+        return static_cast<std::int32_t>(javaSlot(static_cast<std::size_t>(slot.slot)));
+    return slot.slot < 9 ? slots + 27 + slot.slot : slots + slot.slot - 9;
+}
+
+const std::optional<play::WireItemStack>& BedrockSession::itemAt(std::int32_t javaSlot) const {
+    static const std::optional<play::WireItemStack> kNothing;
+    const auto index = static_cast<std::size_t>(javaSlot);
+    if (!window_)
+        return index < inventory_.size() ? inventory_[index] : kNothing;
+    const std::size_t slots = window_->slots;
+    if (index < slots)
+        return index < window_->items.size() ? window_->items[index] : kNothing;
+    const std::size_t own = index - slots;
+    const std::size_t player = own < 27 ? own + 9 : own - 27 + 36;
+    return player < inventory_.size() ? inventory_[player] : kNothing;
+}
+
+void BedrockSession::click(std::int32_t slot, std::int8_t button, play::ServerboundContainerClickPacket::Mode mode) {
+    play::ServerboundContainerClickPacket packet;
+    packet.containerId = window_ ? window_->id : 0;
+    packet.stateId = stateId_;
+    packet.slot = static_cast<std::int16_t>(slot);
+    packet.button = button;
+    packet.mode = mode;
+    wire::io::ByteBuffer out;
+    packet.write(out);
+    sendJava(play::ServerboundContainerClickPacket::kId, out);
+}
+
+bool BedrockSession::clickFor(const bedrock::BedrockStackAction& action) {
+    using Type = bedrock::BedrockStackActionType;
+    using Mode = play::ServerboundContainerClickPacket::Mode;
+    const auto cursor = static_cast<std::int32_t>(bedrock::BedrockContainerSlot::Cursor);
+    const auto source = clickSlot(action.source);
+    const auto destination = clickSlot(action.destination);
+    if (action.type == Type::Take && source && action.destination.container == cursor) {
+        const std::int32_t held = itemAt(*source) ? itemAt(*source)->count : 0;
+        click(*source, action.count > 0 && action.count < held ? 1 : 0, Mode::Pickup);
+        return true;
+    }
+    if (action.type == Type::Place && action.source.container == cursor && destination) {
+        click(*destination, action.count == 1 ? 1 : 0, Mode::Pickup);
+        return true;
+    }
+    if (action.type == Type::Swap && source && destination) {
+        click(*source, 0, Mode::Pickup);
+        click(*destination, 0, Mode::Pickup);
+        click(*source, 0, Mode::Pickup);
+        return true;
+    }
+    if (action.type == Type::Swap && source && action.destination.container == cursor) {
+        click(*source, 0, Mode::Pickup);
+        return true;
+    }
+    if (action.type == Type::Swap && action.source.container == cursor && destination) {
+        click(*destination, 0, Mode::Pickup);
+        return true;
+    }
+    return false;
+}
+
+void BedrockSession::stackRequests(wire::io::ByteBuffer& body) {
+    for (const auto& request : bedrock::readItemStackRequests(body, connection_.protocolVersion()))
+        stackRequest(request);
+}
+
+void BedrockSession::stackRequest(const bedrock::BedrockStackRequest& request) {
+    bool known = !request.actions.empty();
+    for (const auto& action : request.actions)
+        known = known && clickFor(action);
+    if (!known) {
+        rejectStackRequest(request.requestId);
         return;
-    rejectStackRequest(bedrock::readVarInt(body));
+    }
+    wire::io::ByteBuffer out;
+    bedrock::writeItemStackResponse(out, request.requestId, true, {}, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::ItemStackResponse, out);
 }
 
 void BedrockSession::rejectStackRequest(std::int32_t requestId) {
@@ -1055,6 +1139,8 @@ void BedrockSession::inventoryContent(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
     const auto packet = play::ContainerSetContentPacket::read(in);
+    if (packet)
+        stateId_ = packet->stateId;
     if (packet && window_ && packet->containerId == window_->id) {
         windowContent(*packet);
         return;
@@ -1329,7 +1415,7 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
     } else if (packet == BedrockPacket::PlayerAuthInput) {
         const auto input = bedrock::readPlayerAuthInput(body, connection_.protocolVersion());
         if (input && input->stackRequest)
-            rejectStackRequest(input->stackRequest->requestId);
+            stackRequest(*input->stackRequest);
         if (!input || !teleported_)
             return;
         wire::io::ByteBuffer out;
@@ -1349,7 +1435,7 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
             closed && window_ && closed->containerId == window_->id)
             closeWindow(true);
     } else if (packet == BedrockPacket::ItemStackRequest) {
-        rejectStackRequest(body);
+        stackRequests(body);
     } else if (packet == BedrockPacket::InventoryTransaction) {
         entityTransaction(body);
     } else if (packet == BedrockPacket::Animate) {

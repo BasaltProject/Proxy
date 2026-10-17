@@ -101,7 +101,13 @@ private:
     void windowContent(const wire::protocol::play::ContainerSetContentPacket& packet);
     void drawWindow();
     void closeWindow(bool tellBackend);
-    void rejectStackRequest(wire::io::ByteBuffer& body);
+    void stackRequests(wire::io::ByteBuffer& body);
+    void stackRequest(const wire::bedrock::BedrockStackRequest& request);
+    [[nodiscard]] bool clickFor(const wire::bedrock::BedrockStackAction& action);
+    [[nodiscard]] std::optional<std::int32_t> clickSlot(const wire::bedrock::BedrockStackSlot& slot) const;
+    [[nodiscard]] const std::optional<wire::protocol::play::WireItemStack>& itemAt(std::int32_t javaSlot) const;
+    void click(std::int32_t javaSlot, std::int8_t button,
+               wire::protocol::play::ServerboundContainerClickPacket::Mode mode);
     void rejectStackRequest(std::int32_t requestId);
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
@@ -174,6 +180,7 @@ private:
     };
 
     std::optional<Window> window_;
+    std::int32_t stateId_ = 0;
     std::array<std::int32_t, 3> lastUse_{};
 
     std::chrono::steady_clock::time_point joinStarted_{};
