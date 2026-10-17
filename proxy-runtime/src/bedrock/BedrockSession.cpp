@@ -8,6 +8,7 @@
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
+#include <basalt/wire/bedrock/BedrockTypes.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
@@ -277,6 +278,10 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         inventoryContent(body);
     else if (id == play::ContainerSetSlotPacket::kId)
         inventorySlot(body);
+    else if (id == play::OpenScreenPacket::kId)
+        screenOpened(body);
+    else if (id == play::ContainerClosePacket::kClientboundId)
+        screenClosed(body);
     else if (id == play::ClientboundBlockUpdatePacket::kId)
         blockChanged(body);
     else if (id == play::SectionBlocksUpdatePacket::kId)
@@ -944,10 +949,116 @@ void BedrockSession::sendInventory() {
     sendBedrock(BedrockPacket::InventoryContent, out);
 }
 
+std::optional<bedrock::BedrockContainerType> BedrockSession::windowType(std::int32_t menu, std::size_t& slots) {
+    using Type = bedrock::BedrockContainerType;
+    constexpr std::int32_t kGeneric9x1 = 0;
+    constexpr std::int32_t kGeneric9x6 = 5;
+    constexpr std::int32_t kGeneric3x3 = 6;
+    constexpr std::int32_t kHopper = 16;
+    constexpr std::size_t kRow = 9;
+    if (menu >= kGeneric9x1 && menu <= kGeneric9x6) {
+        slots = kRow * static_cast<std::size_t>(menu + 1);
+        return Type::Container;
+    }
+    if (menu == kGeneric3x3) {
+        slots = kRow;
+        return Type::Dispenser;
+    }
+    if (menu == kHopper) {
+        slots = 5;
+        return Type::Hopper;
+    }
+    return std::nullopt;
+}
+
+void BedrockSession::screenOpened(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::OpenScreenPacket::read(in);
+    if (!packet)
+        return;
+    if (window_)
+        closeWindow(true);
+    std::size_t slots = 0;
+    const auto type = windowType(packet->menuType, slots);
+    if (!type) {
+        // Nothing to draw for this menu: tell the backend the player closed it so it does not stay open for nobody.
+        wire::io::ByteBuffer out;
+        play::ContainerClosePacket{packet->containerId}.write(out);
+        sendJava(play::ContainerClosePacket::kServerboundId, out);
+        return;
+    }
+    window_ = Window{packet->containerId, *type, slots, {}, false};
+    window_->items.resize(slots);
+}
+
+void BedrockSession::windowContent(const play::ContainerSetContentPacket& packet) {
+    for (std::size_t slot = 0; slot < window_->items.size() && slot < packet.items.size(); ++slot)
+        window_->items[slot] = packet.items[slot];
+    if (!window_->shown) {
+        window_->shown = true;
+        wire::io::ByteBuffer open;
+        bedrock::writeContainerOpen(open, window_->id, window_->type, lastUse_[0], lastUse_[1], lastUse_[2]);
+        sendBedrock(BedrockPacket::ContainerOpen, open);
+    }
+    drawWindow();
+}
+
+void BedrockSession::drawWindow() {
+    std::vector<bedrock::BedrockItemStack> items;
+    items.reserve(window_->items.size());
+    for (const auto& item : window_->items)
+        items.push_back(stackOf(item));
+    wire::io::ByteBuffer out;
+    bedrock::writeInventoryContent(out, static_cast<std::uint32_t>(window_->id), items,
+                                   bedrock::BedrockContainerSlot::LevelEntity, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::InventoryContent, out);
+}
+
+void BedrockSession::screenClosed(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::ContainerClosePacket::read(in);
+    if (packet && window_ && packet->containerId == window_->id)
+        closeWindow(false);
+}
+
+void BedrockSession::closeWindow(bool tellBackend) {
+    if (!window_)
+        return;
+    if (window_->shown) {
+        wire::io::ByteBuffer out;
+        bedrock::writeContainerClose(out, window_->id, window_->type, !tellBackend);
+        sendBedrock(BedrockPacket::ContainerClose, out);
+    }
+    if (tellBackend) {
+        wire::io::ByteBuffer out;
+        play::ContainerClosePacket{window_->id}.write(out);
+        sendJava(play::ContainerClosePacket::kServerboundId, out);
+    }
+    window_.reset();
+}
+
+void BedrockSession::rejectStackRequest(wire::io::ByteBuffer& body) {
+    if (bedrock::readVarUInt(body) == 0)
+        return;
+    rejectStackRequest(bedrock::readVarInt(body));
+}
+
+void BedrockSession::rejectStackRequest(std::int32_t requestId) {
+    wire::io::ByteBuffer out;
+    bedrock::writeItemStackResponse(out, requestId, false, {}, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::ItemStackResponse, out);
+}
+
 void BedrockSession::inventoryContent(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
     const auto packet = play::ContainerSetContentPacket::read(in);
+    if (packet && window_ && packet->containerId == window_->id) {
+        windowContent(*packet);
+        return;
+    }
     if (!packet || packet->containerId != play::ContainerSetContentPacket::kPlayerInventory ||
         packet->items.size() < kJavaPlayerSlots)
         return;
@@ -960,6 +1071,13 @@ void BedrockSession::inventorySlot(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
     const auto packet = play::ContainerSetSlotPacket::read(in);
+    if (packet && window_ && packet->containerId == window_->id) {
+        if (packet->slot >= 0 && static_cast<std::size_t>(packet->slot) < window_->items.size()) {
+            window_->items[static_cast<std::size_t>(packet->slot)] = packet->item;
+            drawWindow();
+        }
+        return;
+    }
     if (!packet || packet->containerId != play::ContainerSetContentPacket::kPlayerInventory || packet->slot < 0 ||
         static_cast<std::size_t>(packet->slot) >= kJavaPlayerSlots)
         return;
@@ -1180,6 +1298,7 @@ void BedrockSession::interact(const bedrock::PlayerAuthInput& input) {
     if (!input.itemUse || input.itemUse->action != 0)
         return;
     const bedrock::BedrockItemUse& use = *input.itemUse;
+    lastUse_ = {use.x, use.y, use.z};
     wire::io::ByteBuffer out;
     if (use.hotbarSlot != heldSlot_ && use.hotbarSlot >= 0 && use.hotbarSlot < 9) {
         heldSlot_ = use.hotbarSlot;
@@ -1209,6 +1328,8 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         connection_.flush();
     } else if (packet == BedrockPacket::PlayerAuthInput) {
         const auto input = bedrock::readPlayerAuthInput(body, connection_.protocolVersion());
+        if (input && input->stackRequest)
+            rejectStackRequest(input->stackRequest->requestId);
         if (!input || !teleported_)
             return;
         wire::io::ByteBuffer out;
@@ -1223,6 +1344,12 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         sendJava(play::ServerboundPositionLookPacket::kId, out);
         sprinting(input->sprinting);
         interact(*input);
+    } else if (packet == BedrockPacket::ContainerClose) {
+        if (const auto closed = bedrock::readContainerClose(body);
+            closed && window_ && closed->containerId == window_->id)
+            closeWindow(true);
+    } else if (packet == BedrockPacket::ItemStackRequest) {
+        rejectStackRequest(body);
     } else if (packet == BedrockPacket::InventoryTransaction) {
         entityTransaction(body);
     } else if (packet == BedrockPacket::Animate) {
