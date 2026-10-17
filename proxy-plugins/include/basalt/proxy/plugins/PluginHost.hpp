@@ -52,8 +52,7 @@ struct PluginHooks {
     std::function<bool(std::string_view line)> console;
 };
 
-/// One thread runs every plugin's Lua, so a Lua state is never entered twice at once and no I/O owner waits on a
-/// plugin.
+/// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
 class PluginHost {
 public:
     [[nodiscard]] static std::expected<std::unique_ptr<PluginHost>, std::string> start(PluginSettings settings,
@@ -72,8 +71,7 @@ public:
     [[nodiscard]] bool playerCommand(std::string_view player, std::string_view line);
     [[nodiscard]] std::vector<runtime::PlayerCommandSpec> playerCommandSpecs() const;
 
-    /// Stops the plugin thread, drops every plugin and its commands, reads the packages again and resumes.
-    /// Events queued meanwhile are kept; per-plugin data stays in the database. Serialised with itself.
+    /// Drops every plugin, reads the packages again and resumes; queued events and per-plugin data are kept.
     [[nodiscard]] std::size_t reload();
 
     [[nodiscard]] std::size_t loaded() const noexcept { return loaded_.load(std::memory_order_relaxed); }

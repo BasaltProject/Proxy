@@ -1,18 +1,17 @@
 # Session envelope, version 1
 
-Wire format in `wire/wire-protocol` (`SessionEnvelope.hpp`). It is the transport a Basalt Proxy and a Basalt Server will share when the
-Server, not the Proxy, translates a client's protocol (ADR-P001). The codec exists and is tested; nothing activates it yet.
+Wire format in `wire/wire-protocol` (`SessionEnvelope.hpp`). It is the transport a Basalt Proxy and a Basalt Server share when the
+Server, not the Proxy, translates a client's protocol. It is active for Java clients; see Status.
 
 ## Negotiation and activation are separate
 
 Negotiation happens in the forwarding exchange (docs/specs/forwarding-basalt-v1.md). Capability bit 0, `kCapabilitySessionEnvelope`,
 is offered by a backend in its signed request and selected by the proxy in its signed response only if the proxy implements the
-envelope and its `translation.mode` allows delegating. Today the Proxy never selects it, so no session uses the envelope. A selected
-bit changes nothing by itself.
+envelope and its `translation.mode` allows delegating. A selected bit changes nothing by itself.
 
-## Activation (to be implemented)
+## Activation
 
-After LoginFinished, in the transport direction of each peer, the sender writes exactly one control frame `Open` as the last frame in
+After LoginFinished the proxy writes exactly one control frame `Open` as the last frame in
 the old codec and every frame after it is an envelope frame. The receiver answers `Opened`, and until it arrives only `Opened` and
 `Close` are legal. A peer that receives anything else, an unknown version, or a second `Open` closes the connection.
 

@@ -35,8 +35,7 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
     const bool nativeChannel = backend.forwarding == Mode::Basalt && std::ranges::equal(channel, basalt::kChannel);
     const bool forwarding = velocityChannel || nativeChannel;
     const auto requested = payload.empty() ? 1 : payload[0];
-    // Velocity answers every request, and a backend that sends it early sends it again; Basalt's challenge is single
-    // use.
+    // Velocity answers every request; Basalt's challenge is single use.
     if (nativeChannel && forwarded_)
         return std::unexpected(BackendLoginError::kMalformed);
     if (velocityChannel && (payload.size() > 1 || requested == 0))

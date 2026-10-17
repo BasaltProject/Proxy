@@ -17,8 +17,7 @@
 
 namespace basalt::proxy::runtime::detail {
 
-/// The proxy as a Java client: it logs a Bedrock player in to a native backend, walks the configuration and then hands
-/// every play packet to its owner, answering the ones that are only about keeping the connection alive.
+/// The proxy as a Java client of a backend: logs in, walks the configuration and hands play packets to its owner.
 struct NativeForwarding;
 
 class JavaLink {

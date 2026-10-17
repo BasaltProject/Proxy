@@ -17,8 +17,7 @@
 
 namespace basalt::proxy::runtime::detail {
 
-/// Everything a client sends before it has a backend: the handshake, the login start, the encryption response and the
-/// status exchange.
+/// Everything a client sends before it has a backend: handshake, login start, encryption response and status.
 bool ClientSession::preLoginPacket(std::int32_t id) {
     namespace protocol = wire::protocol;
     if (state_ == State::Handshake) {

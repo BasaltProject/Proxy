@@ -57,8 +57,7 @@ struct RuntimeServices {
         resolution = {};
     /// Called on session owner threads; must return quickly and never block.
     std::function<void(PlayerEvent)> playerEvents = {};
-    /// Offered every command a player types in play (without the slash). True consumes it: it is not sent to the
-    /// backend. Called on session owner threads; must return quickly and never block.
+    /// Offered every command typed in play; true keeps it from the backend. Runs on owner threads and must not block.
     std::function<bool(std::string_view player, std::string_view command)> playerCommand = {};
     /// Told every chat message a player sends, after the fact. Called on session owner threads; must not block.
     std::function<void(std::string_view player, std::string_view message)> playerChat = {};
@@ -87,12 +86,10 @@ public:
     /// Thread-safe; matches the verified name exactly. Ticket retains bounded resources until released.
     [[nodiscard]] std::expected<BackendChangeRequest, BackendChangeError> sendPlayer(std::string_view player,
                                                                                      std::string_view backend);
-    /// Thread-safe. Validates everything first, then swaps backends, routes and forced hosts atomically.
-    /// Sessions keep the snapshot they started with; fixed settings (network, limits, forwarding) need a restart.
+    /// Thread-safe. Validates first, then swaps backends and routes atomically; fixed settings need a restart.
     [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
     [[nodiscard]] std::vector<std::string> backendNames() const;
-    /// Thread-safe. Queues a chat line to a player's client; true when handed to the session owners, not when
-    /// delivered.
+    /// Thread-safe. Queues a chat line for a player; true once handed to the session owners.
     [[nodiscard]] bool tellPlayer(std::string_view player, std::string_view text);
     /// Thread-safe. Disconnects a player in play with a MiniMessage reason; true when handed to the session owners.
     [[nodiscard]] bool kickPlayer(std::string_view player, std::string_view reason);
@@ -103,8 +100,7 @@ public:
     /// Connections admitted to a session owner, and those turned away by rate limits or exhausted budgets.
     [[nodiscard]] std::uint64_t acceptedConnections() const noexcept;
     [[nodiscard]] std::uint64_t rejectedConnections() const noexcept;
-    /// Packet bytes queued toward clients and toward backends since the process started (before framing toward
-    /// backends).
+    /// Packet bytes queued toward clients and backends since the process started.
     [[nodiscard]] std::uint64_t bytesTowardClients() const noexcept;
     [[nodiscard]] std::uint64_t bytesTowardBackends() const noexcept;
 
