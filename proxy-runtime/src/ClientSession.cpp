@@ -449,8 +449,10 @@ bool ClientSession::packet() {
             pendingPings_.clear();
             if (!backend()->finishConfiguration())
                 return false;
-            if (!activeBackend_)
+            if (!activeBackend_) {
                 activeBackend_ = std::move(candidateBackend_);
+                relayCounters().logins.fetch_add(1, std::memory_order_relaxed);
+            }
             state_ = State::kPlay;
             awaitingJoin_ = legacyRaw_;
         }

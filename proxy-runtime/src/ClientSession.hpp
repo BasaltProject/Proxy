@@ -116,6 +116,15 @@ public:
 
     [[nodiscard]] std::int64_t handle() const { return connection_.nativeHandle(); }
 
+    /// 0 handshake or status, 1 login, 2 configuration, 3 play.
+    [[nodiscard]] std::size_t phase() const noexcept {
+        if (state_ == State::kPlay)
+            return 3;
+        if (state_ == State::kConfiguration)
+            return 2;
+        return state_ == State::Handshake || state_ == State::StatusRequest || state_ == State::Ping ? 0 : 1;
+    }
+
     [[nodiscard]] bool accounted() const;
     std::uint64_t timer = 0;
     std::array<std::int64_t, 3> watchedBackends{-1, -1, -1};
