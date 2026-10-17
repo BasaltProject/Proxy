@@ -166,6 +166,11 @@ void BedrockStatus::kick(std::string_view player, std::string_view miniMessage) 
         pending_.push_back({Order::Kind::kKick, std::string{player}, std::string{miniMessage}});
 }
 
+std::size_t BedrockStatus::playingCount() {
+    const std::lock_guard lock{orders_};
+    return playing_.size();
+}
+
 bool BedrockStatus::connect(std::string_view player, std::string_view backend) {
     if (!lookup_ || !lookup_(backend))
         return false;

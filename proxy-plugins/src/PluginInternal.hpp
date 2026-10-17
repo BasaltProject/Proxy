@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/wire/plugins/EventPriority.hpp>
 #include <basalt/wire/plugins/PluginText.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
 #include <basalt/wire/common/toml/Toml.hpp>
@@ -13,12 +14,12 @@ namespace basalt::proxy::plugins {
 inline constexpr std::chrono::milliseconds kTick{50};
 inline constexpr std::size_t kMaxSourceBytes = 1024 * 1024;
 
-enum class Priority : std::uint8_t { kLowest, kLow, kNormal, kHigh, kHighest, kMonitor };
+using Priority = wire::plugins::EventPriority;
 
 struct PluginHost::Plugin {
     struct Handler {
         wire::lua::LuaRef function;
-        Priority priority = Priority::kNormal;
+        Priority priority = Priority::Normal;
         std::map<std::string, std::string, std::less<>> filters;
     };
 
@@ -61,8 +62,6 @@ struct PluginApi {
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
 
-[[nodiscard]] std::string_view priorityName(Priority priority);
-[[nodiscard]] std::optional<Priority> priorityOf(std::string_view name);
 
 inline constexpr std::string_view kEnableEvent = "plugin.enable";
 inline constexpr std::string_view kDisableEvent = "plugin.disable";

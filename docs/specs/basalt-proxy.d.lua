@@ -47,7 +47,7 @@ local ConsoleSource = {}
 ---@param text string
 function ConsoleSource:send(text) end
 
----@alias EventPriority "lowest"|"low"|"normal"|"high"|"highest"|"monitor"
+---@alias EventPriority "FIRST"|"EARLY"|"NORMAL"|"LATE"|"LAST"
 
 ---@class EventOptions
 ---@field priority? EventPriority

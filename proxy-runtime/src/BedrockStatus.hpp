@@ -36,6 +36,7 @@ public:
     BedrockStatus& operator=(const BedrockStatus&) = delete;
 
     [[nodiscard]] bool start();
+    [[nodiscard]] std::size_t playingCount();
     void tell(std::string_view player, std::string_view miniMessage);
     void kick(std::string_view player, std::string_view miniMessage);
     /// True when a Bedrock player of that name is playing and the backend exists; the move happens on the Bedrock

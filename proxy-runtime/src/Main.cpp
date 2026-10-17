@@ -306,11 +306,20 @@ int run(const cliCommand::Run& command) {
         logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
     }
     std::jthread console{[&](std::stop_token stop) {
-        detail::runConsole(*runtime, configuration->backends, stopping, stop, reloadConfiguration,
-                           [&pluginHost](std::string_view line) {
-                               auto* host = pluginHost.load(std::memory_order_acquire);
-                               return host != nullptr && host->command(line);
-                           });
+        detail::runConsole(
+            *runtime, configuration->backends, stopping, stop, reloadConfiguration,
+            [&pluginHost](std::string_view line) {
+                auto* host = pluginHost.load(std::memory_order_acquire);
+                return host != nullptr && host->command(line);
+            },
+            detail::BedrockConsole{[&bedrockPlayers]() -> std::size_t {
+                                       auto* side = bedrockPlayers.load(std::memory_order_acquire);
+                                       return side != nullptr ? side->playingCount() : 0;
+                                   },
+                                   [&bedrockPlayers](std::string_view player, std::string_view backend) {
+                                       auto* side = bedrockPlayers.load(std::memory_order_acquire);
+                                       return side != nullptr && side->connect(player, backend);
+                                   }});
     }};
     const auto result = runtime->run(stopping.get_token());
     console.request_stop();

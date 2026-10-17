@@ -17,7 +17,7 @@ constexpr std::string_view kHelp = "Commands: help, servers, status, reload, sen
 ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
                             const std::vector<config::BackendConfig>& backends, std::stop_token stop,
                             const std::function<std::string()>& reload,
-                            const std::function<bool(std::string_view)>& pluginCommand) {
+                            const std::function<bool(std::string_view)>& pluginCommand, const BedrockConsole& bedrock) {
     static_cast<void>(backends);
     if (line.size() > 4096 || line.find('\0') != std::string_view::npos)
         return {"Invalid console command."};
@@ -59,7 +59,9 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
                     "; accepted: " + std::to_string(runtime.acceptedConnections()) +
                     "; rejected: " + std::to_string(runtime.rejectedConnections()) +
                     "; bytes toward clients: " + std::to_string(runtime.bytesTowardClients()) +
-                    "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) + "."};
+                    "; toward backends: " + std::to_string(runtime.bytesTowardBackends()) +
+                    (bedrock.playing ? "; Bedrock players: " + std::to_string(bedrock.playing()) : std::string{}) +
+                    "."};
         if (words[0] == "servers") {
             std::string names = "Backends:";
             for (const auto& name : runtime.backendNames())
@@ -71,6 +73,8 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
     }
     if (count != 3 || words[0] != "send")
         return {std::string{kHelp}};
+    if (bedrock.connect && bedrock.connect(words[1], words[2]))
+        return {"Backend change requested for " + std::string{words[1]} + " (Bedrock)."};
     auto request = runtime.sendPlayer(words[1], words[2]);
     if (!request) {
         switch (request.error()) {
@@ -105,7 +109,7 @@ ConsoleReply consoleCommand(std::string_view line, ProxyRuntime& runtime,
 
 void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>& backends, std::stop_source& stopping,
                 std::stop_token stop, const std::function<std::string()>& reload,
-                const std::function<bool(std::string_view)>& pluginCommand) {
+                const std::function<bool(std::string_view)>& pluginCommand, const BedrockConsole& bedrock) {
     const wire::common::Logger logger{"Console"};
     wire::io::ConsoleInput input;
     while (!stop.stop_requested() && !stopping.stop_requested()) {
@@ -117,7 +121,7 @@ void runConsole(ProxyRuntime& runtime, const std::vector<config::BackendConfig>&
             }
             break;
         }
-        const auto reply = consoleCommand(*line, runtime, backends, stop, reload, pluginCommand);
+        const auto reply = consoleCommand(*line, runtime, backends, stop, reload, pluginCommand, bedrock);
         if (!reply.message.empty())
             logger.info([&] { return reply.message; });
         if (reply.stop) {
