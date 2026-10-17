@@ -3,6 +3,7 @@
 #include <basalt/wire/bedrock/BedrockPacketIds.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 
+#include <algorithm>
 #include <chrono>
 
 namespace basalt::proxy::runtime::detail {
@@ -33,7 +34,9 @@ std::string BedrockStatus::advertisement() const {
     std::string line = "MCPE;" + motd_ + ";";
     line += std::to_string(wire::bedrock::kNativeBedrockProtocol) + ";";
     line += std::string{kGameVersion} + ";";
-    line += std::to_string(online_ ? online_() : 0) + ";";
+    const auto playing = static_cast<std::size_t>(
+        std::ranges::count_if(clients_, [](const auto& entry) { return entry.second.session != nullptr; }));
+    line += std::to_string((online_ ? online_() : 0) + playing) + ";";
     line += std::to_string(max_) + ";";
     line += std::to_string(server_ ? server_->guid() : 0) + ";";
     line += "Basalt Proxy;Survival;1;";
