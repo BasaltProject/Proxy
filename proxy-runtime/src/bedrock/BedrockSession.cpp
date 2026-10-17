@@ -45,6 +45,11 @@ constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
 constexpr std::int32_t kOverworldMinSection = -4;
+constexpr std::uint8_t kBabyIndex = 16;
+constexpr std::uint64_t kSharedMask =
+    bedrock::flagBit(bedrock::EntityFlag::OnFire) | bedrock::flagBit(bedrock::EntityFlag::Sneaking) |
+    bedrock::flagBit(bedrock::EntityFlag::Sprinting) | bedrock::flagBit(bedrock::EntityFlag::Invisible) |
+    bedrock::flagBit(bedrock::EntityFlag::Gliding);
 constexpr std::int32_t kSwingAction = 1;
 constexpr std::int32_t kAttackAction = 1;
 constexpr std::int32_t kTitleKeep = -1;
@@ -135,6 +140,7 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     }
     others_.clear();
     mobs_.clear();
+    nameTags_.clear();
     waitingItems_.clear();
     for (const auto& [key, entity] : bossBars_) {
         wire::io::ByteBuffer gone;
@@ -393,8 +399,8 @@ void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
         wire::io::ByteBuffer out;
         bedrock::writeAddEntity(out, static_cast<std::int64_t>(runtimeId(packet->entityId)), name,
                                 static_cast<float>(packet->x), static_cast<float>(packet->y),
-                                static_cast<float>(packet->z), packet->yaw, packet->pitch, box.width, box.height, 0,
-                                connection_.protocolVersion());
+                                static_cast<float>(packet->z), packet->yaw, packet->pitch, box.width, box.height,
+                                NameTag{}.flags, connection_.protocolVersion());
         sendBedrock(BedrockPacket::AddEntity, out);
         mobs_.insert(packet->entityId);
         return;
@@ -445,6 +451,8 @@ void BedrockSession::entityData(std::span<const std::uint8_t> body) {
     const auto packet = play::SetEntityDataPacket::read(in);
     if (!packet)
         return;
+    if (mobs_.contains(packet->entityId))
+        nameTagged(*packet);
     const auto waiting = waitingItems_.find(packet->entityId);
     if (waiting == waitingItems_.end())
         return;
@@ -461,6 +469,67 @@ void BedrockSession::entityData(std::span<const std::uint8_t> body) {
         mobs_.insert(packet->entityId);
         return;
     }
+}
+
+std::uint64_t BedrockSession::sharedFlags(std::uint8_t java) {
+    using Data = play::SetEntityDataPacket;
+    using Flag = bedrock::EntityFlag;
+    std::uint64_t flags = 0;
+    const auto map = [&](std::uint8_t javaBit, Flag flag) {
+        if ((java & javaBit) != 0)
+            flags |= bedrock::flagBit(flag);
+    };
+    map(Data::kFlagOnFire, Flag::OnFire);
+    map(Data::kFlagSneaking, Flag::Sneaking);
+    map(Data::kFlagSprinting, Flag::Sprinting);
+    map(Data::kFlagInvisible, Flag::Invisible);
+    map(Data::kFlagFallFlying, Flag::Gliding);
+    return flags;
+}
+
+void BedrockSession::nameTagged(const play::SetEntityDataPacket& packet) {
+    NameTag& tag = nameTags_[packet.entityId];
+    bool changed = false;
+    bool flagsChanged = false;
+    for (const auto& entry : packet.entries) {
+        if (entry.index == play::SetEntityDataPacket::kSharedFlagsIndex) {
+            const auto* shared = std::get_if<play::SetEntityDataPacket::ByteValue>(&entry.value);
+            if (shared == nullptr)
+                continue;
+            tag.flags &= ~kSharedMask;
+            tag.flags |= sharedFlags(static_cast<std::uint8_t>(shared->value));
+            flagsChanged = true;
+        } else if (entry.index == kBabyIndex) {
+            const auto* baby = std::get_if<play::SetEntityDataPacket::BoolValue>(&entry.value);
+            if (baby == nullptr)
+                continue;
+            const auto bit = bedrock::flagBit(bedrock::EntityFlag::Baby);
+            tag.flags = baby->value ? (tag.flags | bit) : (tag.flags & ~bit);
+            flagsChanged = true;
+        } else if (entry.index == play::SetEntityDataPacket::kCustomNameIndex) {
+            const auto* name = std::get_if<play::SetEntityDataPacket::OptionalTextValue>(&entry.value);
+            if (name == nullptr)
+                continue;
+            tag.text = name->value ? wire::text::toLegacyText(resolved(*name->value)) : std::string{};
+            changed = true;
+        } else if (entry.index == play::SetEntityDataPacket::kCustomNameVisibleIndex) {
+            const auto* visible = std::get_if<play::SetEntityDataPacket::BoolValue>(&entry.value);
+            if (visible == nullptr)
+                continue;
+            tag.always = visible->value;
+            changed = true;
+        }
+    }
+    if (flagsChanged) {
+        wire::io::ByteBuffer out;
+        bedrock::writeEntityFlags(out, runtimeId(packet.entityId), tag.flags, connection_.protocolVersion());
+        sendBedrock(BedrockPacket::SetEntityData, out);
+    }
+    if (!changed)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeNameTag(out, runtimeId(packet.entityId), tag.text, tag.always, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::SetEntityData, out);
 }
 
 void BedrockSession::syncEntity(std::span<const std::uint8_t> body) {
@@ -485,6 +554,7 @@ void BedrockSession::removeEntities(std::span<const std::uint8_t> body) {
         return;
     for (const std::int32_t id : packet->entityIds) {
         waitingItems_.erase(id);
+        nameTags_.erase(id);
         if (mobs_.erase(id) != 0) {
             wire::io::ByteBuffer gone;
             bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
@@ -562,6 +632,7 @@ void BedrockSession::respawned(std::span<const std::uint8_t> body) {
     }
     others_.clear();
     mobs_.clear();
+    nameTags_.clear();
     waitingItems_.clear();
     chunks_ = 0;
     useDimension(dimensionOf(packet->spawnInfo.dimensionName));

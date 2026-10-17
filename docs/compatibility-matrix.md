@@ -111,7 +111,9 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Titles, subtitles, the action bar | yes |
 | Boss bars (create, rename, progress) | yes |
 | The sidebar scoreboard (objective, title, lines) | yes |
-| Open containers, mob names and variants | not done |
+| Mob custom names | sent, the bot does not read them |
+| Baby mobs, burning, sneaking, invisible, gliding flags of mobs | sent, the bot does not read them |
+| Open containers, mob colour and type variants | not done |
 
 ## Under stress
 
