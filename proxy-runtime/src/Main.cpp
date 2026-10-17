@@ -295,7 +295,7 @@ int run(const cliCommand::Run& command) {
                     return std::nullopt;
                 return *found;
             },
-            nativeForwarding, configuration->network.onlineMode);
+            nativeForwarding, configuration->network.onlineMode, configuration->admission);
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";

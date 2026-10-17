@@ -49,8 +49,6 @@ constexpr float kMaxHealth = 20.0F;
 constexpr float kMaxFood = 20.0F;
 constexpr float kMaxLevel = 24791.0F;
 constexpr float kWalkSpeed = 0.1F;
-constexpr float kMobWidth = 0.6F;
-constexpr float kMobHeight = 1.8F;
 constexpr std::size_t kCarriedSlots = 36;
 constexpr std::size_t kJavaPlayerSlots = 46;
 
@@ -362,10 +360,11 @@ void BedrockSession::spawnEntity(std::span<const std::uint8_t> body) {
         const std::string_view name = bedrock::bedrockEntityName(javaType);
         if (path.empty() || name.empty())
             return;
+        const play::EntityDimensions box = play::javaEntityDimensions(path).value_or(play::EntityDimensions{});
         wire::io::ByteBuffer out;
         bedrock::writeAddEntity(out, static_cast<std::int64_t>(runtimeId(packet->entityId)), name,
                                 static_cast<float>(packet->x), static_cast<float>(packet->y),
-                                static_cast<float>(packet->z), packet->yaw, packet->pitch, kMobWidth, kMobHeight, 0,
+                                static_cast<float>(packet->z), packet->yaw, packet->pitch, box.width, box.height, 0,
                                 connection_.protocolVersion());
         sendBedrock(BedrockPacket::AddEntity, out);
         mobs_.insert(packet->entityId);
