@@ -82,6 +82,11 @@ bool BedrockSession::begin() {
     profile.id = wire::common::Uuid::offlinePlayer(profile.name);
     javaName_ = profile.name;
     javaUuid_ = profile.id.toString();
+    profile_ = std::move(profile);
+    return openLink();
+}
+
+bool BedrockSession::openLink() {
     JavaLink::Events events;
     events.play = [this](std::int32_t id, std::span<const std::uint8_t> body) { fromJava(id, body); };
     events.registry = [this](const std::string& registry, std::vector<std::string> keys) {
@@ -89,8 +94,47 @@ bool BedrockSession::begin() {
             biomeKeys_ = std::move(keys);
     };
     events.closed = [this](const std::string& reason) { leave(reason); };
-    link_ = std::make_unique<JavaLink>(backend_, std::move(profile), address_, std::move(events));
+    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, std::move(events));
     return link_->begin(kConnectBudget);
+}
+
+bool BedrockSession::switchTo(config::BackendConfig target) {
+    if (!started_ || link_ == nullptr)
+        return false;
+    for (const auto& [id, uuid] : others_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
+        sendBedrock(BedrockPacket::RemoveEntity, gone);
+        gone.clear();
+        bedrock::writePlayerListRemove(gone, std::span{&uuid, 1}, connection_.protocolVersion());
+        sendBedrock(BedrockPacket::PlayerList, gone);
+    }
+    for (const std::int32_t id : mobs_) {
+        wire::io::ByteBuffer gone;
+        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
+        sendBedrock(BedrockPacket::RemoveEntity, gone);
+    }
+    others_.clear();
+    mobs_.clear();
+    waitingItems_.clear();
+    names_.clear();
+    biomeKeys_.clear();
+    inventory_ = {};
+    chunks_ = 0;
+    spawned_ = false;
+    teleported_ = false;
+    switching_ = true;
+    // The client keeps a world for as long as it stays in a dimension, so it is sent to another and brought back.
+    wire::io::ByteBuffer out;
+    const float eye = y_ + bedrock::kPlayerEyeHeight;
+    bedrock::writeChangeDimension(out, bedrock::BedrockDimension::Nether, x_, eye, z_, false);
+    sendBedrock(BedrockPacket::ChangeDimension, out);
+    out.clear();
+    bedrock::writeChangeDimension(out, bedrock::BedrockDimension::Overworld, x_, eye, z_, false);
+    sendBedrock(BedrockPacket::ChangeDimension, out);
+    connection_.flush();
+    backend_ = std::move(target);
+    return openLink();
 }
 
 void BedrockSession::tell(std::string_view miniMessage) {
@@ -171,8 +215,12 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
     const auto login = play::LoginPlayPacket::read(in);
-    if (!login || started_)
+    if (!login || (started_ && !switching_))
         return;
+    if (switching_) {
+        switching_ = false;
+        return;
+    }
     started_ = true;
     const int protocol = connection_.protocolVersion();
     sections_ = 24;
@@ -561,6 +609,10 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
     yaw_ = position->yaw;
     pitch_ = position->pitch;
     wire::io::ByteBuffer out;
+    bedrock::writeNetworkChunkPublisherUpdate(out, static_cast<std::int32_t>(x_), static_cast<std::int32_t>(y_),
+                                              static_cast<std::int32_t>(z_), kInitialRadius * 16);
+    sendBedrock(BedrockPacket::NetworkChunkPublisherUpdate, out);
+    out.clear();
     bedrock::writeTeleport(out, 1, x_, y_ + bedrock::kPlayerEyeHeight, z_, yaw_, pitch_, 0,
                            connection_.protocolVersion());
     sendBedrock(BedrockPacket::MovePlayer, out);

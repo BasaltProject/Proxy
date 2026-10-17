@@ -158,7 +158,10 @@ int run(const cliCommand::Run& command) {
         settings.queueSize = configuration->plugins.queueSize;
         proxy::plugins::PluginHooks hooks;
         hooks.servers = [&runtime] { return runtime->backendNames(); };
-        hooks.send = [&runtime](std::string_view player, std::string_view backend) {
+        hooks.send = [&runtime, &bedrockPlayers](std::string_view player, std::string_view backend) {
+            auto* bedrockSide = bedrockPlayers.load(std::memory_order_acquire);
+            if (bedrockSide != nullptr && bedrockSide->connect(player, backend))
+                return true;
             return runtime->sendPlayer(player, backend).has_value();
         };
         hooks.tell = [&runtime, &bedrockPlayers](std::string_view player, std::string_view text) {
@@ -269,7 +272,14 @@ int run(const cliCommand::Run& command) {
                 if (auto* host = pluginHost.load(std::memory_order_acquire))
                     host->post(std::move(event));
             },
-            *language);
+            *language,
+            [&configuration](std::string_view name) -> std::optional<proxy::config::BackendConfig> {
+                const auto found =
+                    std::ranges::find(configuration->backends, name, &proxy::config::BackendConfig::name);
+                if (found == configuration->backends.end())
+                    return std::nullopt;
+                return *found;
+            });
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";

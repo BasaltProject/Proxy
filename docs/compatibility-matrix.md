@@ -79,7 +79,10 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Time of day and rain | yes |
 | Plugin events, `player:send` and `player:kick` for a Bedrock player | yes |
 | Block changes, break and place, dropped items | sent, not seen by the bot |
-| Open containers, mob size and metadata, backend switch | not done |
+| Moving a Bedrock player to another backend (`player:connect`): the old world is cleared, the new one streams in, spawn again | yes, between two Basalt Servers |
+| 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
+| A RakNet peer that leaves splits open, holds ordered frames back or never acknowledges is cut off | yes (16 splits, 4 MiB of parts, 256 held frames, 8192 unacknowledged datagrams) |
+| Open containers, mob size and metadata | not done |
 
 
 
