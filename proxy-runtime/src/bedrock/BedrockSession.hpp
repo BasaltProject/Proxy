@@ -6,11 +6,13 @@
 #include <basalt/wire/auth/SessionProfile.hpp>
 #include <basalt/wire/bedrock/BedrockConnection.hpp>
 #include <basalt/wire/protocol/play/InventoryPackets.hpp>
+#include <basalt/wire/text/Component.hpp>
 #include <basalt/wire/text/LangTable.hpp>
 
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -64,6 +66,17 @@ private:
     void interact(const wire::bedrock::PlayerAuthInput& input);
     [[nodiscard]] wire::bedrock::BedrockItemStack
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
+    void title(wire::bedrock::TitleType type, std::span<const std::uint8_t> body);
+    void titleTimes(std::span<const std::uint8_t> body);
+    void titlesCleared(std::span<const std::uint8_t> body);
+    [[nodiscard]] std::string sidebarTitle() const;
+    void drawSidebar();
+    void objective(std::span<const std::uint8_t> body);
+    void displayObjective(std::span<const std::uint8_t> body);
+    void scoreSet(std::span<const std::uint8_t> body);
+    void scoreReset(std::span<const std::uint8_t> body);
+    void bossEvent(std::span<const std::uint8_t> body);
+    [[nodiscard]] wire::text::Component resolved(const wire::text::Component& component) const;
     void healthChanged(std::span<const std::uint8_t> body);
     void experienceChanged(std::span<const std::uint8_t> body);
     void timeChanged(std::span<const std::uint8_t> body);
@@ -96,6 +109,22 @@ private:
     std::vector<std::string> biomeKeys_;
     std::unordered_map<std::string, std::string> names_;
     std::unordered_set<std::int32_t> mobs_;
+    std::unordered_map<std::string, std::int64_t> bossBars_;
+
+    struct ScoreLine {
+        std::int64_t id = 0;
+        std::string text;
+        std::int32_t score = 0;
+    };
+
+    struct Objective {
+        std::string title;
+        std::map<std::string, ScoreLine> lines;
+    };
+
+    std::unordered_map<std::string, Objective> objectives_;
+    std::string sidebar_;
+    std::int64_t nextLine_ = 0;
     std::unordered_map<std::int32_t, std::array<float, 3>> waitingItems_;
     std::unordered_map<std::int32_t, std::pair<std::uint64_t, std::uint64_t>> others_;
     std::int32_t sections_ = 24;
