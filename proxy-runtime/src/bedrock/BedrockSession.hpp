@@ -60,7 +60,6 @@ private:
     stackOf(const std::optional<wire::protocol::play::WireItemStack>& item) const;
     void timeChanged(std::span<const std::uint8_t> body);
     void gameEvent(std::span<const std::uint8_t> body);
-    void releaseHeld();
     void sendInventory();
     void inventoryContent(std::span<const std::uint8_t> body);
     void inventorySlot(std::span<const std::uint8_t> body);
@@ -95,13 +94,6 @@ private:
     bool started_ = false;
     std::array<std::optional<wire::protocol::play::WireItemStack>, 46> inventory_{};
 
-    struct Held {
-        std::int32_t id;
-        std::vector<std::uint8_t> body;
-    };
-
-    std::vector<Held> held_;
-    std::chrono::steady_clock::time_point readyAt_{};
     std::int32_t sequence_ = 0;
     std::int32_t heldSlot_ = 0;
     bool spawned_ = false;

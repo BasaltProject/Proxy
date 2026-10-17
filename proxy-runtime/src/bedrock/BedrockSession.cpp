@@ -38,8 +38,6 @@ constexpr std::int32_t kInitialRadius = 4;
 constexpr float kChunksPerTick = 9.0F;
 constexpr std::uint64_t kOthersBase = 1000;
 constexpr std::int64_t kTicksPerDay = 24000;
-constexpr std::chrono::milliseconds kSettle{1500};
-constexpr std::size_t kMaxHeld = 256;
 constexpr float kMobWidth = 0.6F;
 constexpr float kMobHeight = 1.8F;
 constexpr std::size_t kCarriedSlots = 36;
@@ -110,7 +108,6 @@ void BedrockSession::kick(std::string_view miniMessage) {
 void BedrockSession::pump() {
     if (link_ != nullptr)
         link_->pump();
-    releaseHeld();
 }
 
 void BedrockSession::leave(const std::string& reason) {
@@ -124,24 +121,8 @@ void BedrockSession::sendBedrock(BedrockPacket packet, const wire::io::ByteBuffe
 }
 
 void BedrockSession::sendJava(std::int32_t id, const wire::io::ByteBuffer& body) {
-    if (link_ == nullptr)
-        return;
-    const auto bytes = body.readable();
-    if (std::chrono::steady_clock::now() < readyAt_ || !held_.empty()) {
-        if (held_.size() < kMaxHeld)
-            held_.push_back({id, std::vector<std::uint8_t>{bytes.begin(), bytes.end()}});
-        return;
-    }
-    link_->send(id, bytes);
-}
-
-void BedrockSession::releaseHeld() {
-    if (held_.empty() || std::chrono::steady_clock::now() < readyAt_ || link_ == nullptr)
-        return;
-    std::vector<Held> now;
-    now.swap(held_);
-    for (const Held& packet : now)
-        link_->send(packet.id, packet.body);
+    if (link_ != nullptr)
+        link_->send(id, body.readable());
 }
 
 void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> body) {
@@ -594,8 +575,7 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
     sendJava(play::AcceptTeleportationPacket::kId, out);
     teleported_ = true;
     out.clear();
-    link_->send(play::kPlayerLoadedId, out.readable());
-    readyAt_ = std::chrono::steady_clock::now() + kSettle;
+    sendJava(play::kPlayerLoadedId, out);
     spawn();
 }
 
