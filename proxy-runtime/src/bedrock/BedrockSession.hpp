@@ -133,6 +133,8 @@ private:
     bool started_ = false;
     std::array<std::optional<wire::protocol::play::WireItemStack>, 46> inventory_{};
 
+    std::chrono::steady_clock::time_point joinStarted_{};
+    std::chrono::steady_clock::time_point lastFromJava_{};
     std::int32_t sequence_ = 0;
     std::int32_t heldSlot_ = 0;
     bool switching_ = false;
