@@ -26,9 +26,9 @@ Both on the same protocol, no translation. Forwarding checked against Paper in e
 
 | Versions (protocol) | none | BungeeCord | Velocity modern |
 |---|---|---|---|
-| 1.8.8 (47), 1.9.4 (110), 1.10.2 (210), 1.11.2 (316), 1.12 (335), 1.12.1 (338), 1.12.2 (340) | yes | 1.8.8, 1.12.2 | n/a before 1.13 |
-| 1.13 to 1.15.2 (393 to 578, including 1.14.2 and 1.15.1) | yes | 1.14.4 | 1.14.4 |
-| 1.16.1 (736) and 1.16.2 to 1.18.2 (751 to 758, including 1.17 and 1.17.1) | yes | 1.16.5, 1.18.2 | 1.16.5, 1.18.2 |
+| 1.8.8 (47), 1.9 (107) to 1.9.4 (110), 1.10.2 (210), 1.11 (315), 1.11.2 (316), 1.12 (335), 1.12.1 (338), 1.12.2 (340) | yes | 1.8.8, 1.12.2 | n/a before 1.13 |
+| 1.13 to 1.15.2 (393 to 578, every one of them) | yes | 1.14.4 | 1.14.4 |
+| 1.16 (735) to 1.18.2 (758, every one of them) | yes | 1.16.5, 1.18.2 | 1.16.5, 1.18.2 |
 | 1.19 to 1.20.2 (759 to 764) | yes | 1.20.1 | 1.20.1 |
 | 1.20.3 and 1.20.4 (765) to 26.2 (776) | yes | 1.21.4 | 26.2 and 1.21.4 |
 
@@ -36,13 +36,15 @@ Moving a player between two backends of the same version without reconnecting: 1
 1.19.4, 1.20.1, and every version from 1.20.3 to 26.2. Before 1.20.2 the client receives the new backend's join packet; its tab list and
 boss bars from the previous backend are not cleared.
 
-Not covered: 1.16 (735, Paper never published it). The 1.12 jars come from Mojang by hand because Paperclip's own download URL is gone. A negative control (backend demanding forwarding, proxy sending none) fails as it should for BungeeCord and Velocity.
+Versions Paper never published or no longer downloads (1.9, 1.9.1, 1.9.2, 1.11, 1.14, 1.16 and the Paperclip fetch of 1.12 and 1.12.1) were checked
+against the Mojang server jar of that version, offline, forwarding none. A negative control (backend demanding forwarding, proxy sending none) fails as it should for BungeeCord and Velocity.
 
 ### Translated, client older than the backend
 
 A bot of each of these versions logs in and plays against a Basalt Server 26.3 through the proxy (Velocity forwarding):
-1.8, 1.9, 1.9.2, 1.11, 1.12, 1.12.1, 1.12.2, 1.13, 1.13.1, 1.13.2, 1.14, 1.14.1, 1.14.3, 1.14.4, 1.15, 1.15.1, 1.15.2, 1.16, 1.16.1, 1.16.2,
-1.16.3, 1.17, 1.17.1, 1.18.2, 1.19, 1.19.3, 1.19.4, 1.21, 1.21.4, 1.21.5, 1.21.6, 1.21.11, 26.1, 26.2. The login packets of each version are checked
+1.8, 1.9, 1.9.1, 1.9.2, 1.9.4, 1.10.2, 1.11, 1.11.2, 1.12, 1.12.1, 1.12.2, 1.13, 1.13.1, 1.13.2, 1.14, 1.14.1, 1.14.2, 1.14.3, 1.14.4, 1.15, 1.15.1, 1.15.2, 1.16, 1.16.1, 1.16.2,
+1.16.3, 1.16.5, 1.17, 1.17.1, 1.18.1, 1.18.2, 1.19, 1.19.2, 1.19.3, 1.19.4, 1.20.1, 1.20.2, 1.20.4, 1.20.6, 1.21, 1.21.3, 1.21.4, 1.21.5, 1.21.6, 1.21.8, 1.21.10,
+1.21.11, 26.1, 26.2. Versions that share a protocol (1.16.4 and 1.16.5, 1.20 and 1.20.1, and so on) count as one. The login packets of each version are checked
 for their exact shape. Reconfiguration without reconnecting is checked for 1.20.2 and later.
 
 ## Identity
