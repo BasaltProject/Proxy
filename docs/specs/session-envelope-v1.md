@@ -39,6 +39,17 @@ already proved. Bedrock datagrams are not Java packets: for Bedrock the data fra
 
 ## Status
 
-Codec, the Open/Opened state machine (`EnvelopeEndpoint`, one per peer, usable by both) and tests are in Wire. Not done: calling it from the
-Proxy and the Server at the end of login, the Server adapter that runs translation on data frames, switching from Basalt to external
-backends and back, and forced-mode configuration.
+Codec, the Open/Opened state machine (`EnvelopeEndpoint`, one per peer) and tests are in Wire. Java is wired at both ends.
+
+Proxy: it selects capability bit 0 in its signed response when the backend offers it, the backend is `forwarding = "basalt"` with `protocol = "client"` (or
+`"auto"` resolving to it), the client is Java and `[translation] mode` is `auto`. Right after the backend's LoginFinished it sends `Open` (Java, the client's
+protocol) as the last frame of the old codec, then wraps every packet it writes to that backend in a Data frame and unwraps what it reads; `Opened` is consumed.
+Any other control frame, a malformed frame or `Close` ends that backend login. Each backend connection negotiates on its own, so a move Basalt to external,
+external to Basalt and Basalt to Basalt needs nothing extra.
+
+Server: `[network.forwarding] session-envelope = true` offers the bit; it answers `Opened`, adopts the protocol from `Open` and translates for it.
+
+Checked with the Swarm Java bot through the Proxy against a Server built from its committed envelope adapter: 26.3, 1.21.4, 1.20.1 and 1.16.5 clients join and play;
+`[translation] mode = "proxy"` selects nothing and the session is unchanged; Basalt to Basalt and Basalt to Paper to Basalt moves keep one client connection.
+
+Not done: Bedrock (the Server answers `Close(Unsupported)`, and the Proxy never selects it for Bedrock players) and coverage-guided fuzzing of the framing.

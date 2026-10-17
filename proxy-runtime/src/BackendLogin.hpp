@@ -6,6 +6,7 @@
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/TcpSocket.hpp>
+#include <basalt/wire/protocol/EnvelopeEndpoint.hpp>
 
 #include <chrono>
 #include <expected>
@@ -135,6 +136,9 @@ private:
     const BackendAttempt attempt_;
     bool forwarded_ = false;
     const NativeForwarding* native_ = nullptr;
+    bool envelopeSelected_ = false;
+    bool envelopeActive_ = false;
+    std::optional<wire::protocol::sessionEnvelope::EnvelopeEndpoint> envelope_;
     std::uint8_t origin_ = 0;
     std::string originId_;
     std::string_view virtualHost_;

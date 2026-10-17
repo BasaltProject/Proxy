@@ -11,6 +11,7 @@ struct NativeForwarding {
     wire::auth::forwarding::native::SigningKey key;
     std::string proxyId;
     bool onlineMode = false;
+    bool delegate = true;
 };
 
 } // namespace basalt::proxy::runtime::detail

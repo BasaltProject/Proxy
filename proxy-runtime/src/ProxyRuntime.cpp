@@ -68,7 +68,8 @@ loadForwarding(const config::ProxyConfig& config) {
     if (!signing)
         return std::unexpected(signing.error());
     return std::make_shared<const detail::NativeForwarding>(
-        detail::NativeForwarding{std::move(*signing), config.forwarding.proxyId, config.network.onlineMode});
+        detail::NativeForwarding{std::move(*signing), config.forwarding.proxyId, config.network.onlineMode,
+                                 config.translation == config::TranslationMode::Auto});
 }
 } // namespace
 

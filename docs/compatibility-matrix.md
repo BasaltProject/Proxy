@@ -131,3 +131,5 @@ termination signal ended it cleanly with no sanitizer report. Fuzzing of RakNet 
 - Bedrock clients (protocol 2193) join the first backend of the default route as a Java client. See the Bedrock section.
 - The official game client has not been tried against this proxy; every client above is a bot.
 - Windows and macOS builds compile and the Windows one ran under wine; the macOS backend of the event loop ran on FreeBSD.
+
+| Session envelope: Java clients delegated to a Basalt Server over data frames (`session-envelope = true` on the Server) | yes, 26.3, 1.21.4, 1.20.1, 1.16.5, plus Basalt to Paper and back |

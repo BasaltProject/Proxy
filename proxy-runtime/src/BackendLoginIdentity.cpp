@@ -74,6 +74,13 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
     finished->gameProfile.id = profile.id;
     if (!advance(Phase::kLogin, Phase::kLoginAccepted))
         return std::unexpected(BackendLoginError::kMalformed);
+    if (envelopeSelected_) {
+        envelope_.emplace();
+        const auto open = envelope_->open(wire::protocol::sessionEnvelope::Edition::Java, protocol_);
+        if (!queue(open, kLoginPacketLimit))
+            return std::unexpected(BackendLoginError::kLimit);
+        envelopeActive_ = true;
+    }
     return std::move(*finished);
 }
 
