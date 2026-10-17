@@ -149,10 +149,10 @@ private:
     [[nodiscard]] bool keepAliveVarInt() const;
     bool legacyRaw_ = false;
     config::TranslationMode translationMode_;
-    [[nodiscard]] std::int32_t speaksTo(std::int32_t configured, std::int32_t client) const;
-    [[nodiscard]] bool routeAllowed(std::int32_t client, std::int32_t configured) const;
+    [[nodiscard]] std::int32_t speaksTo(const config::BackendConfig& backend, std::int32_t client) const;
+    [[nodiscard]] bool routeAllowed(std::int32_t client, const config::BackendConfig& backend) const;
     bool awaitingJoin_ = false;
-    [[nodiscard]] bool acceptsBackend(std::int32_t protocol) const;
+    [[nodiscard]] bool acceptsBackend(const config::BackendConfig& backend) const;
     std::int32_t clientProtocol_ = 0;
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;

@@ -19,6 +19,8 @@ namespace basalt::proxy::runtime::detail {
 
 /// The proxy as a Java client: it logs a Bedrock player in to a native backend, walks the configuration and then hands
 /// every play packet to its owner, answering the ones that are only about keeping the connection alive.
+struct NativeForwarding;
+
 class JavaLink {
 public:
     enum class State { kIdle, kConnecting, kLogin, kConfiguration, kPlay, kClosed };
@@ -30,7 +32,7 @@ public:
     };
 
     JavaLink(config::BackendConfig backend, wire::auth::SessionProfile profile, std::string clientAddress,
-             Events events);
+             Events events, const NativeForwarding* native = nullptr, std::string originId = {});
 
     /// Resolves the backend and starts connecting; false when it cannot be reached at all.
     [[nodiscard]] bool begin(std::chrono::milliseconds budget);
@@ -56,6 +58,8 @@ private:
     wire::auth::SessionProfile profile_;
     std::string clientAddress_;
     Events events_;
+    const NativeForwarding* native_ = nullptr;
+    std::string originId_;
     State state_ = State::kIdle;
     std::unique_ptr<BackendDial> dial_;
     std::unique_ptr<BackendLogin> login_;

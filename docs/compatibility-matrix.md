@@ -63,6 +63,13 @@ for their exact shape. Reconfiguration without reconnecting is checked for 1.20.
 | BungeeCord legacy | every version, plus BungeeGuard and a SafeNet-style token on 26.3 |
 | Basalt (Ed25519 challenge) | Basalt Server 26.3 |
 
+## Who translates: `protocol = "auto"`
+
+A backend with `forwarding = "basalt"` and `protocol = "auto"` takes each client in the client's own version and the Basalt Server translates; the
+proxy keeps translating clients before 1.13, which cannot carry the signed login query. Checked with a Basalt Server 26.3 in basalt forwarding:
+1.8 and 1.12.2 (translated by the proxy), 1.16.5 and 1.21.4 (translated by the Server). Any other backend gets the newest protocol and the proxy
+translates, as before. `[translation] mode = "proxy"` forces the proxy for all of them.
+
 ## Bedrock to a Basalt Server 26.3
 
 Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world, Velocity forwarding. The bot is not the game client.

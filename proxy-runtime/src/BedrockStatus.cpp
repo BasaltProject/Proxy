@@ -25,9 +25,11 @@ std::uint64_t nowMillis() {
 
 BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function<std::size_t()> online, std::size_t max,
                              Route route, BedrockSession::Events events,
-                             std::shared_ptr<const wire::text::LangTable> language, Lookup lookup)
+                             std::shared_ptr<const wire::text::LangTable> language, Lookup lookup,
+                             std::shared_ptr<const NativeForwarding> forwarding, bool requireAuthenticated)
     : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
-      events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)) {}
+      events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
+      forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated) {}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 
@@ -71,6 +73,14 @@ bool BedrockStatus::start() {
             });
         });
         raw.onReady([this, &raw, peer] {
+            if (requireAuthenticated_ && !raw.login().authenticated) {
+                wire::common::Logger{"Bedrock"}.info([&raw] {
+                    return raw.login().name +
+                           " was turned away: this proxy only lets in players signed in to Xbox Live.";
+                });
+                raw.disconnect("Sign in to Xbox Live to play here.");
+                return;
+            }
             const auto found = clients_.find(peer);
             const auto backend = route_ ? route_() : std::nullopt;
             if (found == clients_.end() || !backend) {
@@ -80,7 +90,7 @@ bool BedrockStatus::start() {
                 return;
             }
             found->second.session =
-                std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_, language_);
+                std::make_unique<BedrockSession>(raw, *backend, peer.toString(), events_, language_, forwarding_);
             if (found->second.session->begin()) {
                 const std::lock_guard lock{orders_};
                 playing_.insert(found->second.session->name());

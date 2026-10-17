@@ -116,6 +116,8 @@ struct BackendConfig {
     /// The backend's protocol, or kClientProtocol when it speaks whatever version the player connects with.
     std::int32_t protocol = 777;
     static constexpr std::int32_t kClientProtocol = 0;
+    /// Set by protocol = "auto": the proxy translates the clients this backend cannot take through a login query.
+    bool automatic = false;
     wire::auth::forwarding::ForwardingMode forwarding = wire::auth::forwarding::ForwardingMode::None;
     std::string secret;
     std::string propertyName{wire::auth::forwarding::ProxyForwarding::kSafeNetProperty};

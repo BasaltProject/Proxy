@@ -20,6 +20,8 @@
 
 namespace basalt::proxy::runtime::detail {
 
+struct NativeForwarding;
+
 /// One Bedrock player standing in for a Java client: what the backend says is told to the player in Bedrock's terms and
 /// what the player does is told to the backend in Java's.
 class BedrockSession {
@@ -27,7 +29,8 @@ public:
     using Events = std::function<void(runtime::PlayerEvent)>;
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
-                   Events events = {}, std::shared_ptr<const wire::text::LangTable> language = nullptr);
+                   Events events = {}, std::shared_ptr<const wire::text::LangTable> language = nullptr,
+                   std::shared_ptr<const NativeForwarding> forwarding = nullptr);
     ~BedrockSession();
     BedrockSession(const BedrockSession&) = delete;
     BedrockSession& operator=(const BedrockSession&) = delete;
@@ -82,6 +85,7 @@ private:
     std::string address_;
     Events events_;
     std::shared_ptr<const wire::text::LangTable> language_;
+    std::shared_ptr<const NativeForwarding> forwarding_;
     wire::auth::SessionProfile profile_;
     std::string javaName_;
     std::string javaUuid_;

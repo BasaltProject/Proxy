@@ -206,23 +206,34 @@ bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t
     return static_cast<bool>(target.queue(frame));
 }
 
-std::int32_t ClientSession::speaksTo(std::int32_t configured, std::int32_t client) const {
-    if (configured == 0 && translationMode_ == config::TranslationMode::Proxy)
+std::int32_t ClientSession::speaksTo(const config::BackendConfig& backend, std::int32_t client) const {
+    constexpr std::int32_t kFirstWithLoginQueries = 393;
+    const bool needsQueries = backend.forwarding == wire::auth::forwarding::ForwardingMode::Velocity ||
+                              backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+    if (backend.protocol == 0 &&
+        (translationMode_ == config::TranslationMode::Proxy ||
+         (backend.automatic && needsQueries && client != 0 && client < kFirstWithLoginQueries)))
         return buildInfo::kProtocolVersion;
-    return effectiveProtocol(configured, client);
+    return effectiveProtocol(backend.protocol, client);
 }
 
-bool ClientSession::routeAllowed(std::int32_t client, std::int32_t configured) const {
-    const std::int32_t speaks = speaksTo(configured, client);
+bool ClientSession::routeAllowed(std::int32_t client, const config::BackendConfig& backend) const {
+    const std::int32_t speaks = speaksTo(backend, client);
     if (translationMode_ == config::TranslationMode::Off && client != buildInfo::kProtocolVersion &&
         speaks == buildInfo::kProtocolVersion)
         return false;
     return resolveRoute(client, speaks).has_value();
 }
 
-bool ClientSession::acceptsBackend(std::int32_t configured) const {
+bool ClientSession::acceptsBackend(const config::BackendConfig& backend) const {
     constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
-    const std::int32_t protocol = speaksTo(configured, clientProtocol_);
+    constexpr std::int32_t kFirstWithLoginQueries = 393;
+    const std::int32_t protocol = speaksTo(backend, clientProtocol_);
+    using Mode = wire::auth::forwarding::ForwardingMode;
+    // The signed schemes ride on a login query, which a client before 1.13 cannot carry.
+    if ((backend.forwarding == Mode::Velocity || backend.forwarding == Mode::Basalt) && protocol != kNative &&
+        protocol < kFirstWithLoginQueries)
+        return false;
     if (translationMode_ == config::TranslationMode::Off && clientProtocol_ != 0 && protocol == kNative)
         return false;
     if (legacyRaw_ || (ids_ && !translation_))
@@ -652,7 +663,7 @@ bool ClientSession::routeNext() {
         identityClaimed_ = true;
     }
     while (nextTarget_ < targets_.size() && ((recovering_ && recoveryVisited_.test(targets_[nextTarget_])) ||
-                                             !acceptsBackend(backends_[targets_[nextTarget_]].protocol)))
+                                             !acceptsBackend(backends_[targets_[nextTarget_]])))
         ++nextTarget_;
     if (nextTarget_ == targets_.size()) {
         if (recovering_)
@@ -727,7 +738,7 @@ bool ClientSession::dial() {
     if (!dialAttempt_ || dialAttempt_->target >= backends_.size())
         return false;
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
-    const std::int32_t speaks = speaksTo(backends_[candidateBackend_->attempt().target].protocol, clientProtocol_);
+    const std::int32_t speaks = speaksTo(backends_[candidateBackend_->attempt().target], clientProtocol_);
     candidateBackend_->useIds(rawProtocol(speaks) ? ids_.get() : nullptr);
     dialAttempt_.reset();
     if (!profile_ ||

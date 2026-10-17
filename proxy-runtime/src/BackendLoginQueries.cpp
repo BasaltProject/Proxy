@@ -63,7 +63,9 @@ std::expected<void, BackendLoginError> BackendLogin::answerPluginQuery(wire::io:
                                   .virtualHost = std::string{virtualHost_},
                                   .virtualPort = virtualPort_,
                                   .onlineMode = native_->onlineMode,
-                                  .proxyId = native_->proxyId};
+                                  .proxyId = native_->proxyId,
+                                  .origin = static_cast<basalt::Origin>(origin_),
+                                  .originId = originId_};
         const auto response = basalt::sign(native_->key, *nativeRequest, basalt::kVersion1, identity);
         if (response.empty())
             return std::unexpected(BackendLoginError::kMalformed);
