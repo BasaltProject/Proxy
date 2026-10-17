@@ -29,6 +29,8 @@ std::int32_t backendLoginId(std::int32_t protocol) {
         return 35;
     case 758:
     case 757:
+    case 756:
+    case 755:
         return 38;
     case 754:
         return 36;
