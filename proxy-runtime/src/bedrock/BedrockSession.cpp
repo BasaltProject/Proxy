@@ -10,6 +10,7 @@
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
+#include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/EntityData.hpp>
 #include <basalt/wire/protocol/play/EntityPackets.hpp>
@@ -228,6 +229,12 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         teleportEntity(body);
     else if (id == play::RemoveEntitiesPacket::kId)
         removeEntities(body);
+    else if (id == play::PlayerChatPacket::kId)
+        playerChat(body);
+    else if (id == play::PlayerCombatKillPacket::kId)
+        died(body);
+    else if (id == play::RespawnPacket::kId)
+        respawning_ = true;
     else if (id == play::kSetTitleTextId)
         title(bedrock::TitleType::Title, body);
     else if (id == play::kSetSubtitleTextId)
@@ -279,6 +286,7 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
         return;
     if (switching_) {
         switching_ = false;
+        gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
         return;
     }
     started_ = true;
@@ -290,7 +298,8 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     info.x = x_;
     info.y = y_ + bedrock::kPlayerEyeHeight;
     info.z = z_;
-    info.playerGameType = static_cast<std::int32_t>(login->spawnInfo.gamemode);
+    gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
+    info.playerGameType = gamemode_;
     info.vanillaVersion = "1.26.50";
     info.serverId = "basalt-proxy";
     info.worldId = "basalt-proxy";
@@ -498,6 +507,33 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     if (named == nullptr)
         return {};
     return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+}
+
+void BedrockSession::died(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::PlayerCombatKillPacket::read(in);
+    if (!packet)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeDeathInfo(out, wire::text::toLegacyText(resolved(packet->message)));
+    sendBedrock(BedrockPacket::DeathInfo, out);
+}
+
+void BedrockSession::playerChat(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::PlayerChatPacket::read(in);
+    if (!packet)
+        return;
+    const auto known = names_.find(packet->sender.toString());
+    const std::string name =
+        known != names_.end() ? known->second : wire::text::toPlainText(resolved(packet->chatType.name));
+    const std::string message =
+        packet->unsignedContent ? wire::text::toLegacyText(resolved(*packet->unsignedContent)) : packet->content;
+    wire::io::ByteBuffer out;
+    bedrock::writeText(out, bedrock::TextType::Chat, name, message, "");
+    sendBedrock(BedrockPacket::Text, out);
 }
 
 void BedrockSession::title(bedrock::TitleType type, std::span<const std::uint8_t> body) {
@@ -725,6 +761,18 @@ void BedrockSession::timeChanged(std::span<const std::uint8_t> body) {
     }
 }
 
+void BedrockSession::applyGamemode(std::int32_t mode) {
+    constexpr std::int32_t kCreative = 1;
+    constexpr std::int32_t kAdventure = 2;
+    constexpr std::int32_t kSpectator = 3;
+    wire::io::ByteBuffer settings;
+    bedrock::writeUpdateAdventureSettings(settings, mode == kAdventure || mode == kSpectator);
+    sendBedrock(BedrockPacket::UpdateAdventureSettings, settings);
+    wire::io::ByteBuffer abilities;
+    bedrock::writeUpdateAbilities(abilities, 1, false, mode == kCreative);
+    sendBedrock(BedrockPacket::UpdateAbilities, abilities);
+}
+
 void BedrockSession::gameEvent(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
@@ -739,6 +787,13 @@ void BedrockSession::gameEvent(std::span<const std::uint8_t> body) {
             static_cast<std::int32_t>(strength * static_cast<float>(bedrock::kWeatherStrengthScale)));
         sendBedrock(BedrockPacket::LevelEvent, out);
     };
+    if (packet->event == play::GameEventPacket::kChangeGameMode) {
+        applyGamemode(static_cast<std::int32_t>(packet->param));
+        wire::io::ByteBuffer mode;
+        bedrock::writeSetPlayerGameType(mode, static_cast<std::int32_t>(packet->param));
+        sendBedrock(BedrockPacket::SetPlayerGameType, mode);
+        return;
+    }
     if (packet->event == play::GameEventPacket::kStartRaining)
         send(Level::StartRaining, 1.0F);
     else if (packet->event == play::GameEventPacket::kStopRaining)
@@ -886,6 +941,12 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
                                               static_cast<std::int32_t>(z_), kInitialRadius * 16);
     sendBedrock(BedrockPacket::NetworkChunkPublisherUpdate, out);
     out.clear();
+    if (respawning_) {
+        respawning_ = false;
+        wire::io::ByteBuffer ready;
+        bedrock::writeRespawn(ready, x_, y_ + bedrock::kPlayerEyeHeight, z_, bedrock::RespawnState::ServerReady, 1);
+        sendBedrock(BedrockPacket::Respawn, ready);
+    }
     bedrock::writeTeleport(out, 1, x_, y_ + bedrock::kPlayerEyeHeight, z_, yaw_, pitch_, 0,
                            connection_.protocolVersion());
     sendBedrock(BedrockPacket::MovePlayer, out);
@@ -908,6 +969,7 @@ void BedrockSession::spawn() {
     if (spawned_ || !teleported_ || chunks_ == 0)
         return;
     spawned_ = true;
+    applyGamemode(gamemode_);
     if (events_ && !announced_) {
         announced_ = true;
         events_({runtime::PlayerEventKind::kJoin, javaName_, backend_.name, javaUuid_, {}});
@@ -999,6 +1061,12 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         move.write(out);
         sendJava(play::ServerboundPositionLookPacket::kId, out);
         interact(*input);
+    } else if (packet == BedrockPacket::Respawn) {
+        if (bedrock::readRespawn(body) == bedrock::RespawnState::ClientReady) {
+            wire::io::ByteBuffer out;
+            play::ClientCommandPacket{play::ClientCommandPacket::Action::PerformRespawn}.write(out);
+            sendJava(play::ClientCommandPacket::kId, out);
+        }
     } else if (packet == BedrockPacket::Text) {
         const auto text = bedrock::readText(body);
         if (!text)
