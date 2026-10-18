@@ -96,14 +96,16 @@ int run(const cliCommand::Run& command) {
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
     RuntimeServices services;
-    services.playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
+    const auto playerCommandSpecs = [&pluginHost]() -> std::vector<PlayerCommandSpec> {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr ? host->playerCommandSpecs() : std::vector<PlayerCommandSpec>{};
     };
-    services.playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
+    const auto playerCommand = [&pluginHost](std::string_view player, std::string_view command) {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr && host->playerCommand(player, command);
     };
+    services.playerCommandSpecs = playerCommandSpecs;
+    services.playerCommand = playerCommand;
     services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kChat, std::string{player}, {}, {}, std::string{message}});
@@ -296,7 +298,8 @@ int run(const cliCommand::Run& command) {
                     return std::nullopt;
                 return *found;
             },
-            nativeForwarding, configuration->network.onlineMode, configuration->admission);
+            nativeForwarding, configuration->network.onlineMode, configuration->admission,
+            detail::BedrockSession::Commands{playerCommand, playerCommandSpecs});
         if (!bedrock->start()) {
             logger.error([&configuration] {
                 return "Could not bind UDP port " + std::to_string(configuration->bedrock.port) + " for Bedrock.";

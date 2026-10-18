@@ -97,9 +97,10 @@ constexpr std::int32_t kChatCommandId = play::ChatCommandPacket::kId;
 BedrockSession::BedrockSession(bedrock::BedrockConnection& connection, config::BackendConfig backend,
                                std::string address, std::uint16_t port, Events events,
                                std::shared_ptr<const wire::text::LangTable> language,
-                               std::shared_ptr<const NativeForwarding> forwarding)
-    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)), port_(port),
-      events_(std::move(events)), language_(std::move(language)), forwarding_(std::move(forwarding)) {}
+                               std::shared_ptr<const NativeForwarding> forwarding, Commands commands)
+    : connection_(connection), backend_(std::move(backend)), address_(std::move(address)),
+      commands_(std::move(commands)), port_(port), events_(std::move(events)), language_(std::move(language)),
+      forwarding_(std::move(forwarding)) {}
 
 BedrockSession::~BedrockSession() {
     if (announced_ && events_)
@@ -233,6 +234,15 @@ void BedrockSession::commandList(std::span<const std::uint8_t> body) {
         const auto& node = tree->nodes[static_cast<std::size_t>(child)];
         if (node.kind == play::CommandNodeData::Kind::Literal && node.name && !node.name->empty())
             commands.push_back({*node.name, {}});
+    }
+    if (commands_.specs) {
+        for (const auto& spec : commands_.specs()) {
+            if (spec.literals.empty() || commands.size() >= kMaxCommands)
+                continue;
+            const auto known = [&](const bedrock::CommandInfo& info) { return info.name == spec.literals.front(); };
+            if (std::ranges::none_of(commands, known))
+                commands.push_back({spec.literals.front(), {}});
+        }
     }
     wire::io::ByteBuffer out;
     bedrock::writeAvailableCommands(out, commands);
@@ -1549,6 +1559,8 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         wire::io::ByteBuffer out;
         play::ChatCommandPacket typed;
         typed.command = command->starts_with('/') ? command->substr(1) : *command;
+        if (commands_.run && commands_.run(javaName_, typed.command))
+            return;
         typed.write(out);
         sendJava(kChatCommandId, out);
     }
