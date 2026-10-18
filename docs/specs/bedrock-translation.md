@@ -1,7 +1,7 @@
 # Bedrock translation: what Server does, what the proxy does
 
 Server serves a Bedrock player from its own world (about 5,600 lines in `server-runtime/src/bedrock`). The proxy has no world: it reads a
-Java backend's packets and writes Bedrock's (about 1,300 lines in `proxy-runtime/src/bedrock`). The parts that do not touch a world live
+Java backend's packets and writes Bedrock's (`proxy-runtime/src/bedrock`). The parts that do not touch a world live
 in `wire-bedrock`.
 
 ## Inventory
@@ -13,16 +13,21 @@ in `wire-bedrock`.
 | Chunks | `BedrockChunks` reads a Server `Chunk` | `BedrockSession::chunk` decodes a Java column | `encodeColumn`, block, biome and item tables |
 | Blocks | per change from its world | Java block updates | `bedrockBlockId` for 26.3 |
 | Movement and rotation | `BedrockPlayer` | position packets both ways | `PlayerAuthInput` reader |
-| Chat, commands, forms | `BedrockPlayer`, forms in `BedrockPlayerConnection` | text and command request; no forms | text and form packets |
+| Chat, commands, forms | `BedrockPlayer`, forms in `BedrockPlayerConnection` | text and command request, the backend command list, proxy plugin commands; no forms | text and form packets |
 | Other players and mobs | `BedrockSeen` from its entities | spawn, move and remove packets | add player, add entity, player list |
 | Dropped items | `BedrockSeen` | spawn plus entity data | add item entity |
-| Inventory and windows | `BedrockWindows`, `BedrockStackRequests` | the 36 carried slots, read only | inventory content writer |
+| Inventory and windows | `BedrockWindows`, `BedrockStackRequests` | the 36 carried slots, worn armour, the off hand, chests, dispensers and hoppers; take, place and swap clicks | inventory content writer, stack request reader |
 | Crafting recipes, maps, shield, records | `BedrockRecipes`, `BedrockMaps`, `BedrockShield`, `BedrockRecords` | none | recipe and map writers |
 | Health, hunger, experience | `BedrockPlayerConnection` | attribute updates from the Java health and experience packets | attribute writer |
 | Titles and the action bar | `BedrockPlayerConnection` | from the Java title and chat overlay packets | `writeSetTitle` |
 | Boss bars | `BedrockPlayerConnection` | create, remove, progress and name | `writeBossEvent` |
 | The sidebar scoreboard | `BedrockPlayerConnection` | objective, display and score packets, for the sidebar only | scoreboard writers |
-| Effects | `BedrockPlayerConnection` | none | writers exist |
+| Effects | `BedrockPlayerConnection` | the potion effects of the player | writers and the effect id table |
+| Hurt and death events | `BedrockSeen` | the hurt flash of any known entity and the death of a mob | entity event writer |
+| Sneaking, sprinting | `BedrockPlayer` | a player input packet and the sprint command | `PlayerAuthInput` reader |
+| Resource packs of the backend | none | answered for the player: accepted when required, declined when optional; never shown | none |
+| Bungee messages from the backend | none | `Connect`, `GetServer`, `GetServers` and `UUID` on `bungeecord:main` | none |
+| Kick reason | `BedrockPlayerConnection` | the reason the backend gives | none |
 
 ## What stays in Server
 
@@ -31,5 +36,6 @@ does), recipes, maps, effects and the rest of the player state. Moving them mean
 
 ## What the proxy still lacks
 
-Open containers (a chest, a furnace), item stack requests in either direction, crafting, effects, forms and particles, and the tab list and below-name scoreboards. A Bedrock player behind the proxy can walk, see, chat, run commands, build, switch backend and carry items,
-not play survival through windows.
+Furnaces, crafting tables and the other windows, stack splits and drops, crafting, forms, particles and sounds, the equipment and skins of other
+players, the effects of other entities, mob variants, below-name scoreboards, and the packs of the backend as Bedrock packs. A Bedrock player behind the
+proxy can walk, see, chat, run commands, build, move chests' contents, switch backend and be moved by plugins, but not yet play survival through every window.
