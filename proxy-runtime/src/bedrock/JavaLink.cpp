@@ -190,8 +190,31 @@ void JavaLink::handleConfiguration(std::int32_t id, wire::io::ByteBuffer& body) 
                 keys.push_back(entry.key);
             events_.registry(registry->registryId, std::move(keys));
         }
+    } else if (id == configuration::ResourcePackPushPacket::kConfigurationId) {
+        answerPack(true, body);
     } else if (id == 2) {
         close(textOf(body));
+    }
+}
+
+void JavaLink::answerPack(bool configuration, wire::io::ByteBuffer& body) {
+    namespace cfg = protocol::configuration;
+    const auto push = cfg::ResourcePackPushPacket::read(body);
+    if (!push)
+        return;
+    constexpr std::int32_t kLoaded = 0;
+    constexpr std::int32_t kAccepted = 3;
+    constexpr std::int32_t kDownloaded = 4;
+    const std::int32_t id =
+        configuration ? cfg::ResourcePackResponsePacket::kConfigurationId : cfg::ResourcePackResponsePacket::kPlayId;
+    const std::vector<std::int32_t> actions =
+        push->required ? std::vector<std::int32_t>{kAccepted, kDownloaded, kLoaded}
+                       : std::vector<std::int32_t>{cfg::ResourcePackResponsePacket::kDeclined};
+    for (const std::int32_t action : actions) {
+        scratch_.clear();
+        cfg::ResourcePackResponsePacket{.id = push->id, .action = action}.write(scratch_);
+        const std::vector<std::uint8_t> reply{scratch_.readable().begin(), scratch_.readable().end()};
+        sendFrame(id, reply);
     }
 }
 
@@ -202,6 +225,10 @@ void JavaLink::handlePlay(std::int32_t id, wire::io::ByteBuffer& body) {
     }
     if (id == kPlayPing) {
         sendFrame(kPlayPong, body.readable());
+        return;
+    }
+    if (id == protocol::configuration::ResourcePackPushPacket::kPlayId) {
+        answerPack(false, body);
         return;
     }
     if (events_.play)

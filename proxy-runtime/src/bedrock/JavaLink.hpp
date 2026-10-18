@@ -53,6 +53,7 @@ private:
     void handleConfiguration(std::int32_t id, wire::io::ByteBuffer& body);
     void handlePlay(std::int32_t id, wire::io::ByteBuffer& body);
     void sendFrame(std::int32_t id, std::span<const std::uint8_t> body);
+    void answerPack(bool configuration, wire::io::ByteBuffer& body);
 
     config::BackendConfig backend_;
     wire::auth::SessionProfile profile_;
