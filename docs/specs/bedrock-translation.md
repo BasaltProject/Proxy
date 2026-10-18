@@ -16,7 +16,7 @@ in `wire-bedrock`.
 | Chat, commands, forms | `BedrockPlayer`, forms in `BedrockPlayerConnection` | text and command request, the backend command list, proxy plugin commands; no forms | text and form packets |
 | Other players and mobs | `BedrockSeen` from its entities | spawn, move and remove packets | add player, add entity, player list |
 | Dropped items | `BedrockSeen` | spawn plus entity data | add item entity |
-| Inventory and windows | `BedrockWindows`, `BedrockStackRequests` | the 36 carried slots, worn armour, the off hand, chests, dispensers and hoppers; take, place and swap clicks | inventory content writer, stack request reader |
+| Inventory and windows | `BedrockWindows`, `BedrockStackRequests` | the 36 carried slots, worn armour, the off hand, chests, shulker boxes, dispensers, hoppers and furnaces; take, place and swap clicks | inventory content writer, stack request reader |
 | Crafting recipes, maps, shield, records | `BedrockRecipes`, `BedrockMaps`, `BedrockShield`, `BedrockRecords` | none | recipe and map writers |
 | Health, hunger, experience | `BedrockPlayerConnection` | attribute updates from the Java health and experience packets | attribute writer |
 | Titles and the action bar | `BedrockPlayerConnection` | from the Java title and chat overlay packets | `writeSetTitle` |
@@ -36,6 +36,6 @@ does), recipes, maps, effects and the rest of the player state. Moving them mean
 
 ## What the proxy still lacks
 
-Furnaces, crafting tables and the other windows, stack splits and drops, crafting, forms, particles and sounds, the equipment and skins of other
+Crafting tables and the other windows, stack splits and drops, crafting, forms, particles and sounds, the equipment and skins of other
 players, the effects of other entities, mob variants, below-name scoreboards, and the packs of the backend as Bedrock packs. A Bedrock player behind the
 proxy can walk, see, chat, run commands, build, move chests' contents, switch backend and be moved by plugins, but not yet play survival through every window.
