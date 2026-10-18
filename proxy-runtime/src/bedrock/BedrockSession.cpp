@@ -267,6 +267,14 @@ void BedrockSession::pluginMessage(std::span<const std::uint8_t> body) {
             static_cast<void>(commands_.connect(javaName_, target));
     } else if (subchannel == "GetServer") {
         bungeeAnswer(message->channel, subchannel, backend_.name);
+    } else if (subchannel == "GetServers" && commands_.servers) {
+        std::string names;
+        for (const std::string& name : commands_.servers()) {
+            if (names.size() + name.size() + 2 > kMaxBungeePayload)
+                break;
+            names += names.empty() ? name : ", " + name;
+        }
+        bungeeAnswer(message->channel, subchannel, names);
     } else if (subchannel == "UUID") {
         std::string plain = javaUuid_;
         std::erase(plain, '-');

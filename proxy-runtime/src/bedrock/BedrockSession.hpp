@@ -35,6 +35,7 @@ public:
         std::function<bool(std::string_view player, std::string_view command)> run;
         std::function<std::vector<runtime::PlayerCommandSpec>()> specs;
         std::function<bool(std::string_view player, std::string_view backend)> connect;
+        std::function<std::vector<std::string>()> servers;
     };
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
