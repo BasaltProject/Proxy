@@ -63,6 +63,7 @@ constexpr float kMaxLevel = 24791.0F;
 constexpr float kWalkSpeed = 0.1F;
 constexpr std::size_t kCarriedSlots = 36;
 constexpr std::size_t kCookerSlotCount = 3;
+constexpr std::int32_t kOutsideWindow = -999;
 constexpr std::size_t kJavaPlayerSlots = 46;
 constexpr std::size_t kArmourSlots = 4;
 constexpr std::size_t kJavaArmourStart = 5;
@@ -1332,6 +1333,17 @@ bool BedrockSession::clickFor(const bedrock::BedrockStackAction& action) {
     const auto cursor = static_cast<std::int32_t>(bedrock::BedrockContainerSlot::Cursor);
     const auto source = clickSlot(action.source);
     const auto destination = clickSlot(action.destination);
+    if (action.type == Type::Drop) {
+        if (action.source.container == cursor) {
+            click(kOutsideWindow, action.count == 1 ? 1 : 0, Mode::Pickup);
+            return true;
+        }
+        if (source) {
+            const std::int32_t held = itemAt(*source) ? itemAt(*source)->count : 0;
+            click(*source, action.count >= held ? 1 : 0, Mode::Throw);
+            return true;
+        }
+    }
     if (action.type == Type::Take && source && action.destination.container == cursor) {
         const std::int32_t held = itemAt(*source) ? itemAt(*source)->count : 0;
         click(*source, action.count > 0 && action.count < held ? 1 : 0, Mode::Pickup);
