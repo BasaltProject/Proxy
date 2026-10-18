@@ -116,6 +116,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Potion effects on the player (given, changed, cleared) | yes, the bot sees speed and regeneration added and removed; effects of other entities are not shown |
 | Sneaking of a Bedrock player reaches the backend as a player input packet | yes, the packet is sent when the bot starts sneaking; the pose other players see was not checked |
 | The hurt flash of the player and of mobs, and the death of a mob, shown to the Bedrock client | yes, the packets are sent and the bot accepts them; what the client draws was not checked |
+| `Connect` sent by a backend on `bungeecord:main` (with `bungee-messages = true`) moves a Bedrock player; the other subcommands are not answered | yes, a message injected between the proxy and the backend moved the bot to the second backend |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
 | Bedrock connections go through the same admission gate as Java ones (global and per-origin token buckets) | yes: 32 of 40 bots arriving at once from one address enter with the defaults |
 | A RakNet peer that leaves splits open, holds ordered frames back or never acknowledges is cut off | yes (16 splits, 4 MiB of parts, 256 held frames, 8192 unacknowledged datagrams) |

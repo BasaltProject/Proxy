@@ -37,7 +37,9 @@ BedrockStatus::BedrockStatus(std::uint16_t port, std::string motd, std::function
     : port_(port), motd_(std::move(motd)), online_(std::move(online)), max_(max), route_(std::move(route)),
       events_(std::move(events)), language_(std::move(language)), lookup_(std::move(lookup)),
       forwarding_(std::move(forwarding)), requireAuthenticated_(requireAuthenticated), admission_(admission),
-      commands_(std::move(commands)) {}
+      commands_(std::move(commands)) {
+    commands_.connect = [this](std::string_view player, std::string_view backend) { return connect(player, backend); };
+}
 
 BedrockStatus::~BedrockStatus() { stop(); }
 

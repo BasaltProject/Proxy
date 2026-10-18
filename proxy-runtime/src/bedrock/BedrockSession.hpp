@@ -34,6 +34,7 @@ public:
     struct Commands {
         std::function<bool(std::string_view player, std::string_view command)> run;
         std::function<std::vector<runtime::PlayerCommandSpec>()> specs;
+        std::function<bool(std::string_view player, std::string_view backend)> connect;
     };
 
     BedrockSession(wire::bedrock::BedrockConnection& connection, config::BackendConfig backend, std::string address,
@@ -128,6 +129,7 @@ private:
     void sendBedrock(wire::bedrock::BedrockPacket packet, const wire::io::ByteBuffer& body);
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
     void tickEnded();
+    void pluginMessage(std::span<const std::uint8_t> body);
     void hurt(std::span<const std::uint8_t> body);
     void entityEvent(std::span<const std::uint8_t> body);
     void effectGiven(std::span<const std::uint8_t> body);
