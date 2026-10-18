@@ -1,0 +1,9 @@
+id = "example"
+name = "Example"
+version = "1.0.0"
+api = 1
+main = "src/main.lua"
+
+[capabilities]
+# Needed for `player.data.visits`: a counter per player in the proxy's own database.
+players_data = true
