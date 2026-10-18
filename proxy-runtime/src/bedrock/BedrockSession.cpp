@@ -9,6 +9,7 @@
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
+#include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -245,6 +246,21 @@ void BedrockSession::pump() {
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
         leave("The server stopped answering.");
+}
+
+void BedrockSession::sound(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::SoundPacket::read(in);
+    if (!packet)
+        return;
+    const std::string_view named = bedrock::bedrockSoundName(packet->sound);
+    if (named.empty())
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writePlaySound(out, named, packet->x, packet->y, packet->z, packet->volume, packet->pitch,
+                            connection_.protocolVersion());
+    sendBedrock(BedrockPacket::PlaySound, out);
 }
 
 void BedrockSession::pluginMessage(std::span<const std::uint8_t> body) {
@@ -489,6 +505,8 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         sectionChanged(body);
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
+    else if (id == play::SoundPacket::kId)
+        sound(body);
     else if (id == play::CustomPayloadPacket::kClientboundId)
         pluginMessage(body);
     else if (id == play::HurtAnimationPacket::kId)

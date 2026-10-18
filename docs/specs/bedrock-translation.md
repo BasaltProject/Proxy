@@ -27,6 +27,7 @@ in `wire-bedrock`.
 | Sneaking, sprinting | `BedrockPlayer` | a player input packet and the sprint command | `PlayerAuthInput` reader |
 | Resource packs of the backend | none | answered for the player: accepted when required, declined when optional; never shown | none |
 | Bungee messages from the backend | none | `Connect`, `GetServer`, `GetServers` and `UUID` on `bungeecord:main` | none |
+| Sounds | `BedrockPlayerConnection` | the ones the backend names, not the registry numbers | the sound name table |
 | Kick reason | `BedrockPlayerConnection` | the reason the backend gives | none |
 
 ## What stays in Server
@@ -36,6 +37,6 @@ does), recipes, maps, effects and the rest of the player state. Moving them mean
 
 ## What the proxy still lacks
 
-Crafting tables and the other windows, stack splits, crafting, forms, particles and sounds, the equipment and skins of other
+Crafting tables and the other windows, stack splits, crafting, forms, particles and the numbered sounds, the equipment and skins of other
 players, the effects of other entities, mob variants, below-name scoreboards, and the packs of the backend as Bedrock packs. A Bedrock player behind the
 proxy can walk, see, chat, run commands, build, move chests' contents, switch backend and be moved by plugins, but not yet play survival through every window.
