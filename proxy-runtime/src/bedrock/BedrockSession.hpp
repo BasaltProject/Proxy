@@ -127,6 +127,8 @@ private:
     void sendBedrock(wire::bedrock::BedrockPacket packet, const wire::io::ByteBuffer& body);
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
     void tickEnded();
+    void effectGiven(std::span<const std::uint8_t> body);
+    void effectRemoved(std::span<const std::uint8_t> body);
     void commandList(std::span<const std::uint8_t> body);
     void kicked(std::span<const std::uint8_t> body);
     void leave(const std::string& reason);
@@ -147,6 +149,7 @@ private:
     std::vector<std::string> biomeKeys_;
     std::unordered_map<std::string, std::string> names_;
     std::unordered_set<std::int32_t> mobs_;
+    std::unordered_set<std::int32_t> effects_;
 
     struct NameTag {
         std::string text;
