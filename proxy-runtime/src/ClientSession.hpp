@@ -165,6 +165,8 @@ private:
     std::int32_t clientProtocol_ = 0;
     [[nodiscard]] bool answerKnownPacks();
     [[nodiscard]] bool legacyClient() const;
+    void trackBossBar(std::span<const std::uint8_t> body);
+    [[nodiscard]] bool clearBossBars();
     [[nodiscard]] bool synthesizeClientPacket(std::int32_t id);
     bool synthesizing_ = false;
     enum class ConnectionStage { kIdle, kResolving, kConnecting };
@@ -214,6 +216,7 @@ private:
     wire::io::BudgetMemoryResource memory_;
     PendingCookies pendingCookies_;
     PendingResponses pendingKeepAlives_;
+    std::vector<std::array<std::uint8_t, 16>> bossBars_;
     PendingResponses pendingPings_;
     CookieCache cookieCache_;
     ResourcePacks resourcePacks_;
