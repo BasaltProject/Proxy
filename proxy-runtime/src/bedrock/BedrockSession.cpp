@@ -219,6 +219,17 @@ void BedrockSession::pump() {
         leave("The server stopped answering.");
 }
 
+void BedrockSession::kicked(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::PlayDisconnectPacket::read(in);
+    std::string reason = packet ? wire::text::toLegacyText(resolved(packet->reason)) : std::string{};
+    if (events_ && packet)
+        events_({runtime::PlayerEventKind::kKick, javaName_, backend_.name, javaUuid_,
+                 wire::text::toPlainText(resolved(packet->reason))});
+    leave(reason.empty() ? "The server closed the connection." : reason);
+}
+
 void BedrockSession::leave(const std::string& reason) {
     wire::common::Logger{"Bedrock"}.info([&] { return connection_.login().name + " left: " + reason; });
     if (connection_.state() != bedrock::BedrockState::Closed)
@@ -309,7 +320,7 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
     else if (id == play::PlayDisconnectPacket::kId)
-        leave("The server closed the connection.");
+        kicked(body);
     connection_.flush();
 }
 
