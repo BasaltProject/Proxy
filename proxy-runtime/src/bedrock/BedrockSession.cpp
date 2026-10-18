@@ -75,6 +75,9 @@ constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::size_t kMaxCommands = 2000;
 constexpr std::uint64_t kSelfRuntimeId = 1;
+constexpr std::int32_t kPlayerInputId = 0x2b;
+constexpr std::uint8_t kInputShift = 0x20;
+constexpr std::uint8_t kInputSprint = 0x40;
 constexpr std::chrono::milliseconds kPositionInterval{50};
 // A client ends each of its ticks with this packet; vanilla refuses a second position before one arrives.
 constexpr std::int32_t kClientTickEndId = 0x0d;
@@ -187,6 +190,7 @@ bool BedrockSession::switchTo(config::BackendConfig target) {
     spawned_ = false;
     teleported_ = false;
     acceptedTeleport_ = -1;
+    sneaking_ = false;
     pendingMove_.reset();
     switching_ = true;
     // The client keeps a world for as long as it stays in a dimension, so it is sent to another and brought back.
@@ -1462,6 +1466,15 @@ void BedrockSession::chat(std::span<const std::uint8_t> body) {
     sendBedrock(BedrockPacket::Text, out);
 }
 
+void BedrockSession::sneaking(bool now) {
+    if (now == sneaking_)
+        return;
+    sneaking_ = now;
+    wire::io::ByteBuffer out;
+    out.writeByte(static_cast<std::uint8_t>((now ? kInputShift : 0) | (sprinting_ ? kInputSprint : 0)));
+    sendJava(kPlayerInputId, out);
+}
+
 void BedrockSession::sprinting(bool now) {
     if (now == sprinting_)
         return;
@@ -1578,6 +1591,7 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
             tickEnded();
         }
         sprinting(input->sprinting);
+        sneaking(input->sneaking);
         interact(*input);
     } else if (packet == BedrockPacket::ContainerClose) {
         if (const auto closed = bedrock::readContainerClose(body);
