@@ -18,6 +18,14 @@
 namespace basalt::proxy::runtime::detail {
 
 /// Everything a client sends before it has a backend: handshake, login start, encryption response and status.
+bool ClientSession::refuse(std::string_view text) {
+    closing_ = true;
+    frame_.clear();
+    wire::protocol::varInt::write(frame_, wire::protocol::login::LoginDisconnectPacket::kId);
+    wire::protocol::login::LoginDisconnectPacket{wire::text::Component::text(std::string{text})}.write(frame_);
+    return queuePacket(frame_.readable());
+}
+
 bool ClientSession::preLoginPacket(std::int32_t id) {
     namespace protocol = wire::protocol;
     if (state_ == State::Handshake) {
@@ -40,7 +48,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     return resolveRoute(hello->protocolVersion, speaksTo(backends_[target], hello->protocolVersion))
                         .has_value();
                 }))
-                return false;
+                return refuse("No server here can take your game version.");
             if (hello->protocolVersion != buildInfo::kProtocolVersion) {
                 clientProtocol_ = hello->protocolVersion;
                 auto chain = wire::multiversion::java::javaTranslators::chainFor(hello->protocolVersion);
@@ -74,6 +82,8 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
             loginDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.loginTimeoutMs};
             readDeadline_ = loginDeadline_;
             return true;
+        } else if (hello->intent == protocol::handshake::ClientIntent::Login) {
+            return refuse("Your game version is not supported on this network.");
         } else {
             return false;
         }
