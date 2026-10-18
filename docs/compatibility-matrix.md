@@ -112,6 +112,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | A backend that requires a Java resource pack: the proxy accepts it for the Bedrock player (an optional pack is declined); the pack is not shown | yes, with Paper 26.3 and `require-resource-pack=true`; without it the join never finishes |
 | The commands of the backend are offered to the Bedrock client so it accepts a slash command; each takes free text and no tab completion of arguments | yes, 102 commands seen by the bot on a Basalt Server, plus the 103rd of a proxy plugin |
 | A command a proxy plugin registered with `cmd` run by a Bedrock player | yes, the bot ran one and got the plugin's answer |
+| Worn armour and the off hand are shown to the Bedrock client (windows 120 and 119) | yes, the bot receives both windows with the items; the order of the armour slots follows the Java menu (head first) |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
 | Bedrock connections go through the same admission gate as Java ones (global and per-origin token buckets) | yes: 32 of 40 bots arriving at once from one address enter with the defaults |
 | A RakNet peer that leaves splits open, holds ordered frames back or never acknowledges is cut off | yes (16 splits, 4 MiB of parts, 256 held frames, 8192 unacknowledged datagrams) |
