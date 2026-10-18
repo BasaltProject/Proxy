@@ -121,6 +121,7 @@ private:
     void chat(std::span<const std::uint8_t> body);
     void sendBedrock(wire::bedrock::BedrockPacket packet, const wire::io::ByteBuffer& body);
     void sendJava(std::int32_t id, const wire::io::ByteBuffer& body);
+    void tickEnded();
     void leave(const std::string& reason);
 
     wire::bedrock::BedrockConnection& connection_;
@@ -200,6 +201,7 @@ private:
     bool teleported_ = false;
     bool arriving_ = false;
     std::int32_t acceptedTeleport_ = -1;
+    std::chrono::steady_clock::time_point holdPositionsUntil_{};
     std::chrono::steady_clock::time_point lastPosition_{};
     std::optional<wire::protocol::play::ServerboundPositionLookPacket> pendingMove_;
     int traced_ = 0;
