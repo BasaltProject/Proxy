@@ -75,6 +75,8 @@ constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::size_t kMaxCommands = 2000;
 constexpr std::uint64_t kSelfRuntimeId = 1;
+// parity: EntityEvent.HURT.
+constexpr std::int8_t kJavaHurtEvent = 2;
 constexpr std::int32_t kPlayerInputId = 0x2b;
 constexpr std::uint8_t kInputShift = 0x20;
 constexpr std::uint8_t kInputSprint = 0x40;
@@ -238,6 +240,38 @@ void BedrockSession::pump() {
         leave("The server stopped answering.");
 }
 
+void BedrockSession::hurt(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::HurtAnimationPacket::read(in);
+    if (!packet ||
+        (packet->entityId != selfEntity_ && !mobs_.contains(packet->entityId) && !others_.contains(packet->entityId)))
+        return;
+    const std::uint64_t entity = packet->entityId == selfEntity_ ? kSelfRuntimeId : runtimeId(packet->entityId);
+    wire::io::ByteBuffer out;
+    bedrock::writeEntityEvent(out, entity, bedrock::BedrockEntityEvent::Hurt, 0, connection_.protocolVersion());
+    sendBedrock(BedrockPacket::EntityEvent, out);
+}
+
+void BedrockSession::entityEvent(std::span<const std::uint8_t> body) {
+    wire::io::ByteBuffer in;
+    in.writeBytes(body);
+    const auto packet = play::EntityEventPacket::read(in);
+    if (!packet)
+        return;
+    const bool self = packet->entityId == selfEntity_;
+    const bool known = self || mobs_.contains(packet->entityId) || others_.contains(packet->entityId);
+    const bool hurt = packet->eventId == kJavaHurtEvent;
+    const bool died = packet->eventId == play::EntityEventPacket::kLivingDeath && !self;
+    if (!known || (!hurt && !died))
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeEntityEvent(out, self ? kSelfRuntimeId : runtimeId(packet->entityId),
+                              hurt ? bedrock::BedrockEntityEvent::Hurt : bedrock::BedrockEntityEvent::Death, 0,
+                              connection_.protocolVersion());
+    sendBedrock(BedrockPacket::EntityEvent, out);
+}
+
 void BedrockSession::effectGiven(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
     in.writeBytes(body);
@@ -397,6 +431,10 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         sectionChanged(body);
     else if (id == play::ChunkBatchFinishedPacket::kId)
         batchFinished();
+    else if (id == play::HurtAnimationPacket::kId)
+        hurt(body);
+    else if (id == play::EntityEventPacket::kId)
+        entityEvent(body);
     else if (id == play::UpdateMobEffectPacket::kId)
         effectGiven(body);
     else if (id == play::RemoveMobEffectPacket::kId)
