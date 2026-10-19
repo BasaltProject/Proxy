@@ -51,4 +51,22 @@ Server: `[network.forwarding] session-envelope = true` offers the bit; it answer
 Checked with the Swarm Java bot through the Proxy against a Server built from its committed envelope adapter: 26.3, 1.21.4, 1.20.1 and 1.16.5 clients join and play;
 `[translation] mode = "proxy"` selects nothing and the session is unchanged; Basalt to Basalt and Basalt to Paper to Basalt moves keep one client connection.
 
-Not done: Bedrock (the Server answers `Close(Unsupported)`, and the Proxy never selects it for Bedrock players) and coverage-guided fuzzing of the framing.
+The envelope endpoint, the frame decoder and the forwarding request were fuzzed with libFuzzer under ASan and UBSan (2.8 million runs, no finding).
+
+Not done: Bedrock (the Server answers `Close(Unsupported)`, and the Proxy never selects it for Bedrock players).
+
+## Bedrock (proposed contract, not implemented)
+
+The same two frames carry a Bedrock player; what changes is what a Data frame holds and who does what.
+
+- The Proxy keeps the transport and the identity: it terminates RakNet, the encryption and the Bedrock login chain, and tells the backend who the player is through
+  the signed forwarding exchange with `origin = Bedrock` and the Xbox id, as it does today for a Bedrock player it translates itself.
+- After the backend's login, the Proxy sends `Open` with edition Bedrock and the client's Bedrock protocol, and the backend answers `Opened`.
+- A Data frame holds one Bedrock game packet as the client's protocol frames it (packet id and body), after the Proxy has decrypted and unbatched it, and before it
+  would batch and encrypt a packet going the other way. RakNet frames, datagrams and the batch header never cross.
+- The backend runs what it already runs for a Bedrock player it serves directly, over frames instead of a RakNet session: its translation, its chunks and its windows.
+  The Proxy only relays, so it needs no Java translation for that session.
+- Limits and failures are the Java ones: 2 MiB per data frame, a frame that is neither `Opened` nor `Close` before `Opened` ends the login, and `Close` ends the session.
+- Compatibility: a backend that does not offer the capability, or answers `Close(Unsupported)`, keeps today's behaviour, in which the Proxy translates the Bedrock
+  player to a Java backend itself.
+
