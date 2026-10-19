@@ -80,7 +80,7 @@ bool upwardVerified(std::int32_t protocol) noexcept {
            protocol == versions::kV1_20_2 || protocol == versions::kV1_20 || protocol == versions::kV1_19_4 ||
            protocol == versions::kV1_19_3 || protocol == versions::kV1_19_1 || protocol == versions::kV1_19 ||
            protocol == versions::kV1_18_2 || protocol == versions::kV1_18 || protocol == versions::kV1_17_1 ||
-           protocol == versions::kV1_17;
+           protocol == versions::kV1_17 || protocol == versions::kV1_16_4;
 }
 
 LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
