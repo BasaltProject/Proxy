@@ -20,8 +20,9 @@ route for before it enters a state it cannot leave.
 
 A 26.3 client reached a real Paper 26.2, Paper 26.1.2, Paper 1.21.11 and Paper 1.21.10 through the proxy with the Swarm bot and the independent frame recorder (Paper 1.21.10 as well) (joined, 29 keep-alives answered, teleport confirmed,
 the command tree identical to what a 26.2 bot sees directly, commands, summon and block use). It also moved four times between two Paper 26.2 and between a Paper 26.2 and a
-Basalt Server 26.3 in one connection. The registries of 1.21.11 were rewritten into 26.1's and checked against what a real 26.1 server sends (two entries differ, both vanilla data changes: the lunge enchantment
-and the End's sky light colour). Not converted: the brewing stand's accepted items (the client has no list, so it will not take items in the UI) and the item
+Basalt Server 26.3 in one connection. The Swarm bot's own checks of what a server sends against 26.3 (registries and their elements, tags, command argument registries) report nothing on the four routes,
+apart from the `paper:raw` chat type Paper adds itself. The brewing stand's item lists are added from a real 26.3 server's. The registries of 1.21.11 were rewritten into 26.1's and checked against what a real 26.1 server sends (two entries differ, both vanilla data changes: the lunge enchantment
+and the End's sky light colour). Not converted: the item
 components that changed shape (a trim with an inline material, pot decorations, teleport effects). No graphical client has been tried.
 
 A network may mix both kinds of backend for clients from 1.20.2 on: a 26.2 client moves between a Basalt Server 26.3 (translated) and a Paper 26.2
