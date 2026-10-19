@@ -130,6 +130,7 @@ Checked with the Swarm Bedrock bot against a Basalt Server 26.3 on a void world,
 | Worn armour and the off hand are shown to the Bedrock client (windows 120 and 119) | yes, the bot receives both windows with the items; the order of the armour slots follows the Java menu (head first) |
 | Potion effects on the player (given, changed, cleared) | yes, the bot sees speed and regeneration added and removed; effects of other entities are not shown |
 | Sneaking of a Bedrock player reaches the backend as a player input packet | yes, the packet is sent when the bot starts sneaking; the pose other players see was not checked |
+| Selecting a hotbar slot as a Bedrock player | yes, one SetCarriedItem reaches the backend per change (seen with a TCP tee and the bot's `--hotbar`) |
 | The hurt flash of the player and of mobs, and the death of a mob, shown to the Bedrock client | yes, the packets are sent and the bot accepts them; what the client draws was not checked |
 | `Connect` sent by a backend on `bungeecord:main` (with `bungee-messages = true`) moves a Bedrock player; `GetServer`, `GetServers` and `UUID` are answered in the Bungee format | yes, messages injected between the proxy and the backend moved the bot and got the right replies |
 | 150 Bedrock bots at once, release build | yes, all enter; 226 of 400 enter on this machine, where the bots and the backend use more CPU than the proxy (73% of one core) |
