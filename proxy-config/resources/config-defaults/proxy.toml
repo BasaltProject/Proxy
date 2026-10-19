@@ -68,6 +68,8 @@ motd = "Basalt Proxy"
 # Path to a Minecraft server jar or to an en_us.json language file, used to put into words the translatable messages a
 # backend sends (join and leave lines, death messages). Empty keeps the raw keys. Nothing is downloaded.
 language = ""
+# Let a backend with forwarding = "basalt" serve Bedrock players itself over the session envelope; the proxy relays. Off by default.
+delegate = false
 
 [reload]
 # Reload by itself when a file in the config directory or the plugin directory changes, once it has stopped changing.

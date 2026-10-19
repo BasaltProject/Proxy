@@ -260,8 +260,11 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
             return std::span<const std::uint8_t>{};
         if (envelope_) {
             const auto outcome = envelope_->receive(frame_.readable());
-            if (outcome.closed)
-                return std::unexpected(BackendLoginError::kMalformed);
+            if (outcome.closed) {
+                disconnectMessage_ = outcome.message;
+                return std::unexpected(outcome.message.empty() ? BackendLoginError::kMalformed
+                                                               : BackendLoginError::kIo);
+            }
             const std::vector<std::uint8_t> inner{outcome.packet.begin(), outcome.packet.end()};
             frame_.clear();
             if (inner.empty()) {

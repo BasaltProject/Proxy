@@ -22,17 +22,25 @@ struct NativeForwarding;
 
 class JavaLink {
 public:
-    enum class State { kIdle, kConnecting, kLogin, kConfiguration, kPlay, kClosed };
+    enum class State { kIdle, kConnecting, kLogin, kConfiguration, kPlay, kDelegated, kClosed };
 
     struct Events {
         std::function<void(std::int32_t id, std::span<const std::uint8_t> body)> play;
         std::function<void(const std::string& registry, std::vector<std::string> keys)> registry;
+        std::function<void(std::span<const std::uint8_t> packet)> relay;
         std::function<void(const std::string& reason)> closed;
     };
 
     JavaLink(config::BackendConfig backend, wire::auth::SessionProfile profile, std::string clientAddress,
              std::uint16_t clientPort, Events events, const NativeForwarding* native = nullptr,
              std::string originId = {});
+
+    void delegateBedrock(wire::protocol::sessionEnvelope::BedrockIdentity identity, std::int32_t protocol) {
+        identity_ = std::move(identity);
+        bedrockProtocol_ = protocol;
+    }
+
+    void relay(std::span<const std::uint8_t> packet);
 
     /// Resolves the backend and starts connecting; false when it cannot be reached at all.
     [[nodiscard]] bool begin(std::chrono::milliseconds budget);
@@ -59,6 +67,8 @@ private:
     wire::auth::SessionProfile profile_;
     std::string clientAddress_;
     std::uint16_t clientPort_ = 0;
+    std::optional<wire::protocol::sessionEnvelope::BedrockIdentity> identity_;
+    std::int32_t bedrockProtocol_ = 0;
     Events events_;
     const NativeForwarding* native_ = nullptr;
     std::string originId_;

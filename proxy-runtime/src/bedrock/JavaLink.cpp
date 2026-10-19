@@ -22,6 +22,7 @@ constexpr std::int32_t kLoginDisconnect = 0;
 constexpr std::int32_t kLoginFinished = 2;
 constexpr std::int32_t kLoginPluginRequest = 4;
 constexpr std::int32_t kConfigurationPing = 0x05;
+constexpr std::size_t kMaxRelayFrame = 8 * 1024 * 1024;
 constexpr std::int32_t kPlayPing = 0x3d;
 constexpr std::int32_t kPlayPong = 0x2d;
 
@@ -76,6 +77,8 @@ void JavaLink::pump() {
         login_ = std::make_unique<BackendLogin>(std::move(*connected), *std::pmr::new_delete_resource(),
                                                 BackendAttempt{1, 0});
         login_->useOrigin(1, originId_);
+        if (identity_)
+            login_->delegateBedrock(*identity_, bedrockProtocol_);
         if (!login_->start(backend_, profile_, backend_.host, backend_.port, clientAddress_, clientPort_, native_)) {
             close("the backend login could not start");
             return;
@@ -87,7 +90,7 @@ void JavaLink::pump() {
          ++i) {
         auto packet = login_->ready(wire::io::IoReady{.handle = login_->handle(), .readable = true, .writable = true});
         if (!packet) {
-            close("the backend connection ended");
+            close(login_->disconnectMessage().empty() ? "the backend connection ended" : login_->disconnectMessage());
             return;
         }
         if (packet->empty())
@@ -123,6 +126,13 @@ void JavaLink::handle(std::span<const std::uint8_t> packet) {
         handleConfiguration(id, body);
     else if (state_ == State::kPlay)
         handlePlay(id, body);
+    else if (state_ == State::kDelegated && events_.relay)
+        events_.relay(packet);
+}
+
+void JavaLink::relay(std::span<const std::uint8_t> packet) {
+    if (state_ != State::kDelegated || !login_ || !login_->queue(packet, kMaxRelayFrame))
+        close("the backend connection is full");
 }
 
 void JavaLink::handleLogin(std::int32_t id, wire::io::ByteBuffer& body) {
@@ -141,6 +151,18 @@ void JavaLink::handleLogin(std::int32_t id, wire::io::ByteBuffer& body) {
     }
     if (!login_->acceptLogin(body)) {
         close("the backend login did not match the player");
+        return;
+    }
+    if (login_->delegated()) {
+        if (!login_->acknowledgeLogin() || !login_->finishConfiguration()) {
+            close("the backend login could not be acknowledged");
+            return;
+        }
+        state_ = State::kDelegated;
+        return;
+    }
+    if (identity_) {
+        close("the backend cannot serve Bedrock players itself");
         return;
     }
     sendFrame(protocol::login::kLoginAcknowledgedId, {});

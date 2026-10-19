@@ -75,9 +75,14 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
     if (!advance(Phase::kLogin, Phase::kLoginAccepted))
         return std::unexpected(BackendLoginError::kMalformed);
     if (envelopeSelected_) {
+        namespace envelope = wire::protocol::sessionEnvelope;
         envelope_.emplace();
-        const auto open = envelope_->open(wire::protocol::sessionEnvelope::Edition::Java, protocol_);
+        const bool bedrock = origin_ == 1 && bedrockIdentity_.has_value();
+        const auto open = envelope_->open(bedrock ? envelope::Edition::Bedrock : envelope::Edition::Java,
+                                          bedrock ? bedrockProtocol_ : protocol_);
         if (!queue(open, kLoginPacketLimit))
+            return std::unexpected(BackendLoginError::kLimit);
+        if (bedrock && !queue(envelope_->identify(*bedrockIdentity_), kMaxIdentityFrame))
             return std::unexpected(BackendLoginError::kLimit);
         envelopeActive_ = true;
     }

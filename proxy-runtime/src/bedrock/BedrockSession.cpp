@@ -79,6 +79,7 @@ constexpr std::size_t kBlocksPerSection = 4096;
 constexpr std::size_t kBiomesPerSection = 64;
 constexpr std::size_t kMaxCommands = 2000;
 constexpr std::uint64_t kSelfRuntimeId = 1;
+constexpr std::uint32_t kPacketIdMask = 0x3ff;
 constexpr std::string_view kBungeeChannel = "bungeecord:main";
 constexpr std::string_view kBungeeLegacyChannel = "BungeeCord";
 constexpr std::size_t kMaxBungeePayload = 32768;
@@ -148,8 +149,25 @@ bool BedrockSession::openLink() {
             biomeKeys_ = std::move(keys);
     };
     events.closed = [this](const std::string& reason) { leave(reason); };
+    events.relay = [this](std::span<const std::uint8_t> packet) { relayFromBackend(packet); };
     link_ = std::make_unique<JavaLink>(backend_, profile_, address_, port_, std::move(events), forwarding_.get(),
                                        connection_.login().xuid);
+    delegated_ = forwarding_ != nullptr && forwarding_->delegateBedrock &&
+                 backend_.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+    if (delegated_) {
+        const bedrock::LoginRequest& login = connection_.login();
+        wire::protocol::sessionEnvelope::BedrockIdentity identity;
+        identity.gamertag = login.name;
+        identity.xuid = login.xuid;
+        identity.authenticated = login.authenticated;
+        identity.address = address_;
+        identity.skinId = login.skinId;
+        identity.resourcePatch = login.skinGeometry;
+        identity.skinWidth = static_cast<std::int32_t>(login.skinWidth);
+        identity.skinHeight = static_cast<std::int32_t>(login.skinHeight);
+        identity.skinPixels = login.skinPixels;
+        link_->delegateBedrock(std::move(identity), connection_.protocolVersion());
+    }
     return link_->begin(kConnectBudget);
 }
 
@@ -242,7 +260,7 @@ void BedrockSession::pump() {
         sendJava(play::ServerboundPositionLookPacket::kId, out);
         tickEnded();
     }
-    if (!spawned_ && now - joinStarted_ > kJoinBudget)
+    if (!delegated_ && !spawned_ && now - joinStarted_ > kJoinBudget)
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
         leave("The server stopped answering.");
@@ -1695,7 +1713,33 @@ void BedrockSession::interact(const bedrock::PlayerAuthInput& input) {
     sendJava(play::ServerboundUseItemOnPacket::kId, out);
 }
 
+void BedrockSession::relayToBackend(BedrockPacket packet, wire::io::ByteBuffer& body) {
+    if (link_ == nullptr || link_->state() != JavaLink::State::kDelegated)
+        return;
+    wire::io::ByteBuffer out;
+    bedrock::writeVarUInt(out, static_cast<std::uint32_t>(packet));
+    out.writeBytes(body.readable());
+    link_->relay(out.readable());
+}
+
+void BedrockSession::relayFromBackend(std::span<const std::uint8_t> packet) {
+    lastFromJava_ = std::chrono::steady_clock::now();
+    wire::io::ByteBuffer in;
+    in.writeBytes(packet);
+    const std::uint32_t header = bedrock::readVarUInt(in);
+    if (in.failed()) {
+        leave("the backend sent a malformed packet");
+        return;
+    }
+    connection_.sendPacket(static_cast<BedrockPacket>(header & kPacketIdMask), in.readable());
+    connection_.flush();
+}
+
 void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& body) {
+    if (delegated_) {
+        relayToBackend(packet, body);
+        return;
+    }
     if (packet == BedrockPacket::RequestChunkRadius) {
         const auto radius = bedrock::readRequestChunkRadius(body);
         if (!radius)
