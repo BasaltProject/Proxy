@@ -11,7 +11,7 @@ port = 25566
 # Backend Java protocol, or "client" for a backend that speaks whatever version each player connects with, as a Basalt Server does
 # for the older versions it translates itself, or "auto": "client" for a backend with forwarding = "basalt" (the proxy still translates clients before 1.13,
 # which cannot carry its login query) and the newest protocol otherwise. Compatibility is checked for the client/backend pair.
-# A backend on 26.2 (776), 26.1 (775) or 1.21.11 (774) can serve current clients too, translated upward by the proxy.
+# A backend on 26.2 (776), 26.1 (775), 1.21.11 (774) or 1.21.9 and 1.21.10 (773) can serve current clients too, translated upward by the proxy.
 protocol = 777
 # none, basalt, velocity, bungeecord, bungeeguard or safenet, explicitly chosen for this backend.
 # none is viable for an offline vanilla backend; it does not forward premium UUID/properties.
