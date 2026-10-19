@@ -1787,6 +1787,14 @@ void BedrockSession::fromBedrock(BedrockPacket packet, wire::io::ByteBuffer& bod
         sneaking(input->sneaking);
         interact(*input);
         tickEnded();
+    } else if (packet == BedrockPacket::MobEquipment) {
+        const auto slot = bedrock::readHeldSlot(body, connection_.protocolVersion());
+        if (slot && *slot >= 0 && *slot < 9 && *slot != heldSlot_) {
+            heldSlot_ = *slot;
+            wire::io::ByteBuffer out;
+            play::ServerboundSetCarriedItemPacket{static_cast<std::int16_t>(heldSlot_)}.write(out);
+            sendJava(play::ServerboundSetCarriedItemPacket::kId, out);
+        }
     } else if (packet == BedrockPacket::ContainerClose) {
         if (const auto closed = bedrock::readContainerClose(body);
             closed && window_ && closed->containerId == window_->id)
