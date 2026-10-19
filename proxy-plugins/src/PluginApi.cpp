@@ -1,8 +1,8 @@
 #include "PluginInternal.hpp"
 
+#include <basalt/wire/plugins/PluginValue.hpp>
+
 #include <algorithm>
-#include <array>
-#include <charconv>
 #include <utility>
 
 namespace basalt::proxy::plugins {
@@ -69,40 +69,6 @@ void pushHandle(LuaArgs& lua, std::shared_ptr<std::atomic<bool>> cancelled) {
     lua.setField("cancel");
 }
 
-[[nodiscard]] std::optional<std::string> encode(LuaArgs& lua, std::int32_t index) {
-    if (lua.isBoolean(index))
-        return lua.toBoolean(index) ? "b1" : "b0";
-    if (lua.isInteger(index))
-        return "n" + std::to_string(lua.toInteger(index));
-    if (lua.isNumber(index)) {
-        std::array<char, 40> buffer{};
-        const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), lua.toNumber(index));
-        return "n" + std::string{buffer.data(), end};
-    }
-    if (lua.isString(index))
-        return "s" + lua.toText(index);
-    return std::nullopt;
-}
-
-void pushDecoded(LuaArgs& lua, const std::string& stored) {
-    if (stored.empty()) {
-        lua.pushNil();
-    } else if (stored[0] == 's') {
-        lua.pushString(std::string_view{stored}.substr(1));
-    } else if (stored[0] == 'b') {
-        lua.pushBoolean(stored.size() > 1 && stored[1] == '1');
-    } else {
-        const std::string_view number = std::string_view{stored}.substr(1);
-        std::int64_t whole = 0;
-        const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), whole);
-        if (error == std::errc{} && end == number.data() + number.size()) {
-            lua.pushInteger(whole);
-        } else {
-            lua.pushNumber(std::strtod(std::string{number}.c_str(), nullptr));
-        }
-    }
-}
-
 } // namespace
 
 void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player) {
@@ -136,7 +102,7 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
                 value = query.text(0);
         }
         if (value)
-            pushDecoded(args, *value);
+            wire::plugins::pushValue(args, *value);
         else
             args.pushNil();
         return 1;
@@ -159,7 +125,7 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
             static_cast<void>(remove.execute());
             return 0;
         }
-        const auto encoded = encode(args, 3);
+        const auto encoded = wire::plugins::encodeValue(args, 3);
         if (!encoded)
             return args.fail("only strings, numbers and booleans can be stored");
         const std::string& value = *encoded;
@@ -512,7 +478,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
                 value = query.text(0);
         }
         if (value)
-            pushDecoded(args, *value);
+            wire::plugins::pushValue(args, *value);
         else
             args.pushNil();
         return 1;
@@ -525,7 +491,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         const std::string name = args.checkString(1);
         if (name.empty() || name.size() > kMaxKey)
             return args.fail("a store key is 1 to 128 bytes");
-        const auto encoded = encode(args, 2);
+        const auto encoded = wire::plugins::encodeValue(args, 2);
         if (!encoded)
             return args.fail("only strings, numbers and booleans can be stored");
         const std::string& value = *encoded;
