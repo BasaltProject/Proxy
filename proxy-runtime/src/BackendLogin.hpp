@@ -126,6 +126,9 @@ public:
 
     [[nodiscard]] bool hasOutput() const { return output_.readableBytes() != 0; }
 
+    /// Writes what the socket takes now; a failure is left for the next readiness event to report.
+    void flushOpportunistically();
+
     /// Packet begins after its ID. Identity is checked before this transport accepts login.
     [[nodiscard]] std::expected<wire::protocol::login::LoginFinishedPacket, BackendLoginError>
     acceptLogin(wire::io::ByteBuffer& packet);

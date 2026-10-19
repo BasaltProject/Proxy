@@ -203,6 +203,19 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
     return {};
 }
 
+void BackendLogin::flushOpportunistically() {
+    if (output_.readableBytes() == 0 || phase_ == Phase::kUnstarted || phase_ == Phase::kRetired)
+        return;
+    const auto written = connection_.writeSome(output_.readable());
+    if (!written)
+        return;
+    output_.skip(*written);
+    if (output_.readableBytes() == 0) {
+        output_.clear();
+        writeDeadline_ = Clock::time_point::max();
+    }
+}
+
 std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::ready(const wire::io::IoReady& event,
                                                                                     bool readEnabled) {
     if (phase_ == Phase::kUnstarted || phase_ == Phase::kRetired)

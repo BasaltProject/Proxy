@@ -501,6 +501,8 @@ bool ClientSession::ready(const wire::io::IoReady& event) {
     }
     if (!flushOutput())
         return false;
+    if (state_ == State::kPlay && backend())
+        backend()->flushOpportunistically();
     backpressure();
     return accounted() && (!closing_ || output_.readableBytes() != 0) && advancePreparedChange();
 }
