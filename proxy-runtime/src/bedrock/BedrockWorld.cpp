@@ -132,13 +132,33 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
         [&biomes](std::int32_t section, bedrock::BiomeQuarts& quarts) {
             quarts = biomes[static_cast<std::size_t>(section)];
         },
-        [&packet](wire::io::ByteBuffer& tags) {
+        [&](wire::io::ByteBuffer& tags) {
+            const auto stateAt = [&](std::int32_t x, std::int32_t y, std::int32_t z) {
+                const std::int32_t section = ((y - (minSection_ * 16)) >> 4);
+                if (section < 0 || static_cast<std::size_t>(section) >= blocks.size())
+                    return 0;
+                const std::size_t at = (static_cast<std::size_t>(y & 15) << 8) | (static_cast<std::size_t>(z) << 4) |
+                                       static_cast<std::size_t>(x);
+                return blocks[static_cast<std::size_t>(section)][at];
+            };
+            for (std::size_t section = 0; section < blocks.size(); ++section) {
+                for (std::size_t at = 0; at < kBlocksPerSection; ++at) {
+                    const auto colour = bedrock::javaBedColour(blocks[section][at]);
+                    if (!colour)
+                        continue;
+                    const auto y = static_cast<std::int32_t>(((minSection_ + static_cast<std::int32_t>(section)) * 16) +
+                                                             static_cast<std::int32_t>(at >> 8));
+                    bedrock::writeBedTag(tags, (packet->x * 16) + static_cast<std::int32_t>(at & 15), y,
+                                         (packet->z * 16) + static_cast<std::int32_t>((at >> 4) & 15), *colour);
+                }
+            }
             for (const auto& entity : packet->blockEntities) {
                 if (!entity.tag)
                     continue;
-                const std::int32_t x = (packet->x * 16) + ((entity.packedXZ >> 4) & 0xF);
-                const std::int32_t z = (packet->z * 16) + (entity.packedXZ & 0xF);
-                bedrock::writeJavaBlockEntity(tags, x, entity.y, z, entity.typeId, *entity.tag);
+                const std::int32_t localX = (entity.packedXZ >> 4) & 0xF;
+                const std::int32_t localZ = entity.packedXZ & 0xF;
+                bedrock::writeJavaBlockEntity(tags, (packet->x * 16) + localX, entity.y, (packet->z * 16) + localZ,
+                                              entity.typeId, *entity.tag, stateAt(localX, entity.y, localZ));
             }
         });
     wire::io::ByteBuffer out;
