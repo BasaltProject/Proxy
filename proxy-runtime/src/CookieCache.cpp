@@ -1,5 +1,6 @@
 #include "CookieCache.hpp"
 
+#include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 
 #include <cstring>
@@ -16,7 +17,7 @@ std::optional<CookieCache::Entry> CookieCache::find(std::string_view key) const 
         std::uint64_t revision = 0;
         for (std::size_t i = 0; i < 8; ++i)
             revision = (revision << 8) | bytes[offset + 5 + i];
-        if (std::string_view{reinterpret_cast<const char*>(bytes.data() + offset + 13), keySize} == key)
+        if (wire::common::asText(bytes.subspan(offset + 13, keySize)) == key)
             return Entry{offset, size, offset + 13 + keySize, payloadSize, bytes[offset + 4] != 0, revision};
         offset += size;
     }
@@ -67,7 +68,7 @@ bool CookieCache::update(std::string_view key, std::optional<std::span<const std
     values_.writeShort(static_cast<std::int16_t>(payload ? payload->size() : 0));
     values_.writeByte(payload.has_value() ? 1 : 0);
     values_.writeLong(static_cast<std::int64_t>(revision));
-    values_.writeBytes({reinterpret_cast<const std::uint8_t*>(key.data()), key.size()});
+    values_.writeBytes(wire::common::asBytes(key));
     if (payload)
         values_.writeBytes(*payload);
     return true;

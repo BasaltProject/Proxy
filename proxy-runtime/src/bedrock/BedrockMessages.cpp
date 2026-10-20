@@ -11,6 +11,7 @@
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
+#include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/common/SafeInt.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -104,7 +105,7 @@ void BedrockSession::bungeeAnswer(const std::string& channel, std::string_view s
     wire::io::ByteBuffer data;
     for (const std::string_view part : {subchannel, value}) {
         data.writeShort(static_cast<std::int16_t>(part.size()));
-        data.writeBytes(std::span{reinterpret_cast<const std::uint8_t*>(part.data()), part.size()});
+        data.writeBytes(wire::common::asBytes(part));
     }
     play::CustomPayloadPacket reply;
     reply.channel = channel;
