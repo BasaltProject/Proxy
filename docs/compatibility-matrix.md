@@ -14,11 +14,11 @@ route for before it enters a state it cannot leave.
 | 26.3 | 26.3 (Basalt Server, Paper) | native | relayed as is |
 | 1.8 to 26.2 (see below) | 26.3 | translated | the Wire chain rewrites packets between versions |
 | N | N, for the versions below | same version | relayed untranslated; only packet ids are read through the version's tables |
-| 26.3 | 26.2 (`protocol = 776`), 26.1 (775), 1.21.11 (774), 1.21.9 and 1.21.10 (773) or 1.21.7 and 1.21.8 (772) | carried upward | the Wire chain read upward: ids, login, chunks and light, particles, movement, advancements, command parsers, trim materials and the three registries 26.3 added |
-| 26.3 | anything older than 1.21.7 | refused | no translation upward exists |
+| 26.3 | 26.2 (`protocol = 776`), 26.1 (775), 1.21.11 (774), 1.21.9 and 1.21.10 (773) or 1.21.7 and 1.21.8 (772), 1.21.6 (771) or 1.21.5 (770) | carried upward | the Wire chain read upward: ids, login, chunks and light, particles, movement, advancements, command parsers, trim materials and the three registries 26.3 added |
+| 26.3 | anything older than 1.21.5 | refused | no translation upward exists |
 | N | M, N different from M, M not 26.3 | refused | |
 
-A 26.3 client reached a real Paper 26.2, Paper 26.1.2, Paper 1.21.11, Paper 1.21.10 and Paper 1.21.8 through the proxy (three bots saw each other on the last) with the Swarm bot and the independent frame recorder (Paper 1.21.10 as well) (joined, 29 keep-alives answered, teleport confirmed,
+A 26.3 client reached a real Paper 26.2, Paper 26.1.2, Paper 1.21.11, Paper 1.21.10, Paper 1.21.8, Paper 1.21.6 and Paper 1.21.5 through the proxy (three bots saw each other on the last) with the Swarm bot and the independent frame recorder (Paper 1.21.10 as well) (joined, 29 keep-alives answered, teleport confirmed,
 the command tree identical to what a 26.2 bot sees directly, commands, summon and block use). It also moved four times between two Paper 26.2 and between a Paper 26.2 and a
 Basalt Server 26.3 in one connection. The Swarm bot's own checks of what a server sends against 26.3 (registries and their elements, tags, command argument registries) report nothing on the four routes,
 apart from the `paper:raw` chat type Paper adds itself. The brewing stand's item lists are added from a real 26.3 server's. The registries of 1.21.11 were rewritten into 26.1's and checked against what a real 26.1 server sends (two entries differ, both vanilla data changes: the lunge enchantment
