@@ -5,6 +5,7 @@
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/SessionProfile.hpp>
+#include <basalt/wire/multiversion/java/JavaTranslators.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -57,6 +58,7 @@ public:
 
 private:
     void handle(std::span<const std::uint8_t> packet);
+    void dispatch(std::int32_t id, wire::io::ByteBuffer& body);
     void handleLogin(std::int32_t id, wire::io::ByteBuffer& body);
     void handleConfiguration(std::int32_t id, wire::io::ByteBuffer& body);
     void handlePlay(std::int32_t id, wire::io::ByteBuffer& body);
@@ -76,6 +78,7 @@ private:
     std::unique_ptr<BackendDial> dial_;
     std::unique_ptr<BackendLogin> login_;
     wire::io::ByteBuffer scratch_;
+    std::unique_ptr<wire::multiversion::java::JavaChain> upward_;
 };
 
 } // namespace basalt::proxy::runtime::detail
