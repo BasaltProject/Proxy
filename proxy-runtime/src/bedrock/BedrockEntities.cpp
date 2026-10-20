@@ -8,6 +8,7 @@
 #include <basalt/wire/bedrock/BedrockEffects.hpp>
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
+#include <basalt/wire/bedrock/BedrockMapConversion.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
@@ -275,7 +276,13 @@ bedrock::BedrockItemStack BedrockSession::stackOf(const std::optional<play::Wire
     const bedrock::ItemName* named = bedrock::bedrockItem(javaItem);
     if (named == nullptr)
         return {};
-    return {.runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+    bedrock::BedrockItemStack stack{
+        .runtimeId = named->palettePlace + 1, .count = item->count, .data = named->data, .blockRuntimeId = 0};
+    if (const std::optional<std::int32_t> map = item->mapId(); map)
+        stack.mapId = *map;
+    if (const std::int32_t explorer = bedrock::bedrockMapExplorerData(javaItem); explorer != 0)
+        stack.data = explorer;
+    return stack;
 }
 
 } // namespace basalt::proxy::runtime::detail
