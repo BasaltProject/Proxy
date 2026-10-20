@@ -11,6 +11,7 @@
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
+#include <basalt/wire/common/SafeInt.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
@@ -603,8 +604,8 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     bedrock::writeChunkRadiusUpdated(out, kInitialRadius);
     sendBedrock(BedrockPacket::ChunkRadiusUpdated, out);
     out.clear();
-    bedrock::writeNetworkChunkPublisherUpdate(out, static_cast<std::int32_t>(x_), static_cast<std::int32_t>(y_),
-                                              static_cast<std::int32_t>(z_), kInitialRadius * 16);
+    bedrock::writeNetworkChunkPublisherUpdate(out, wire::common::safeInt32(x_), wire::common::safeInt32(y_),
+                                              wire::common::safeInt32(z_), kInitialRadius * 16);
     sendBedrock(BedrockPacket::NetworkChunkPublisherUpdate, out);
 }
 
@@ -1168,13 +1169,13 @@ void BedrockSession::gameEvent(std::span<const std::uint8_t> body) {
         wire::io::ByteBuffer out;
         bedrock::writeLevelEvent(
             out, type, 0.0F, 0.0F, 0.0F,
-            static_cast<std::int32_t>(strength * static_cast<float>(bedrock::kWeatherStrengthScale)));
+            wire::common::safeInt32(strength * static_cast<float>(bedrock::kWeatherStrengthScale)));
         sendBedrock(BedrockPacket::LevelEvent, out);
     };
     if (packet->event == play::GameEventPacket::kChangeGameMode) {
-        applyGamemode(static_cast<std::int32_t>(packet->param));
+        applyGamemode(wire::common::safeInt32(packet->param));
         wire::io::ByteBuffer mode;
-        bedrock::writeSetPlayerGameType(mode, static_cast<std::int32_t>(packet->param));
+        bedrock::writeSetPlayerGameType(mode, wire::common::safeInt32(packet->param));
         sendBedrock(BedrockPacket::SetPlayerGameType, mode);
         return;
     }
@@ -1567,8 +1568,8 @@ void BedrockSession::teleported(std::span<const std::uint8_t> body) {
     yaw_ = position->yaw;
     pitch_ = position->pitch;
     wire::io::ByteBuffer out;
-    bedrock::writeNetworkChunkPublisherUpdate(out, static_cast<std::int32_t>(x_), static_cast<std::int32_t>(y_),
-                                              static_cast<std::int32_t>(z_), kInitialRadius * 16);
+    bedrock::writeNetworkChunkPublisherUpdate(out, wire::common::safeInt32(x_), wire::common::safeInt32(y_),
+                                              wire::common::safeInt32(z_), kInitialRadius * 16);
     sendBedrock(BedrockPacket::NetworkChunkPublisherUpdate, out);
     out.clear();
     if (respawning_) {
