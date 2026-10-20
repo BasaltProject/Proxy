@@ -8,6 +8,7 @@
 #include <basalt/wire/bedrock/BedrockEffects.hpp>
 #include <basalt/wire/bedrock/BedrockEntityIdentifiers.hpp>
 #include <basalt/wire/bedrock/BedrockItems.hpp>
+#include <basalt/wire/bedrock/BedrockJavaBlockEntities.hpp>
 #include <basalt/wire/bedrock/BedrockPackets.hpp>
 #include <basalt/wire/bedrock/BedrockSounds.hpp>
 #include <basalt/wire/bedrock/BedrockTypes.hpp>
@@ -130,6 +131,15 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
         },
         [&biomes](std::int32_t section, bedrock::BiomeQuarts& quarts) {
             quarts = biomes[static_cast<std::size_t>(section)];
+        },
+        [&packet](wire::io::ByteBuffer& tags) {
+            for (const auto& entity : packet->blockEntities) {
+                if (!entity.tag)
+                    continue;
+                const std::int32_t x = (packet->x * 16) + ((entity.packedXZ >> 4) & 0xF);
+                const std::int32_t z = (packet->z * 16) + (entity.packedXZ & 0xF);
+                bedrock::writeJavaBlockEntity(tags, x, entity.y, z, entity.typeId, *entity.tag);
+            }
         });
     wire::io::ByteBuffer out;
     out.writeBytes(column);
