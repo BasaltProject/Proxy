@@ -40,6 +40,7 @@
 #include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
+#include <basalt/wire/remote/ApiToken.hpp>
 #include <basalt/wire/remote/QueryServer.hpp>
 #include <basalt/wire/remote/UpdateChecker.hpp>
 
@@ -816,7 +817,8 @@ int run(const cliCommand::Run& command) {
             };
         }
         hooks.loadedPlugins = [&plugins]() -> std::size_t { return plugins ? plugins->loaded() : 0; };
-        auto started = proxy::remote::RemoteApi::start(*remoteConfiguration, std::move(hooks), ".basalt/api.token");
+        auto started = proxy::remote::RemoteApi::start(*remoteConfiguration, std::move(hooks),
+                                                       std::string{wire::remote::kDefaultApiTokenPath});
         if (!started) {
             logger.error([&started] { return started.error(); });
             return 1;
