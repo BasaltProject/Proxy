@@ -15,6 +15,7 @@
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/auth/SessionKeyPair.hpp>
 #include <basalt/wire/auth/forwarding/ProxyForwarding.hpp>
+#include <basalt/wire/config/DefaultIcon.hpp>
 #include <basalt/wire/io/EventLoop.hpp>
 #include <basalt/wire/io/ResourceBudget.hpp>
 #include <basalt/wire/io/TaskQueue.hpp>
@@ -635,6 +636,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
         impl->statusSource = [state = impl.get()](std::int32_t clientProtocol, std::string_view host,
                                                   std::string_view address,
                                                   const DecisionResult* changes) -> std::vector<std::uint8_t> {
+            const auto icon = wire::config::defaultIcon::bytes();
             protocol::status::ServerStatusPayload payload =
                 state->services.status
                     ? state->services.status(clientProtocol, host, address)
@@ -647,7 +649,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                                   .sample = {}},
                           .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
                                                                                     buildInfo::kProtocolVersion},
-                          .favicon = std::nullopt};
+                          .favicon = std::vector<std::uint8_t>{icon.begin(), icon.end()}};
             if (changes != nullptr) {
                 if (!changes->text.empty())
                     payload.description = wire::text::miniMessage::parse(changes->text);

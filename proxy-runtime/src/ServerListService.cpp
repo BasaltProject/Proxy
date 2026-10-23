@@ -1,7 +1,5 @@
 #include "ServerListService.hpp"
 
-#include "DefaultIcon.hpp"
-
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/wire/config/BasicPlaceholders.hpp>
@@ -62,8 +60,7 @@ ServerListService::ServerListService(std::string directory, wire::config::Server
         wire::config::ServerListStatus::Options{.slots = sources_.slots,
                                                 .versionName = std::string{buildInfo::kMinecraftVersion},
                                                 .protocolVersion = buildInfo::kProtocolVersion,
-                                                .configRoot = directory_,
-                                                .builtInIcon = defaultIcon()},
+                                                .configRoot = directory_},
         std::move(hooks), wire::common::Logger{"ServerList"});
 }
 
