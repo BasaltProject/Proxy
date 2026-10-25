@@ -148,12 +148,12 @@ struct PluginsConfig {
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };
 
-enum class BedrockTransport : std::uint8_t { Both, NetherNet, RakNet };
+enum class BedrockTransport : std::uint8_t { kBoth, kNetherNet, kRakNet };
 
 struct BedrockConfig {
     bool enabled = false;
     std::uint16_t port = 19132;
-    BedrockTransport transport = BedrockTransport::Both;
+    BedrockTransport transport = BedrockTransport::kBoth;
     std::uint16_t nethernetPort = 0;
     std::string advertiseAddress;
     std::string language;

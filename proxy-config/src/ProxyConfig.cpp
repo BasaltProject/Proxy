@@ -164,11 +164,11 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     std::string transport = "both";
     reader.scalar(bedrock, "transport", transport, "bedrock.");
     if (transport == "both")
-        result.bedrock.transport = BedrockTransport::Both;
+        result.bedrock.transport = BedrockTransport::kBoth;
     else if (transport == "nethernet")
-        result.bedrock.transport = BedrockTransport::NetherNet;
+        result.bedrock.transport = BedrockTransport::kNetherNet;
     else if (transport == "raknet")
-        result.bedrock.transport = BedrockTransport::RakNet;
+        result.bedrock.transport = BedrockTransport::kRakNet;
     else
         reader.fail("bedrock.transport", "must be both, nethernet or raknet");
     reader.integer(bedrock, "nethernet-port", result.bedrock.nethernetPort, 0, 65535, "bedrock.");

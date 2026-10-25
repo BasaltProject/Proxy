@@ -74,7 +74,7 @@ bool BedrockStatus::start() {
         return false;
     keys_ = std::make_shared<const wire::bedrock::EcKeyPair>(std::move(*keys));
     const wire::common::Logger logger{"Bedrock"};
-    if (options_.transport != config::BedrockTransport::NetherNet) {
+    if (options_.transport != config::BedrockTransport::kNetherNet) {
         wire::bedrock::RakServerConfig config;
         config.port = port_;
         config.guid = nowMillis() ^ 0x6261736c61747870ULL;
@@ -96,7 +96,7 @@ bool BedrockStatus::start() {
             server_->onDisconnect([this](wire::bedrock::RakSession& session) { release(session.peer()); });
         }
     }
-    if (options_.transport != config::BedrockTransport::RakNet && !startNetherNet())
+    if (options_.transport != config::BedrockTransport::kRakNet && !startNetherNet())
         nether_.reset();
     if (server_ == nullptr && nether_ == nullptr)
         return false;
