@@ -37,8 +37,8 @@ constexpr std::array<std::string_view, 16> kBuiltinCommands = {
     "op",   "deop", "group", "whitelist", "ban",  "pardon", "banlist", "kick"};
 
 [[nodiscard]] wire::plugins::DataScopeHost dataScope(wire::sql::Database* database, const std::string& pluginId,
-                                                      const std::string& scope, bool allowed, const char* denied,
-                                                      const char* full, bool ranked) {
+                                                     const std::string& scope, bool allowed, const char* denied,
+                                                     const char* full, bool ranked) {
     wire::plugins::DataScopeHost host;
     host.problem = [database, allowed, denied]() -> const char* {
         if (!allowed) {
@@ -75,11 +75,11 @@ runtime::CommandNode nodeOf(const wire::plugins::CommandSpec& spec, runtime::Com
     for (std::size_t i = 1; i < spec.literals.size(); ++i)
         chain.push_back(runtime::CommandNode::literal(spec.literals[i]));
     for (const auto& argument : spec.arguments) {
-        const auto kind = argument.type == Type::Text    ? runtime::ArgumentKind::Text
-                          : argument.type == Type::Int   ? runtime::ArgumentKind::Int
-                          : argument.type == Type::Float ? runtime::ArgumentKind::Float
-                          : argument.type == Type::Bool  ? runtime::ArgumentKind::Bool
-                                                         : runtime::ArgumentKind::Word;
+        const auto kind = argument.type == Type::Text    ? runtime::ArgumentKind::kText
+                          : argument.type == Type::Int   ? runtime::ArgumentKind::kInt
+                          : argument.type == Type::Float ? runtime::ArgumentKind::kFloat
+                          : argument.type == Type::Bool  ? runtime::ArgumentKind::kBool
+                                                         : runtime::ArgumentKind::kWord;
         chain.push_back(
             runtime::CommandNode::argument(argument.name, kind, argument.optional).range(argument.min, argument.max));
     }
@@ -612,10 +612,10 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         lua.setGlobal("packet");
     }
 
-    wire::plugins::pushDataScope(
-        lua, dataScope(server->database_ ? &*server->database_ : nullptr, plugin.id, std::string{kServerScope},
-                       manifest.capabilities.storage, "store needs storage = true under [capabilities] in plugin.toml",
-                       "a plugin's store is limited to 1000 keys", true));
+    wire::plugins::pushDataScope(lua, dataScope(server->database_ ? &*server->database_ : nullptr, plugin.id,
+                                                std::string{kServerScope}, manifest.capabilities.storage,
+                                                "store needs storage = true under [capabilities] in plugin.toml",
+                                                "a plugin's store is limited to 1000 keys", true));
     lua.setGlobal("store");
 }
 

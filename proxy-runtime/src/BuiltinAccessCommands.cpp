@@ -58,8 +58,8 @@ void registerAccessCommands(const CommandEnvironment& env) {
         context.reply(env.messages->command("whitelist-list",
                                             {{"count", std::to_string(names.size())}, {"players", joined(names)}}));
     }));
-    whitelist.then(
-        Node::literal("add").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
+    whitelist.then(Node::literal("add").then(
+        Node::argument("player", Kind::kPlayer).executes([env](const CommandContext& context) {
             const std::string name{context.text("player")};
             const auto player = resolvePlayer(env, name);
             if (!player) {
@@ -77,7 +77,7 @@ void registerAccessCommands(const CommandEnvironment& env) {
                 env.messages->command(added ? "whitelist-added" : "whitelist-already", {{"player", player->name}}));
         })));
     whitelist.then(Node::literal("remove").then(
-        Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
+        Node::argument("player", Kind::kPlayer).executes([env](const CommandContext& context) {
             const std::string name{context.text("player")};
             const bool removed = env.players->locked([&](auto&, auto& access) {
                 const auto entry = access.whitelistedByName(name);
@@ -130,12 +130,12 @@ void registerAccessCommands(const CommandEnvironment& env) {
                 env.kick(entry.name, env.access->banMessage("banned", reason, std::nullopt));
     };
     add(env, "ban", "Bans a player or an address.",
-        Node::literal("ban").then(Node::argument("target", ArgumentKind::Word)
+        Node::literal("ban").then(Node::argument("target", ArgumentKind::kWord)
                                       .executes(banner)
-                                      .then(Node::argument("reason", ArgumentKind::Text, true).executes(banner))));
+                                      .then(Node::argument("reason", ArgumentKind::kText, true).executes(banner))));
     add(env, "pardon", "Lifts a ban.",
         Node::literal("pardon").then(
-            Node::argument("target", ArgumentKind::Word).executes([env](const CommandContext& context) {
+            Node::argument("target", ArgumentKind::kWord).executes([env](const CommandContext& context) {
                 const std::string target{context.text("target")};
                 const bool ip = isAddress(target);
                 std::string subject = target;
@@ -179,9 +179,9 @@ void registerAccessCommands(const CommandEnvironment& env) {
         context.reply(env.messages->command("kick-ok", {{"player", online->name}}));
     };
     add(env, "kick", "Disconnects a player.",
-        Node::literal("kick").then(Node::argument("player", Kind::Player)
+        Node::literal("kick").then(Node::argument("player", Kind::kPlayer)
                                        .executes(kicker)
-                                       .then(Node::argument("reason", ArgumentKind::Text, true).executes(kicker))));
+                                       .then(Node::argument("reason", ArgumentKind::kText, true).executes(kicker))));
 }
 
 } // namespace basalt::proxy::runtime::detail

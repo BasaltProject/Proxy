@@ -19,7 +19,7 @@ namespace basalt::proxy::runtime {
 struct PlayerCommandSpec;
 
 /// Player, Server and Group are single words that the dispatcher knows how to complete.
-enum class ArgumentKind : std::uint8_t { Word, Text, Int, Float, Bool, Player, Server, Group };
+enum class ArgumentKind : std::uint8_t { kWord, kText, kInt, kFloat, kBool, kPlayer, kServer, kGroup };
 
 struct CommandSource {
     std::string name;
@@ -82,7 +82,7 @@ private:
 
     std::string name_;
     bool isLiteral_ = true;
-    ArgumentKind kind_ = ArgumentKind::Word;
+    ArgumentKind kind_ = ArgumentKind::kWord;
     bool optional_ = false;
     std::optional<std::int64_t> min_;
     std::optional<std::int64_t> max_;
@@ -102,10 +102,10 @@ struct CommandRegistration {
     std::string owner;
 };
 
-enum class CommandOutcome : std::uint8_t { Unknown, Denied, Usage, Executed, Failed };
+enum class CommandOutcome : std::uint8_t { kUnknown, kDenied, kUsage, kExecuted, kFailed };
 
 struct CommandResult {
-    CommandOutcome outcome = CommandOutcome::Unknown;
+    CommandOutcome outcome = CommandOutcome::kUnknown;
     /// Usage lines, without the slash, when the outcome is Usage.
     std::vector<std::string> usage;
 };

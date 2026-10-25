@@ -216,15 +216,15 @@ struct RemoteApi::Impl {
         const CommandReply reply = hooks.command(line);
         logger.info([&] { return "API " + std::string{peer} + " ran: " + line; });
         switch (reply.outcome) {
-        case runtime::CommandOutcome::Unknown:
+        case runtime::CommandOutcome::kUnknown:
             return failure(503, "the command is not available");
-        case runtime::CommandOutcome::Denied:
+        case runtime::CommandOutcome::kDenied:
             return failure(403, "the API source is not allowed to run that command");
-        case runtime::CommandOutcome::Usage:
+        case runtime::CommandOutcome::kUsage:
             return failure(400, "the command was refused as malformed");
-        case runtime::CommandOutcome::Failed:
+        case runtime::CommandOutcome::kFailed:
             return failure(422, joinLines(reply.lines));
-        case runtime::CommandOutcome::Executed:
+        case runtime::CommandOutcome::kExecuted:
             break;
         }
         JsonObject object;

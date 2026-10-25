@@ -121,19 +121,19 @@ namespace {
 bool valid(const CommandNode& node, ArgumentKind kind, std::optional<std::int64_t> min, std::optional<std::int64_t> max,
            std::string_view word) {
     switch (kind) {
-    case ArgumentKind::Int: {
+    case ArgumentKind::kInt: {
         std::int64_t number = 0;
         const auto [end, error] = std::from_chars(word.data(), word.data() + word.size(), number);
         return error == std::errc{} && end == word.data() + word.size() && (!min || number >= *min) &&
                (!max || number <= *max);
     }
-    case ArgumentKind::Float: {
+    case ArgumentKind::kFloat: {
         const std::string copy{word};
         char* end = nullptr;
         std::strtod(copy.c_str(), &end);
         return !copy.empty() && end == copy.c_str() + copy.size();
     }
-    case ArgumentKind::Bool:
+    case ArgumentKind::kBool:
         return word == "true" || word == "false";
     default:
         static_cast<void>(node);
@@ -369,12 +369,12 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
             for (const CommandNode& child : node.children_) {
                 if (child.isLiteral_)
                     continue;
-                std::string value{child.kind_ == ArgumentKind::Text ? line.substr(token.begin) : token.text};
+                std::string value{child.kind_ == ArgumentKind::kText ? line.substr(token.begin) : token.text};
                 if (!valid(child, child.kind_, child.min_, child.max_, value))
                     continue;
                 walk.values[child.name_] = std::move(value);
                 walk.path.push_back(tokenOf(child, false, false));
-                if (step(child, child.kind_ == ArgumentKind::Text ? tokens.size() : at + 1))
+                if (step(child, child.kind_ == ArgumentKind::kText ? tokens.size() : at + 1))
                     return true;
                 walk.path.pop_back();
                 walk.values.erase(child.name_);
@@ -382,7 +382,7 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
             return false;
         };
         if (step(root, 1))
-            return {walk.failed ? CommandOutcome::Failed : CommandOutcome::Executed, {}};
+            return {walk.failed ? CommandOutcome::kFailed : CommandOutcome::kExecuted, {}};
         std::string prefix;
         for (const std::string& word : walk.deepestPath)
             prefix += (prefix.empty() ? "" : " ") + word;
@@ -398,8 +398,8 @@ CommandResult CommandDispatcher::execute(const CommandSource& source, std::strin
             usage.push_back(prefix);
     }
     if (!usage.empty())
-        return {CommandOutcome::Usage, std::move(usage)};
-    return {denied ? CommandOutcome::Denied : CommandOutcome::Usage, {}};
+        return {CommandOutcome::kUsage, std::move(usage)};
+    return {denied ? CommandOutcome::kDenied : CommandOutcome::kUsage, {}};
 }
 
 std::vector<std::string> CommandDispatcher::roots(const CommandSource& source) const {
@@ -450,7 +450,7 @@ std::vector<std::string> CommandDispatcher::suggest(const CommandSource& source,
                         if (next == nullptr && !child.isLiteral_ &&
                             valid(child, child.kind_, child.min_, child.max_, tokens[at].text))
                             next = &child;
-                    lost = next == nullptr || next->kind_ == ArgumentKind::Text;
+                    lost = next == nullptr || next->kind_ == ArgumentKind::kText;
                     if (!lost)
                         node = next;
                 }
@@ -464,13 +464,13 @@ std::vector<std::string> CommandDispatcher::suggest(const CommandSource& source,
                         continue;
                     }
                     std::vector<std::string> names;
-                    if (child.kind_ == ArgumentKind::Player && suggestions_.players)
+                    if (child.kind_ == ArgumentKind::kPlayer && suggestions_.players)
                         names = suggestions_.players();
-                    else if (child.kind_ == ArgumentKind::Server && suggestions_.servers)
+                    else if (child.kind_ == ArgumentKind::kServer && suggestions_.servers)
                         names = suggestions_.servers();
-                    else if (child.kind_ == ArgumentKind::Group && suggestions_.groups)
+                    else if (child.kind_ == ArgumentKind::kGroup && suggestions_.groups)
                         names = suggestions_.groups();
-                    else if (child.kind_ == ArgumentKind::Bool)
+                    else if (child.kind_ == ArgumentKind::kBool)
                         names = {"true", "false"};
                     for (std::string& name : names)
                         offer(std::move(name));
@@ -504,13 +504,13 @@ std::vector<PlayerCommandSpec> CommandDispatcher::specs(const CommandSource& sou
                             continue;
                         next.literals.push_back(child.name_);
                     } else {
-                        const Kind kind = child.kind_ == ArgumentKind::Text    ? Kind::kText
-                                          : child.kind_ == ArgumentKind::Int   ? Kind::kInt
-                                          : child.kind_ == ArgumentKind::Float ? Kind::kFloat
-                                          : child.kind_ == ArgumentKind::Bool  ? Kind::kBool
-                                                                               : Kind::kWord;
-                        const bool asks = child.kind_ == ArgumentKind::Player || child.kind_ == ArgumentKind::Server ||
-                                          child.kind_ == ArgumentKind::Group;
+                        const Kind kind = child.kind_ == ArgumentKind::kText    ? Kind::kText
+                                          : child.kind_ == ArgumentKind::kInt   ? Kind::kInt
+                                          : child.kind_ == ArgumentKind::kFloat ? Kind::kFloat
+                                          : child.kind_ == ArgumentKind::kBool  ? Kind::kBool
+                                                                                : Kind::kWord;
+                        const bool asks = child.kind_ == ArgumentKind::kPlayer ||
+                                          child.kind_ == ArgumentKind::kServer || child.kind_ == ArgumentKind::kGroup;
                         next.arguments.push_back({child.name_, kind, child.optional_, child.min_, child.max_, asks});
                     }
                     walk(child, std::move(next));

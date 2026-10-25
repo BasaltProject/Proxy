@@ -21,7 +21,7 @@ namespace basalt::proxy::remote {
 
 /// What a command run as the API produced: how the dispatcher took it and the plain text it replied with.
 struct CommandReply {
-    runtime::CommandOutcome outcome = runtime::CommandOutcome::Unknown;
+    runtime::CommandOutcome outcome = runtime::CommandOutcome::kUnknown;
     std::vector<std::string> lines;
 };
 

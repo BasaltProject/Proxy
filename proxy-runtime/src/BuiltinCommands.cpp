@@ -149,7 +149,7 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
                                                      {"servers", joined(env.servers())},
                                                      {"groups", joined(groupNames(env))}}));
     });
-    server.then(Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
+    server.then(Node::argument("server", Kind::kServer).executes([env](const CommandContext& context) {
         const std::string target{context.text("server")};
         if (context.source().console) {
             context.reply(env.messages->command("server-players-only"));
@@ -165,8 +165,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
 
     add(env, "send", "Sends a player, or everyone, to a server.",
         Node::literal("send").then(
-            Node::argument("player", Kind::Player)
-                .then(Node::argument("server", Kind::Server).executes([env](const CommandContext& context) {
+            Node::argument("player", Kind::kPlayer)
+                .then(Node::argument("server", Kind::kServer).executes([env](const CommandContext& context) {
                     const std::string target{context.text("server")};
                     const std::string who{context.text("player")};
                     if (!hasServer(env, target)) {
@@ -200,11 +200,11 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
     add(env, "antibot", "Shows or controls the antibot (status, list, attack, ban, unban, verify, unverify, verified).",
         Node::literal("antibot")
             .executes([antibotRun](const CommandContext& context) { antibotRun(context, {}); })
-            .then(Node::argument("action", Kind::Word)
+            .then(Node::argument("action", Kind::kWord)
                       .executes([antibotRun](const CommandContext& context) {
                           antibotRun(context, {context.text("action")});
                       })
-                      .then(Node::argument("target", Kind::Word).executes([antibotRun](const CommandContext& context) {
+                      .then(Node::argument("target", Kind::kWord).executes([antibotRun](const CommandContext& context) {
                           antibotRun(context, {context.text("action"), context.text("target")});
                       }))));
 
@@ -247,22 +247,22 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
         };
     };
     add(env, "op", "Makes a player an operator.",
-        Node::literal("op").then(Node::argument("player", Kind::Player).executes(setOperator(true))));
+        Node::literal("op").then(Node::argument("player", Kind::kPlayer).executes(setOperator(true))));
     add(env, "deop", "Takes operator away from a player.",
-        Node::literal("deop").then(Node::argument("player", Kind::Player).executes(setOperator(false))));
+        Node::literal("deop").then(Node::argument("player", Kind::kPlayer).executes(setOperator(false))));
 
     Node group = Node::literal("group");
     group.then(Node::literal("list").executes([env](const CommandContext& context) {
         context.reply(env.messages->command("group-list", {{"groups", joined(env.permissions->groupNames())}}));
     }));
-    group.then(
-        Node::literal("get").then(Node::argument("player", Kind::Player).executes([env](const CommandContext& context) {
+    group.then(Node::literal("get").then(
+        Node::argument("player", Kind::kPlayer).executes([env](const CommandContext& context) {
             const std::string name{context.text("player")};
             context.reply(
                 env.messages->command("group-info", {{"player", name}, {"group", env.permissions->groupOf(name)}}));
         })));
     group.then(Node::literal("members").then(
-        Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
+        Node::argument("group", Kind::kGroup).executes([env](const CommandContext& context) {
             const std::string name{context.text("group")};
             if (!env.permissions->groupExists(name)) {
                 context.reply(env.messages->command(
@@ -275,8 +275,8 @@ void registerBuiltinCommands(const CommandEnvironment& environment) {
                 {{"group", name}, {"count", std::to_string(members.size())}, {"players", joined(members)}}));
         })));
     group.then(Node::literal("set").then(
-        Node::argument("player", Kind::Player)
-            .then(Node::argument("group", Kind::Group).executes([env](const CommandContext& context) {
+        Node::argument("player", Kind::kPlayer)
+            .then(Node::argument("group", Kind::kGroup).executes([env](const CommandContext& context) {
                 const std::string name{context.text("player")};
                 const std::string target{context.text("group")};
                 if (!env.permissions->groupExists(target)) {

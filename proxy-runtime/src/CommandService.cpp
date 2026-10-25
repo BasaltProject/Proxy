@@ -21,16 +21,16 @@ void CommandService::run(const CommandSource& source, std::string_view line) {
             [&] { return source.name + " issued proxy command: /" + std::string{line}; });
     const CommandResult result = dispatcher_->execute(source, line);
     switch (result.outcome) {
-    case CommandOutcome::Executed:
-    case CommandOutcome::Failed:
+    case CommandOutcome::kExecuted:
+    case CommandOutcome::kFailed:
         return;
-    case CommandOutcome::Unknown:
+    case CommandOutcome::kUnknown:
         source.reply(messages_->command("unknown"));
         return;
-    case CommandOutcome::Denied:
+    case CommandOutcome::kDenied:
         source.reply(messages_->command("no-permission"));
         return;
-    case CommandOutcome::Usage:
+    case CommandOutcome::kUsage:
         for (const std::string& usage : result.usage)
             source.reply(messages_->command("usage", {{"usage", usage}}));
         return;
