@@ -23,9 +23,9 @@
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-green">
 </p>
 
-> ⚠️ **Early development.** Basalt Proxy is not ready for any network, public or
-> private. It has only been exercised on Linux with offline bots and simulated
-> backends. The status table below is the honest state of the project.
+> ⚠️ **Early development.** Basalt Proxy is not ready for a public network. It has
+> only been exercised on Linux, mostly with offline bots against real vanilla, Paper
+> and Basalt backends. The status table below is the honest state of the project.
 
 ## Overview
 
@@ -89,7 +89,7 @@ Keep `backends.toml` private: it holds forwarding secrets.
 
 ## Console
 
-Commands are `help`, `servers`, `status`, `send <player> <backend>` and `stop`.
+Commands are `help`, `servers`, `status`, `reload`, `send <player> <backend>` and `stop`.
 Player names match the verified name exactly, including case. A successful `send`
 acknowledges preparation, and the destination may still reject the login. It uses
 the same change a Bungee `Connect` does and needs no plugins. Console commands do
@@ -138,7 +138,7 @@ tree under the address and undefined sanitizers.
 
 | Area | Status |
 |---|---|
-| Build, module layout and cross-platform CI | Configured; platform validation pending |
+| Build, module layout and cross-platform CI | CI builds Linux x64/arm64, macOS x64/arm64 and Windows x64; only Linux has been run |
 | Command line: `--help`, `--version`, `--config` | Working |
 | Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
 | Login crypto and session verification | Implemented; simulated-endpoint tests |
@@ -150,15 +150,6 @@ tree under the address and undefined sanitizers.
 | Older Java clients, 26.3 clients on older servers, and Bedrock clients | Older clients from 1.8 and 26.3 clients on 1.21.5 to 26.2 bot-verified; Bedrock bridge bot-verified; no graphical client yet. See `docs/compatibility-matrix.md` |
 | Plugins and the Lua runtime | Working, sandboxed, hot reload; Linux only so far |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
-
-## Related repositories
-
-| Repository | What it is |
-|---|---|
-| [Server](https://github.com/BasaltProject/Server) | The Minecraft server itself, in C++23 |
-| [Wire](https://github.com/BasaltProject/Wire) | The network layer both this and the server build on |
-| [Shim](https://github.com/BasaltProject/Shim) | A JVM implemented in C++, for future Java plugin compatibility |
-| [Website](https://github.com/BasaltProject/Website) | The project site, at [basaltmc.org](https://basaltmc.org) |
 
 ## License
 
