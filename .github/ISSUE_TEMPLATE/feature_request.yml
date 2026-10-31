@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest an improvement to Basalt Proxy.
+title: '[Feature]: '
+labels:
+- enhancement
+body:
+- type: markdown
+  attributes:
+    value: Thank you for helping improve **Basalt Proxy**. Explain the problem, the proposed solution and who benefits.
+      Use the bug report form for behavior that is already intended to work.
+- type: checkboxes
+  id: confirmation
+  attributes:
+    label: Before submitting
+    options:
+    - label: I searched existing issues and pull requests for similar suggestions.
+      required: true
+    - label: This suggestion is for Basalt Proxy.
+      required: true
+- type: dropdown
+  id: category
+  attributes:
+    label: Suggestion type
+    multiple: true
+    options:
+    - Routing or backend transfers
+    - Configuration or administration
+    - Plugin API or compatibility
+    - Networking, forwarding or protocol translation
+    - Performance or resource usage
+    - Other
+  validations:
+    required: true
+- type: textarea
+  id: problem
+  attributes:
+    label: Problem or use case
+    description: Describe the limitation and who it affects. Explain why it belongs in Basalt rather than a specific
+      plugin.
+  validations:
+    required: true
+- type: textarea
+  id: solution
+  attributes:
+    label: Proposed solution
+    description: Explain the desired behavior and how it would help other users.
+  validations:
+    required: true
+- type: textarea
+  id: alternatives
+  attributes:
+    label: Alternatives considered
+    description: Describe existing options or workarounds and why they do not solve the problem.
+- type: textarea
+  id: examples
+  attributes:
+    label: Examples
+    description: Optional code, commands, configuration or links to relevant documentation. Use a fenced code block
+      with the appropriate language; do not attach untrusted executable files.
+- type: textarea
+  id: compatibility
+  attributes:
+    label: Compatibility and additional context
+    description: Mention potential breaking changes, migration needs and affected clients, plugins or backend servers.

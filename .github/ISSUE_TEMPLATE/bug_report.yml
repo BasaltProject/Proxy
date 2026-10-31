@@ -1,0 +1,126 @@
+name: Bug report
+description: Report a problem with Basalt Proxy.
+title: '[Bug]: '
+labels:
+- bug
+body:
+- type: markdown
+  attributes:
+    value: |-
+      Thank you for reporting a problem with **Basalt Proxy**. Check the [latest builds](https://github.com/BasaltProject/Proxy/releases) first and include the exact version you tested.
+
+      For backend server issues, use the [Basalt Server tracker](https://github.com/BasaltProject/Server/issues). Compatibility problems involving plugins are welcome here; include a minimal reproduction.
+
+      **Remove passwords, forwarding secrets, authentication tokens, license keys and other private data from logs and configuration before posting.**
+- type: checkboxes
+  id: confirmation
+  attributes:
+    label: Before submitting
+    options:
+    - label: I searched existing issues and pull requests for duplicates.
+      required: true
+    - label: This report concerns Basalt Proxy or one of its compatibility layers.
+      required: true
+- type: dropdown
+  id: category
+  attributes:
+    label: Problem type
+    options:
+    - Crash or startup failure
+    - Connections, routing or backend transfers
+    - Authentication or forwarding
+    - Networking or protocol translation
+    - Performance or resource usage
+    - Plugin or API compatibility
+    - Other
+  validations:
+    required: true
+- type: input
+  id: version
+  attributes:
+    label: Basalt Proxy version
+    description: Copy the full version/build identifier from startup output, or the commit hash for a custom build.
+    placeholder: Full release/nightly version or commit hash
+  validations:
+    required: true
+- type: input
+  id: environment
+  attributes:
+    label: Operating system and hardware
+    description: Include the OS version, CPU architecture (x64/arm64), RAM and whether this runs in a container.
+    placeholder: OS version; CPU/architecture; RAM; container if applicable
+  validations:
+    required: true
+- type: input
+  id: clients
+  attributes:
+    label: Client editions and versions
+    description: List the Java Edition and/or Bedrock versions involved. Enter N/A if no client is involved.
+    placeholder: Edition and exact Minecraft version(s)
+  validations:
+    required: true
+- type: textarea
+  id: backends
+  attributes:
+    label: Backends and network setup
+    description: List backend software and versions, authentication/forwarding mode, and the connection or server-transfer
+      path. Do not include forwarding secrets.
+    placeholder: Client -> Basalt Proxy -> backend software/version; when the failure occurs
+  validations:
+    required: true
+- type: textarea
+  id: actual
+  attributes:
+    label: What happens?
+    description: Describe the observed behavior and when it started.
+  validations:
+    required: true
+- type: textarea
+  id: expected
+  attributes:
+    label: Expected behavior
+    description: Describe what should happen instead.
+  validations:
+    required: true
+- type: textarea
+  id: reproduce
+  attributes:
+    label: Steps to reproduce
+    description: Provide precise steps, commands and a minimal example. For API or plugin compatibility problems,
+      include relevant code and dependency versions.
+    placeholder: |-
+      1. Start with this configuration...
+      2. Run...
+      3. Observe...
+  validations:
+    required: true
+- type: textarea
+  id: plugins
+  attributes:
+    label: Plugins and compatibility layers
+    description: List plugin names and exact versions, which Basalt compatibility layer is used, and any relevant
+      configuration. Enter None if there are no plugins.
+  validations:
+    required: true
+- type: dropdown
+  id: without-plugins
+  attributes:
+    label: Does it happen without plugins?
+    options:
+    - Not tested
+    - 'Yes'
+    - 'No'
+    - No plugins installed
+  validations:
+    required: true
+- type: textarea
+  id: logs
+  attributes:
+    label: Logs and crash reports
+    description: Paste the startup-to-failure log, or link/attach a complete redacted log. For crashes, include
+      the crash dump/native stack trace and the action immediately before the crash. Do not paste secrets.
+- type: textarea
+  id: additional
+  attributes:
+    label: Additional information
+    description: Attach screenshots, a minimal reproducer, or redacted routing/forwarding configuration.

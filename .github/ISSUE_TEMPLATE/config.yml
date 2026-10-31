@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+- name: Basalt Proxy documentation
+  url: https://basaltmc.org/docs/proxy/introduction
+  about: Read configuration, usage and plugin API documentation.
+- name: Basalt Proxy releases
+  url: https://github.com/BasaltProject/Proxy/releases
+  about: Check the latest published release and nightly build.
+- name: Basalt Server issues
+  url: https://github.com/BasaltProject/Server/issues
+  about: Report backend server problems in the appropriate repository.
