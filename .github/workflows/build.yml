@@ -3,9 +3,9 @@ name: Build
 on:
   push:
     branches: [main, cpp]
-    paths-ignore: ['**.md', 'docs/**']
+    paths-ignore: ['**.md', 'docs/**', '.github/ISSUE_TEMPLATE/**']
   pull_request:
-    paths-ignore: ['**.md', 'docs/**']
+    paths-ignore: ['**.md', 'docs/**', '.github/ISSUE_TEMPLATE/**']
   workflow_call:
     inputs:
       version:
