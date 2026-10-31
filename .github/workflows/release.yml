@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  schedule:
+    # 09:00 in Madrid, whichever of the two UTC hours that is today; the plan job picks the right one.
+    - cron: '0 7 * * 1'
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Release even when nothing changed since the last one
+        type: boolean
+        default: false
+      dry_run:
+        description: Build everything but publish nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+      version: ${{ steps.decide.outputs.version }}
+      sha: ${{ steps.decide.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          echo "go=false" >>"$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(TZ=Europe/Madrid date +%H)" != 09 ]; then
+              echo "not 09:00 in Madrid yet"; exit 0
+          fi
+          last="$(gh release list --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          if [ -n "$last" ] && [ "$FORCE" != true ] && [ "$(git rev-list --count "$last"..HEAD)" = 0 ]; then
+              echo "nothing new since $last"; exit 0
+          fi
+          .github/scripts/plan-version.sh release proxy-runtime/include/basalt/proxy/runtime/BuildInfo.hpp
+          echo "go=true" >>"$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: ${{ needs.plan.outputs.go == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      release: true
+      ref: ${{ needs.plan.outputs.sha }}
+
+  publish:
+    needs: [plan, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: basalt-proxy-*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/publish-release.sh release "${{ needs.plan.outputs.version }}" "${{ needs.plan.outputs.sha }}" artifacts basalt-proxy
