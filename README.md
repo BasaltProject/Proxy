@@ -58,6 +58,13 @@ Two goals drive every decision:
 | Configuration | A `proxy.toml` and a `backends.toml`, generated with comments |
 | License | GPL-3.0 |
 
+## Download and documentation
+
+Binaries for Linux, macOS and Windows are on the [releases page](https://github.com/BasaltProject/Proxy/releases):
+a stable release every Monday when there is something new, and a moving **Nightly** prerelease that follows `main`.
+Each asset is the executable itself, with a `SHA256SUMS` file beside them. The full documentation, including the
+plugin API, is at [basaltmc.org/docs](https://basaltmc.org/docs/proxy/introduction).
+
 ## Configuration
 
 On first start the proxy writes commented defaults into `./config/`, or into the
