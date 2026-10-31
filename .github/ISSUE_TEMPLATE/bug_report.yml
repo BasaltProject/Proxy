@@ -11,6 +11,8 @@ body:
 
       For backend server issues, use the [Basalt Server tracker](https://github.com/BasaltProject/Server/issues). Compatibility problems involving plugins are welcome here; include a minimal reproduction.
 
+      **Suspected security vulnerability?** Follow the [private reporting policy](https://github.com/BasaltProject/Proxy/blob/main/SECURITY.md); do not publish exploit details here.
+
       **Remove passwords, forwarding secrets, authentication tokens, license keys and other private data from logs and configuration before posting.**
 - type: checkboxes
   id: confirmation
