@@ -39,14 +39,21 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Select the compiler
+        shell: bash
+        run: .github/scripts/select-compiler.sh
+
       - name: Configure
-        run: cmake --preset release -DBASALT_VERSION=26.3.${{ github.run_number }}
+        shell: bash
+        run: eval cmake --preset release "-DBASALT_VERSION=26.3.${{ github.run_number }}" $BASALT_CMAKE_ARGS
 
       - name: Build
+        shell: bash
         # The run number is the build half of the version: 26.3.<build>.
         run: cmake --build build/release -- -k 0
 
       - name: Test
+        shell: bash
         run: ctest --test-dir build/release --output-on-failure
 
       - name: Upload the binary
@@ -56,7 +63,7 @@ jobs:
           path: build/release/bin/
 
   sanitize:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,8 +71,11 @@ jobs:
 
       - uses: lukka/get-cmake@latest
 
+      - name: Select the compiler
+        run: .github/scripts/select-compiler.sh
+
       - name: Configure with the address and undefined sanitizers
-        run: cmake --preset asan
+        run: eval cmake --preset asan $BASALT_CMAKE_ARGS
 
       - name: Build
         run: cmake --build build/asan
@@ -80,8 +90,11 @@ jobs:
         with:
           submodules: true
       - uses: lukka/get-cmake@latest
+      - name: Select the compiler
+        run: .github/scripts/select-compiler.sh
+
       - name: Configure with the portable poll readiness backend
-        run: cmake --preset debug -DBASALT_IO_FORCE_POLL=ON -B build/poll
+        run: eval cmake --preset debug -DBASALT_IO_FORCE_POLL=ON -B build/poll $BASALT_CMAKE_ARGS
       - name: Build
         run: cmake --build build/poll
       - name: Test
@@ -94,22 +107,28 @@ jobs:
         with:
           submodules: true
       - uses: lukka/get-cmake@latest
+      - name: Select the compiler
+        run: .github/scripts/select-compiler.sh
+
       - name: Configure with the thread sanitizer
-        run: cmake --preset tsan
+        run: eval cmake --preset tsan $BASALT_CMAKE_ARGS
       - name: Build
         run: cmake --build build/tsan
       - name: Test
         run: ctest --test-dir build/tsan --output-on-failure
 
   format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
 
+      - name: Select the compiler
+        run: .github/scripts/select-compiler.sh
+
       - name: Check formatting
         run: |
           find proxy-runtime proxy-config proxy-plugins wire/wire-* -name '*.hpp' -o -name '*.cpp' \
             | grep -v third_party \
-            | xargs clang-format --dry-run --Werror
+            | xargs clang-format-19 --dry-run --Werror
