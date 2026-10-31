@@ -1,25 +1,15 @@
 #!/usr/bin/env bash
-# Usage: publish-release.sh <nightly|release> <version> <sha> <artifact dir> <asset prefix>
-# Packs every downloaded artifact and publishes it: a single moving prerelease "nightly", or a tagged release.
+# Usage: publish-release.sh <nightly|release> <version> <sha> <artifact dir>
+# Publishes the downloaded binaries as they are: a single moving prerelease "nightly", or a tagged release.
 set -euo pipefail
 
 mode="${1:?mode}"
 version="${2:?version}"
 sha="${3:?sha}"
 artifacts="${4:?artifact dir}"
-prefix="${5:?asset prefix}"
 out="$(mktemp -d)"
 
-for dir in "$artifacts"/*/; do
-    target="$(basename "$dir")"
-    target="${target#"$prefix"-}"
-    chmod +x "$dir"/* 2>/dev/null || true
-    if [[ "$target" == Windows-* ]]; then
-        (cd "$dir" && python3 -m zipfile -c "$out/$prefix-$version-$target.zip" *)
-    else
-        tar -czf "$out/$prefix-$version-$target.tar.gz" -C "$dir" .
-    fi
-done
+cp "$artifacts"/*/* "$out"/
 (cd "$out" && sha256sum -- * >SHA256SUMS)
 
 if [ "$mode" = release ]; then
