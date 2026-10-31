@@ -158,6 +158,12 @@ tree under the address and undefined sanitizers.
 | Plugins and the Lua runtime | Working, sandboxed, hot reload; Linux only so far |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
+## Contributing and community
+
+Please read the [contribution guide](CONTRIBUTING.md) and
+[Code of Conduct](.github/CODE_OF_CONDUCT.md) before participating.
+Report suspected vulnerabilities privately using the [security policy](SECURITY.md).
+
 ## License
 
 Basalt Proxy is distributed under the [GNU General Public License v3.0](LICENSE).
