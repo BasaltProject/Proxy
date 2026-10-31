@@ -3,7 +3,9 @@ name: Build
 on:
   push:
     branches: [main, cpp]
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**']
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
