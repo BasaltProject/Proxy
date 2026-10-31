@@ -557,6 +557,7 @@ TEST_CASE("a basalt backend that offers the session envelope gets Open, data fra
     std::ifstream stored{keyFile};
     std::string text;
     stored >> text;
+    stored.close();
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i < seed.size(); ++i)
         seed[i] = static_cast<std::uint8_t>(std::stoi(text.substr(2 * i, 2), nullptr, 16));
