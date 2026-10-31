@@ -17,3 +17,4 @@ compile_commands.json
 
 # Local tooling
 /tools/
+*.log
