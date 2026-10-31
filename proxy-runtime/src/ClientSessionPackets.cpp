@@ -82,11 +82,11 @@ std::optional<wire::plugins::PacketPhase> ClientSession::tapPhase() const {
     case State::kBackendLogin:
     case State::kCookieResponse:
     case State::kLoginAck:
-        return PacketPhase::Login;
+        return PacketPhase::kLogin;
     case State::kConfiguration:
-        return PacketPhase::Configuration;
+        return PacketPhase::kConfiguration;
     case State::kPlay:
-        return PacketPhase::Play;
+        return PacketPhase::kPlay;
     default:
         return std::nullopt;
     }

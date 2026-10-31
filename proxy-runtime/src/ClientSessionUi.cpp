@@ -23,14 +23,14 @@ struct Owned {
 std::optional<UiElement> elementOf(std::int32_t id) {
     switch (id) {
     case play::TabListPacket::kId:
-        return UiElement::TabList;
+        return UiElement::kTabList;
     case play::BossEventPacket::kId:
-        return UiElement::BossBar;
+        return UiElement::kBossBar;
     case play::SetObjectivePacket::kId:
     case play::SetDisplayObjectivePacket::kId:
     case play::SetScorePacket::kId:
     case play::ResetScorePacket::kId:
-        return UiElement::Scoreboard;
+        return UiElement::kScoreboard;
     default:
         return std::nullopt;
     }
@@ -40,11 +40,11 @@ std::optional<UiElement> elementOf(std::int32_t id) {
 
 bool ClientSession::pluginOwns(wire::config::UiElement element) const {
     switch (element) {
-    case UiElement::TabList:
+    case UiElement::kTabList:
         return tabHeader_ || tabFooter_;
-    case UiElement::Scoreboard:
+    case UiElement::kScoreboard:
         return sidebarShown_;
-    case UiElement::BossBar:
+    case UiElement::kBossBar:
         return false;
     }
     return false;
@@ -64,27 +64,27 @@ bool ClientSession::uiBackendPacket(std::int32_t id) {
     const auto configs = uiSource_.configs();
     if (!configs)
         return false;
-    wire::config::UiPriority priority = wire::config::UiPriority::Backend;
+    wire::config::UiPriority priority = wire::config::UiPriority::kBackend;
     bool enabled = false;
     switch (*element) {
-    case UiElement::TabList:
+    case UiElement::kTabList:
         priority = configs->tabList.priority;
         enabled = configs->tabList.enabled;
         break;
-    case UiElement::BossBar:
+    case UiElement::kBossBar:
         priority = configs->bossBar.priority;
         enabled = configs->bossBar.enabled;
         break;
-    case UiElement::Scoreboard:
+    case UiElement::kScoreboard:
         priority = configs->scoreboard.priority;
         enabled = configs->scoreboard.enabled;
         break;
     }
-    if (pluginOwns(*element) && priority == wire::config::UiPriority::Proxy)
+    if (pluginOwns(*element) && priority == wire::config::UiPriority::kProxy)
         return true;
     if (!enabled)
         return false;
-    if (priority == wire::config::UiPriority::Proxy)
+    if (priority == wire::config::UiPriority::kProxy)
         return true;
     uiYielded_ |= static_cast<std::uint8_t>(1U << static_cast<unsigned>(*element));
     if (ui_)

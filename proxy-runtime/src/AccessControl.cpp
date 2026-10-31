@@ -43,9 +43,9 @@ void AccessControl::refresh() {
     using wire::storage::BanKind;
     Snapshot next;
     players_->locked([&](auto&, auto& access) {
-        for (auto& ban : access.bans(BanKind::Player))
+        for (auto& ban : access.bans(BanKind::kPlayer))
             next.players.emplace(ban.subject, std::move(ban));
-        for (auto& ban : access.bans(BanKind::Ip))
+        for (auto& ban : access.bans(BanKind::kIp))
             next.addresses.emplace(ban.subject, std::move(ban));
         for (const auto& entry : access.whitelist())
             next.whitelisted.insert(entry.uuid);

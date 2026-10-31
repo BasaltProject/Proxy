@@ -259,7 +259,7 @@ TEST_CASE("packet listeners written in Lua read, edit, cancel and send, and a br
     const auto endpoint = std::make_shared<Endpoint>();
     PluginPacket packet;
     packet.endpoint = endpoint;
-    packet.address = {PacketPhase::Play, false, 5};
+    packet.address = {PacketPhase::kPlay, false, 5};
     packet.bytes = {4};
     CHECK(replaced->fire(packet));
     CHECK(packet.replacement == std::optional{std::vector<std::uint8_t>{5, 9}});
@@ -268,10 +268,10 @@ TEST_CASE("packet listeners written in Lua read, edit, cancel and send, and a br
     packet.address.id = 7;
     CHECK(replaced->fire(packet));
     CHECK(endpoint->sent == std::vector<std::int32_t>{8});
-    packet.address = {PacketPhase::Play, true, 1};
+    packet.address = {PacketPhase::kPlay, true, 1};
     for (int i = 0; i < 8; ++i)
         CHECK(replaced->fire(packet));
-    packet.address = {PacketPhase::Play, false, 5};
+    packet.address = {PacketPhase::kPlay, false, 5};
     CHECK(replaced->fire(packet));
     CHECK(packet.replacement.has_value());
 }

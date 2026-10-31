@@ -96,13 +96,13 @@ std::expected<UiConfig, std::string> loadUi(std::string_view directory) {
     auto animations = wire::config::AnimationsConfig::load(files, kAnimationsDefaultToml);
     if (!animations)
         return std::unexpected(animations.error());
-    auto tabList = wire::config::TabListConfig::load(files, kTabListDefaultToml, UiPriority::Proxy);
+    auto tabList = wire::config::TabListConfig::load(files, kTabListDefaultToml, UiPriority::kProxy);
     if (!tabList)
         return std::unexpected(tabList.error());
-    auto bossBar = wire::config::BossBarConfig::load(files, kBossBarDefaultToml, UiPriority::Backend);
+    auto bossBar = wire::config::BossBarConfig::load(files, kBossBarDefaultToml, UiPriority::kBackend);
     if (!bossBar)
         return std::unexpected(bossBar.error());
-    auto scoreboard = wire::config::ScoreboardConfig::load(files, kScoreboardDefaultToml, UiPriority::Backend);
+    auto scoreboard = wire::config::ScoreboardConfig::load(files, kScoreboardDefaultToml, UiPriority::kBackend);
     if (!scoreboard)
         return std::unexpected(scoreboard.error());
     ui.animations = std::move(*animations);

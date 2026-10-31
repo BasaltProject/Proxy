@@ -107,7 +107,7 @@ void registerAccessCommands(const CommandEnvironment& env) {
             subject = player->uuid;
             name = player->name;
         }
-        const auto kind = ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player;
+        const auto kind = ip ? wire::storage::BanKind::kIp : wire::storage::BanKind::kPlayer;
         const bool banned = env.players->locked([&](auto&, auto& access) {
             if (access.banOf(subject, kind))
                 return false;
@@ -148,7 +148,7 @@ void registerAccessCommands(const CommandEnvironment& env) {
                     subject = player->uuid;
                 }
                 const bool lifted = env.players->locked([&](auto&, auto& access) {
-                    return access.pardon(subject, ip ? wire::storage::BanKind::Ip : wire::storage::BanKind::Player);
+                    return access.pardon(subject, ip ? wire::storage::BanKind::kIp : wire::storage::BanKind::kPlayer);
                 });
                 env.access->refresh();
                 context.reply(env.messages->command(lifted ? "pardon-ok" : "pardon-not-banned", {{"player", target}}));
@@ -156,9 +156,9 @@ void registerAccessCommands(const CommandEnvironment& env) {
     add(env, "banlist", "Lists who is banned.", Node::literal("banlist").executes([env](const CommandContext& context) {
         std::vector<std::string> names;
         env.players->locked([&](auto&, auto& access) {
-            for (const auto& ban : access.bans(wire::storage::BanKind::Player))
+            for (const auto& ban : access.bans(wire::storage::BanKind::kPlayer))
                 names.push_back(ban.name.value_or(ban.subject));
-            for (const auto& ban : access.bans(wire::storage::BanKind::Ip))
+            for (const auto& ban : access.bans(wire::storage::BanKind::kIp))
                 names.push_back(ban.subject);
             return 0;
         });

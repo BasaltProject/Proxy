@@ -138,9 +138,9 @@ ChatVerdict SecureChatGuard::serverbound(std::int32_t id, std::span<const std::u
         if (!packet)
             return {};
         switch (chat_.updateSession(packet->session)) {
-        case wire::chat::SecureChat::SessionResult::ExpiredKey:
+        case wire::chat::SecureChat::SessionResult::kExpiredKey:
             return kick("expired-public-key");
-        case wire::chat::SecureChat::SessionResult::InvalidSignature:
+        case wire::chat::SecureChat::SessionResult::kInvalidSignature:
             return kick("invalid-public-key-signature");
         default:
             return {};
