@@ -15,6 +15,8 @@
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 
 #include <doctest.h>
+#include <cstdio>
+#include <thread>
 
 #include <array>
 
@@ -48,6 +50,9 @@ TEST_CASE("nonblocking backend dial advances from a refused endpoint to a live e
         REQUIRE(loop.watch(handle, {false, true}, 1));
         auto ready = loop.wait(1000);
         REQUIRE(ready);
+        for (const auto& e : *ready)
+            std::fprintf(stderr, "DIAG ready r=%d w=%d c=%d live=%u closed=%u\n", e.readable, e.writable, e.closed,
+                         *livePort, *closedPort);
         REQUIRE_FALSE(ready->empty());
         loop.unwatch(handle);
         state = dial.advance();
@@ -56,7 +61,11 @@ TEST_CASE("nonblocking backend dial advances from a refused endpoint to a live e
     auto connected = dial.take();
     REQUIRE(connected);
     REQUIRE(connected->setNonBlocking());
+    std::fprintf(stderr, "DIAG connected\n");
+    REQUIRE(live->setNonBlocking());
+    std::this_thread::sleep_for(500ms);
     auto accepted = live->accept();
+    std::fprintf(stderr, "DIAG accept=%d\n", accepted.has_value());
     REQUIRE(accepted);
     const std::array<std::uint8_t, 3> bytes{1, 2, 3};
     REQUIRE(accepted->write(bytes));
