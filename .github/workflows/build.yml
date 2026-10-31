@@ -52,11 +52,6 @@ jobs:
         # The run number is the build half of the version: 26.3.<build>.
         run: cmake --build build/release -- -k 0
 
-      - name: Diag
-        shell: bash
-        run: |
-          f=$(find build/release -name 'proxy-runtime-backend-selection-test*' -type f | head -1)
-          for t in "nonblocking*" "revisiting*" "backend identity*" "clearing*" "a 26.2*"; do echo "== $t"; timeout 20 $f -s -tc="$t" 2>&1 | tail -30 || true; done
       - name: Test
         shell: bash
         run: ctest --test-dir build/release --output-on-failure --timeout 300
