@@ -6,13 +6,55 @@ on:
     paths-ignore: ['**.md', 'docs/**']
   pull_request:
     paths-ignore: ['**.md', 'docs/**']
+  workflow_call:
+    inputs:
+      version:
+        description: The version to stamp; empty derives one from the event
+        type: string
+        default: ''
+      release:
+        description: Build only the release targets
+        type: boolean
+        default: false
+      ref:
+        description: The commit to build
+        type: string
+        default: ''
+
+permissions:
+  contents: read
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Plan the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WANTED: ${{ inputs.version }}
+        run: |
+          if [ -n "$WANTED" ]; then
+              echo "version=$WANTED" >>"$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+              .github/scripts/plan-version.sh nightly proxy-runtime/include/basalt/proxy/runtime/BuildInfo.hpp
+          else
+              .github/scripts/plan-version.sh ci proxy-runtime/include/basalt/proxy/runtime/BuildInfo.hpp
+          fi
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          ref: ${{ inputs.ref }}
 
       - name: Install the toolchain
         uses: lukka/get-cmake@latest
@@ -58,11 +101,10 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: eval cmake --preset release -DCMAKE_BUILD_TYPE=Release "-DBASALT_VERSION=26.3.${{ github.run_number }}" $BASALT_CMAKE_ARGS
+        run: eval cmake --preset release -DCMAKE_BUILD_TYPE=Release "-DBASALT_VERSION=${{ needs.plan.outputs.version }}" $BASALT_CMAKE_ARGS
 
       - name: Build
         shell: bash
-        # The run number is the build half of the version: 26.3.<build>.
         run: cmake --build build/release -- -k 0
 
       - name: Test
@@ -81,6 +123,7 @@ jobs:
         run: file build/release/bin/* | grep -q x86_64
 
   sanitize:
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -108,6 +151,7 @@ jobs:
         run: ctest --test-dir build/asan --output-on-failure
 
   portable-poll:
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +175,7 @@ jobs:
         run: ctest --test-dir build/poll --output-on-failure
 
   thread-sanitize:
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -154,6 +199,7 @@ jobs:
         run: ctest --test-dir build/tsan --output-on-failure
 
   format:
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -168,3 +214,25 @@ jobs:
           find proxy-runtime proxy-config proxy-plugins wire/wire-* -name '*.hpp' -o -name '*.cpp' \
             | grep -v third_party \
             | xargs clang-format-19 --dry-run --Werror
+
+  nightly:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: basalt-proxy-*
+
+      - name: Publish the nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/publish-release.sh nightly "${{ needs.plan.outputs.version }}" "$GITHUB_SHA" artifacts basalt-proxy
