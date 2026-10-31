@@ -21,8 +21,9 @@ jobs:
             target: Linux-x64
           - os: ubuntu-24.04-arm
             target: Linux-arm64
-          - os: macos-15-intel
+          - os: macos-15
             target: macOS-x64
+            arch: x86_64
           - os: macos-15
             target: macOS-arm64
           - os: windows-2025
@@ -40,10 +41,19 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1
         with:
           max-size: 1200M
-          key: ${{ matrix.target }}
+          key: ${{ matrix.arch && format('{0}-cross', matrix.target) || matrix.target }}
+
+      - name: Restore the x64 libc++
+        if: matrix.arch == 'x86_64'
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-x64
+          key: libcxx-x64-${{ hashFiles('.github/scripts/select-compiler.sh') }}
 
       - name: Select the compiler
         shell: bash
+        env:
+          BASALT_TARGET_ARCH: ${{ matrix.arch }}
         run: .github/scripts/select-compiler.sh
 
       - name: Configure
@@ -64,6 +74,11 @@ jobs:
         with:
           name: basalt-proxy-${{ matrix.target }}
           path: build/release/bin/
+
+      - name: Check the architecture
+        if: matrix.arch == 'x86_64'
+        shell: bash
+        run: file build/release/bin/* | grep -q x86_64
 
   sanitize:
     runs-on: ubuntu-24.04
