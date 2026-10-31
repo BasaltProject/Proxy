@@ -1,5 +1,6 @@
 basalt_module(proxy-runtime-core
     SOURCES
+        src/BuildInfo.cpp
         src/Cli.cpp
         src/Console.cpp
         src/Admission.cpp
@@ -46,7 +47,8 @@ basalt_module(proxy-runtime-core
             basalt::wire-multiversion basalt::wire-auth basalt::wire-bedrock
 )
 
-target_compile_definitions(proxy-runtime-core PUBLIC BASALT_VERSION="${BASALT_VERSION}")
+# Only this file sees the version, so stamping a new one does not recompile (or invalidate the cache of) the rest.
+set_source_files_properties(src/BuildInfo.cpp PROPERTIES COMPILE_DEFINITIONS BASALT_VERSION="${BASALT_VERSION}")
 
 # The binary is named the way it is downloaded, the same as the server's.
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
