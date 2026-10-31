@@ -8,12 +8,7 @@
 namespace basalt::proxy::runtime::buildInfo {
 
 /// The version comes from the build (`BASALT_VERSION`), so a release and its banner cannot drift apart.
-
-#ifndef BASALT_VERSION
-#define BASALT_VERSION "0.0.0-dev"
-#endif
-
-inline constexpr std::string_view kVersion = BASALT_VERSION;
+extern const std::string_view kVersion;
 
 inline constexpr std::string_view kMinecraftVersion = "26.3";
 
