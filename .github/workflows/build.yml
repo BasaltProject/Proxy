@@ -31,6 +31,7 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -71,6 +72,7 @@ jobs:
           - os: windows-2025
             target: Windows-x64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -135,6 +137,7 @@ jobs:
   sanitize:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,6 +166,7 @@ jobs:
   portable-poll:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -187,6 +191,7 @@ jobs:
   thread-sanitize:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,6 +216,7 @@ jobs:
   format:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,6 +235,7 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [plan, build]
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     permissions:
       contents: write
     concurrency:

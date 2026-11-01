@@ -3,9 +3,10 @@ set -euo pipefail
 
 case "$(uname -s)" in
 Linux)
-    wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-    sudo bash /tmp/llvm.sh 19
-    sudo apt-get install -y clang-format-19
+    echo 'Acquire::http::Timeout "30"; Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99basalt >/dev/null
+    wget -qO /tmp/llvm.sh --tries=3 --timeout=30 https://apt.llvm.org/llvm.sh
+    sudo timeout 900 bash /tmp/llvm.sh 19
+    sudo timeout 300 apt-get install -y clang-format-19
     echo "BASALT_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19" >>"$GITHUB_ENV"
     ;;
 Darwin)
