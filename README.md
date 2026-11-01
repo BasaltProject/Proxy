@@ -154,7 +154,7 @@ tree under the address and undefined sanitizers.
 | Player forwarding | Velocity modern tested with offline Paper and Basalt; legacy modes have fixture coverage |
 | Online profiles and graphical clients | Not validated |
 | Translation handover to a Basalt Server backend | Working for Java and Bedrock players over the session envelope (bot-verified) |
-| Older Java clients, 26.3 clients on older servers, and Bedrock clients | Older clients from 1.8 and 26.3 clients on 1.21.5 to 26.2 bot-verified; Bedrock bridge bot-verified; no graphical client yet. See `docs/compatibility-matrix.md` |
+| Older Java clients, 26.3 clients on older servers, and Bedrock clients | Older clients from 1.8 and 26.3 clients on 1.21.5 to 26.2 bot-verified; Bedrock bridge bot-verified; no graphical client yet. |
 | Plugins and the Lua runtime | Working, sandboxed, hot reload; Linux only so far |
 | Velocity and BungeeCord adapters using Shim | Deferred until Shim is complete |
 
