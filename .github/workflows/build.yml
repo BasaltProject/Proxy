@@ -86,12 +86,12 @@ jobs:
           max-size: 1200M
           key: ${{ matrix.arch && format('{0}-cross', matrix.target) || matrix.target }}
 
-      - name: Restore the x64 libc++
-        if: matrix.arch == 'x86_64'
+      - name: Restore the libc++
+        if: runner.os == 'macOS'
         uses: actions/cache@v4
         with:
-          path: ~/llvm-x64
-          key: libcxx-x64-${{ hashFiles('.github/scripts/select-compiler.sh') }}
+          path: ~/libcxx-*
+          key: libcxx-${{ matrix.target }}-${{ hashFiles('.github/scripts/select-compiler.sh') }}
 
       - name: Select the compiler
         shell: bash
@@ -110,6 +110,16 @@ jobs:
       - name: Test
         shell: bash
         run: ctest --test-dir build/release --output-on-failure --timeout 300
+
+      - name: Check the macOS binary
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for binary in build/release/bin/*; do
+              otool -L "$binary"
+              if otool -L "$binary" | grep -q /opt/homebrew; then echo "$binary links Homebrew"; exit 1; fi
+              otool -l "$binary" | grep -A4 LC_BUILD_VERSION | grep -q 'minos 13.0'
+          done
 
       - name: Upload the binary
         uses: actions/upload-artifact@v4
