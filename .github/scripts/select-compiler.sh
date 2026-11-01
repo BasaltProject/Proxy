@@ -5,7 +5,15 @@ case "$(uname -s)" in
 Linux)
     echo 'Acquire::http::Timeout "30"; Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99basalt >/dev/null
     wget -qO /tmp/llvm.sh --tries=3 --timeout=30 https://apt.llvm.org/llvm.sh
-    sudo timeout 900 bash /tmp/llvm.sh 19
+    installed=0
+    for attempt in 1 2 3; do
+        if sudo timeout 300 bash /tmp/llvm.sh 19; then
+            installed=1
+            break
+        fi
+        sudo apt-get clean
+    done
+    [ "$installed" = 1 ]
     sudo timeout 300 apt-get install -y clang-format-19
     echo "BASALT_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19" >>"$GITHUB_ENV"
     ;;
