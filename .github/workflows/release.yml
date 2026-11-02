@@ -2,9 +2,13 @@ name: Release
 
 on:
   schedule:
-    # 09:00 in Madrid, whichever of the two UTC hours that is today; the plan job picks the right one.
+    # 09:00 in Madrid is 07:00 or 08:00 UTC depending on DST. GitHub sometimes drops or badly delays
+    # scheduled runs, so the later hours are retries; the plan job skips them once a release exists today.
     - cron: '0 7 * * 1'
     - cron: '0 8 * * 1'
+    - cron: '30 8 * * 1'
+    - cron: '0 9 * * 1'
+    - cron: '0 10 * * 1'
   workflow_dispatch:
     inputs:
       force:
@@ -45,6 +49,11 @@ jobs:
           echo "go=false" >>"$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(TZ=Europe/Madrid date +%H)" != 09 ]; then
               echo "not 09:00 in Madrid yet"; exit 0
+          fi
+          today="$(TZ=Europe/Madrid date +%F)"
+          done="$(gh release list --exclude-pre-releases --limit 1 --json publishedAt --jq '.[0].publishedAt // empty')"
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ -n "$done" ] && [ "$(TZ=Europe/Madrid date -d "$done" +%F)" = "$today" ]; then
+              echo "already released today"; exit 0
           fi
           last="$(gh release list --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')"
           if [ -n "$last" ] && [ "$FORCE" != true ] && [ "$(git rev-list --count "$last"..HEAD)" = 0 ]; then
