@@ -44,6 +44,7 @@ jobs:
       - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
+          job-summary: ''
           max-size: 1200M
           key: ${{ inputs.arch && format('{0}-cross', inputs.target) || inputs.target }}
 
@@ -93,3 +94,8 @@ jobs:
         if: inputs.arch == 'x86_64'
         shell: bash
         run: file build/release/bin/* | grep -q x86_64
+
+      - name: Report ccache statistics
+        if: always()
+        shell: bash
+        run: .github/scripts/report-ccache.sh
