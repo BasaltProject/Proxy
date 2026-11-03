@@ -1,0 +1,95 @@
+name: Build native proxy
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: The native GitHub-hosted runner
+        type: string
+        required: true
+      target:
+        description: The release artifact target
+        type: string
+        required: true
+      arch:
+        description: Optional cross-architecture selection for macOS
+        type: string
+        default: ''
+      version:
+        description: The planned version to stamp
+        type: string
+        required: true
+      ref:
+        description: The source commit to build
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ inputs.ref }}
+
+      - name: Install the toolchain
+        uses: lukka/get-cmake@latest
+
+      - name: Install ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          max-size: 1200M
+          key: ${{ inputs.arch && format('{0}-cross', inputs.target) || inputs.target }}
+
+      - name: Restore the libc++
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/libcxx-*
+          key: libcxx-${{ inputs.target }}-${{ hashFiles('.github/scripts/select-compiler.sh') }}
+
+      - name: Select the compiler
+        shell: bash
+        env:
+          BASALT_TARGET_ARCH: ${{ inputs.arch }}
+        run: .github/scripts/select-compiler.sh
+
+      - name: Configure
+        shell: bash
+        run: eval cmake --preset release -DCMAKE_BUILD_TYPE=Release "-DBASALT_VERSION=${{ inputs.version }}" $BASALT_CMAKE_ARGS
+
+      - name: Build
+        shell: bash
+        run: cmake --build build/release -- -k 0
+
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build/release --output-on-failure --timeout 300
+
+      - name: Check the macOS binary
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for binary in build/release/bin/*; do
+              otool -L "$binary"
+              if otool -L "$binary" | grep -q /opt/homebrew; then echo "$binary links Homebrew"; exit 1; fi
+              otool -l "$binary" | grep -A4 LC_BUILD_VERSION | grep -q 'minos 13.0'
+          done
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: basalt-proxy-${{ inputs.target }}
+          path: build/release/bin/
+          if-no-files-found: error
+
+      - name: Check the architecture
+        if: inputs.arch == 'x86_64'
+        shell: bash
+        run: file build/release/bin/* | grep -q x86_64

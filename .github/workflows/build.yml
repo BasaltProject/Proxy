@@ -54,7 +54,8 @@ jobs:
               .github/scripts/plan-version.sh ci proxy-runtime/include/basalt/proxy/runtime/BuildInfo.hpp
           fi
 
-  build:
+  linux:
+    name: ${{ matrix.target }}
     needs: plan
     strategy:
       fail-fast: false
@@ -64,13 +65,24 @@ jobs:
             target: Linux-x64
           - os: ubuntu-24.04-arm
             target: Linux-arm64
-          - os: macos-15
-            target: macOS-x64
-            arch: x86_64
-          - os: macos-15
-            target: macOS-arm64
-          - os: windows-2025
-            target: Windows-x64
+    uses: ./.github/workflows/build-native.yml
+    with:
+      runner: ${{ matrix.os }}
+      target: ${{ matrix.target }}
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ inputs.ref }}
+
+  musl:
+    name: ${{ matrix.target }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: Linux-musl-x64
+          - os: ubuntu-24.04-arm
+            target: Linux-musl-arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
@@ -78,61 +90,250 @@ jobs:
         with:
           submodules: true
           ref: ${{ inputs.ref }}
-
-      - name: Install the toolchain
-        uses: lukka/get-cmake@latest
-
-      - name: Install ccache
-        uses: hendrikmuhs/ccache-action@v1
+      - uses: actions/cache@v4
         with:
-          max-size: 1200M
-          key: ${{ matrix.arch && format('{0}-cross', matrix.target) || matrix.target }}
-
-      - name: Restore the libc++
-        if: runner.os == 'macOS'
-        uses: actions/cache@v4
-        with:
-          path: ~/libcxx-*
-          key: libcxx-${{ matrix.target }}-${{ hashFiles('.github/scripts/select-compiler.sh') }}
-
-      - name: Select the compiler
-        shell: bash
+          path: build/musl-ccache
+          key: ccache-${{ matrix.target }}-clang20-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.target }}-clang20-
+      - name: Build and test on Alpine
         env:
-          BASALT_TARGET_ARCH: ${{ matrix.arch }}
-        run: .github/scripts/select-compiler.sh
-
-      - name: Configure
-        shell: bash
-        run: eval cmake --preset release -DCMAKE_BUILD_TYPE=Release "-DBASALT_VERSION=${{ needs.plan.outputs.version }}" $BASALT_CMAKE_ARGS
-
-      - name: Build
-        shell: bash
-        run: cmake --build build/release -- -k 0
-
-      - name: Test
-        shell: bash
-        run: ctest --test-dir build/release --output-on-failure --timeout 300
-
-      - name: Check the macOS binary
-        if: runner.os == 'macOS'
-        shell: bash
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          for binary in build/release/bin/*; do
-              otool -L "$binary"
-              if otool -L "$binary" | grep -q /opt/homebrew; then echo "$binary links Homebrew"; exit 1; fi
-              otool -l "$binary" | grep -A4 LC_BUILD_VERSION | grep -q 'minos 13.0'
-          done
-
-      - name: Upload the binary
-        uses: actions/upload-artifact@v4
+          docker run --rm -e VERSION -e CCACHE_DIR=/src/build/musl-ccache -e CCACHE_MAXSIZE=1200M -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
+            apk add --no-cache ccache cmake ninja clang20 lld20 libc++-dev libc++-static llvm-libunwind-dev llvm-libunwind-static gcc g++ musl-dev linux-headers file binutils
+            cmake --preset linux-musl -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
+              -DCMAKE_CXX_FLAGS=-stdlib=libc++ "-DCMAKE_EXE_LINKER_FLAGS=-nostdlib++ -fuse-ld=lld" \
+              "-DCMAKE_CXX_STANDARD_LIBRARIES=-lc++ -lc++abi -lunwind" \
+              -DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_CXX_STANDARD_LIBRARIES \
+              "-DBASALT_VERSION=$VERSION"
+            cmake --build --preset linux-musl --target wire-common-test wire-io-test --parallel 4
+            ctest --preset linux-musl -R "^(wire-common-test|wire-io-test)$" --timeout 120
+            cmake --build --preset linux-musl --parallel 4
+            ctest --preset linux-musl --timeout 300
+            for binary in build/linux-musl/bin/*; do
+              file "$binary"
+              if readelf -l "$binary" | grep -q INTERP; then exit 1; fi
+              if readelf -d "$binary" | grep -q NEEDED; then exit 1; fi
+              .github/scripts/smoke-binary.sh "$binary"
+            done
+          '
+      - uses: actions/upload-artifact@v4
         with:
           name: basalt-proxy-${{ matrix.target }}
-          path: build/release/bin/
+          path: build/linux-musl/bin/
+          if-no-files-found: error
 
-      - name: Check the architecture
-        if: matrix.arch == 'x86_64'
-        shell: bash
-        run: file build/release/bin/* | grep -q x86_64
+  windows:
+    name: ${{ matrix.target }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: Windows-x64
+          - os: windows-11-arm
+            target: Windows-arm64
+    uses: ./.github/workflows/build-native.yml
+    with:
+      runner: ${{ matrix.os }}
+      target: ${{ matrix.target }}
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ inputs.ref }}
+
+  macos:
+    name: ${{ matrix.target }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macOS-x64
+            arch: x86_64
+          - os: macos-15
+            target: macOS-arm64
+    uses: ./.github/workflows/build-native.yml
+    with:
+      runner: ${{ matrix.os }}
+      target: ${{ matrix.target }}
+      arch: ${{ matrix.arch }}
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ inputs.ref }}
+
+  android:
+    name: ${{ matrix.target }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: Android-arm64
+            preset: android-arm64
+            machine: AArch64
+          - target: Android-x64
+            preset: android-x64
+            machine: Advanced Micro Devices X86-64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ inputs.ref }}
+      - uses: lukka/get-cmake@latest
+      - uses: hendrikmuhs/ccache-action@v1
+        with:
+          max-size: 800M
+          key: ${{ matrix.target }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install the Android NDK
+        run: |
+          sdkmanager 'ndk;29.0.14206865'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >>"$GITHUB_ENV"
+      - name: Configure
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: cmake --preset "${{ matrix.preset }}" "-DBASALT_VERSION=$VERSION"
+      - name: Build the executable and platform tests
+        run: cmake --build "build/${{ matrix.preset }}" --target basalt-proxy wire-common-test wire-io-test wire-auth-test proxy-config-test proxy-plugins-test proxy-runtime-cli-test proxy-runtime-network-test proxy-runtime-admission-test proxy-runtime-session-test proxy-runtime-backend-selection-test proxy-runtime-backend-login-test --parallel 4
+      - name: Check the Android executable
+        env:
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          binary=(build/${{ matrix.preset }}/bin/*)
+          readelf -h "${binary[0]}" | grep -F "$MACHINE"
+          readelf -l "${binary[0]}" | grep -F '/system/bin/linker64'
+          if readelf -d "${binary[0]}" | grep NEEDED | grep -E 'libc\+\+_shared|libstdc\+\+|libgcc_s'; then
+              echo 'The Android executable requires a non-system runtime'; exit 1
+          fi
+      - name: Enable KVM
+        if: matrix.preset == 'android-x64'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test on Android 10
+        if: matrix.preset == 'android-x64'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          script: .github/scripts/test-android.sh build/android-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: basalt-proxy-${{ matrix.target }}
+          path: build/${{ matrix.preset }}/bin/
+          if-no-files-found: error
+
+  freebsd:
+    name: ${{ matrix.target }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: FreeBSD-x64
+            cross: false
+            timeout: 180
+          - arch: aarch64
+            target: FreeBSD-arm64
+            cross: true
+            timeout: 120
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ inputs.ref }}
+      - uses: lukka/get-cmake@latest
+        if: matrix.cross
+      - uses: hendrikmuhs/ccache-action@v1
+        if: matrix.cross
+        with:
+          max-size: 1200M
+          key: FreeBSD-arm64-cross-clang19
+      - name: Select the cross-compiler
+        if: matrix.cross
+        run: .github/scripts/select-compiler.sh
+      - name: Extract the FreeBSD arm64 sysroot
+        if: matrix.cross
+        run: .github/scripts/setup-freebsd-sysroot.sh
+      - name: Configure for FreeBSD arm64
+        if: matrix.cross
+        run: |
+          root="$PWD/build/freebsd-sysroot"
+          cmake --preset freebsd -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
+            -DCMAKE_SYSTEM_NAME=FreeBSD -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER_TARGET=aarch64-unknown-freebsd14.5 \
+            -DCMAKE_CXX_COMPILER_TARGET=aarch64-unknown-freebsd14.5 \
+            "-DCMAKE_SYSROOT=$root" \
+            "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem $root/usr/include/c++/v1" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-nostdlib++ -fuse-ld=lld" \
+            "-DCMAKE_CXX_STANDARD_LIBRARIES=$root/usr/lib/libc++.a $root/usr/lib/libcxxrt.a -lpthread" \
+            -DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_CXX_STANDARD_LIBRARIES \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY "-DBASALT_VERSION=$VERSION"
+      - name: Cross-build the executable and all tests
+        if: matrix.cross
+        run: |
+          cmake --build --preset freebsd --target wire-common-test wire-io-test --parallel 4
+          cmake --build --preset freebsd --parallel 4
+          for binary in build/freebsd/bin/*; do
+              readelf -h "$binary" | grep -F AArch64
+              readelf -l "$binary" | grep -F /libexec/ld-elf.so.1
+              if readelf -d "$binary" | grep NEEDED | grep -E 'libc\+\+|libcxxrt'; then exit 1; fi
+          done
+      - uses: actions/cache@v4
+        if: ${{ !matrix.cross }}
+        with:
+          path: build/freebsd-ccache
+          key: ccache-${{ matrix.target }}-clang21-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.target }}-clang21-
+      - name: Verify on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/build/freebsd-ccache
+          CCACHE_MAXSIZE: 1200M
+        with:
+          release: '14.5'
+          arch: ${{ matrix.arch }}
+          envs: VERSION CCACHE_DIR CCACHE_MAXSIZE
+          cpu: 4
+          mem: 8192
+          prepare: ${{ matrix.cross && 'pkg install -y cmake' || 'pkg install -y ccache cmake ninja' }}
+          run: |
+            set -eu
+            if [ "${{ matrix.cross }}" = false ]; then
+                cmake --preset freebsd \
+                  -DCMAKE_EXE_LINKER_FLAGS=-nostdlib++ \
+                  -DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_CXX_STANDARD_LIBRARIES \
+                  "-DCMAKE_CXX_STANDARD_LIBRARIES=/usr/lib/libc++.a /usr/lib/libcxxrt.a -lpthread" \
+                  "-DBASALT_VERSION=$VERSION"
+                cmake --build --preset freebsd --target wire-common-test wire-io-test --parallel 4
+                ctest --preset freebsd -R '^(wire-common-test|wire-io-test)$' --timeout 120
+                cmake --build --preset freebsd --parallel 4
+            fi
+            BASALT_TEST_SYSTEM_HTTPS_URL=https://piston-meta.mojang.com/mc/game/version_manifest_v2.json ctest --preset freebsd --timeout 300
+            for binary in build/freebsd/bin/*; do
+                file "$binary"
+                ldd "$binary"
+                .github/scripts/smoke-binary.sh "$binary"
+            done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: basalt-proxy-${{ matrix.target }}
+          path: build/freebsd/bin/
+          if-no-files-found: error
 
   sanitize:
     if: ${{ !inputs.release }}
@@ -222,18 +423,15 @@ jobs:
         with:
           submodules: true
 
-      - name: Select the compiler
-        run: .github/scripts/select-compiler.sh
-
       - name: Check formatting
         run: |
-          find proxy-runtime proxy-config proxy-plugins wire/wire-* -name '*.hpp' -o -name '*.cpp' \
+          find proxy-* wire/wire-* -name '*.hpp' -o -name '*.cpp' \
             | grep -v third_party \
-            | xargs clang-format-19 --dry-run --Werror
+            | xargs pipx run --spec clang-format==19.1.7 clang-format --dry-run --Werror
 
   nightly:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [plan, build]
+    needs: [plan, linux, musl, windows, macos, android, freebsd]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
