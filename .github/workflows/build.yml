@@ -101,6 +101,8 @@ jobs:
         run: |
           docker run --rm -e VERSION -e CCACHE_DIR=/src/build/musl-ccache -e CCACHE_MAXSIZE=1200M -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
             apk add --no-cache ccache cmake ninja clang20 lld20 libc++-dev libc++-static llvm-libunwind-dev llvm-libunwind-static gcc g++ musl-dev linux-headers file binutils
+            ccache --zero-stats
+            trap ".github/scripts/report-ccache.sh build/musl-ccache-summary.md" EXIT
             cmake --preset linux-musl -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
               -DCMAKE_CXX_FLAGS=-stdlib=libc++ "-DCMAKE_EXE_LINKER_FLAGS=-nostdlib++ -fuse-ld=lld" \
               "-DCMAKE_CXX_STANDARD_LIBRARIES=-lc++ -lc++abi -lunwind" \
@@ -122,6 +124,13 @@ jobs:
           name: basalt-proxy-${{ matrix.target }}
           path: build/linux-musl/bin/
           if-no-files-found: error
+
+      - name: Report ccache statistics
+        if: always()
+        run: |
+          if [ -f build/musl-ccache-summary.md ]; then
+              cat build/musl-ccache-summary.md >>"$GITHUB_STEP_SUMMARY"
+          fi
 
   windows:
     name: ${{ matrix.target }}
@@ -184,6 +193,7 @@ jobs:
       - uses: lukka/get-cmake@latest
       - uses: hendrikmuhs/ccache-action@v1
         with:
+          job-summary: ''
           max-size: 800M
           key: ${{ matrix.target }}
       - uses: actions/setup-java@v4
@@ -230,6 +240,11 @@ jobs:
           path: build/${{ matrix.preset }}/bin/
           if-no-files-found: error
 
+      - name: Report ccache statistics
+        if: always()
+        shell: bash
+        run: .github/scripts/report-ccache.sh
+
   freebsd:
     name: ${{ matrix.target }}
     needs: plan
@@ -259,6 +274,7 @@ jobs:
       - uses: hendrikmuhs/ccache-action@v1
         if: matrix.cross
         with:
+          job-summary: ''
           max-size: 1200M
           key: FreeBSD-arm64-cross-clang19
       - name: Select the cross-compiler
@@ -314,6 +330,8 @@ jobs:
           run: |
             set -eu
             if [ "${{ matrix.cross }}" = false ]; then
+                ccache --zero-stats
+                trap ".github/scripts/report-ccache.sh build/freebsd-ccache-summary.md" EXIT
                 cmake --preset freebsd \
                   -DCMAKE_EXE_LINKER_FLAGS=-nostdlib++ \
                   -DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_CXX_STANDARD_LIBRARIES \
@@ -335,6 +353,15 @@ jobs:
           path: build/freebsd/bin/
           if-no-files-found: error
 
+      - name: Report ccache statistics
+        if: always()
+        run: |
+          if [ "${{ matrix.cross }}" = true ]; then
+              .github/scripts/report-ccache.sh
+          elif [ -f build/freebsd-ccache-summary.md ]; then
+              cat build/freebsd-ccache-summary.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+
   sanitize:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
@@ -349,6 +376,7 @@ jobs:
       - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
+          job-summary: ''
           max-size: 800M
           key: sanitize
 
@@ -364,6 +392,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build/asan --output-on-failure
 
+      - name: Report ccache statistics
+        if: always()
+        shell: bash
+        run: .github/scripts/report-ccache.sh
+
   portable-poll:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
@@ -376,6 +409,7 @@ jobs:
       - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
+          job-summary: ''
           max-size: 800M
           key: portable-poll
 
@@ -389,6 +423,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build/poll --output-on-failure
 
+      - name: Report ccache statistics
+        if: always()
+        shell: bash
+        run: .github/scripts/report-ccache.sh
+
   thread-sanitize:
     if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04
@@ -401,6 +440,7 @@ jobs:
       - name: Install ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
+          job-summary: ''
           max-size: 800M
           key: thread-sanitize
 
@@ -413,6 +453,11 @@ jobs:
         run: cmake --build build/tsan
       - name: Test
         run: ctest --test-dir build/tsan --output-on-failure
+
+      - name: Report ccache statistics
+        if: always()
+        shell: bash
+        run: .github/scripts/report-ccache.sh
 
   format:
     if: ${{ !inputs.release }}
