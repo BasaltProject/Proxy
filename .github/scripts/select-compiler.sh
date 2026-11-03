@@ -4,17 +4,16 @@ set -euo pipefail
 case "$(uname -s)" in
 Linux)
     echo 'Acquire::http::Timeout "30"; Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99basalt >/dev/null
-    wget -qO /tmp/llvm.sh --tries=3 --timeout=30 https://apt.llvm.org/llvm.sh
     installed=0
     for attempt in 1 2 3; do
-        if sudo timeout 300 bash /tmp/llvm.sh 19; then
+        if sudo timeout 300 apt-get update &&
+            sudo timeout 300 apt-get install -y clang-19 clang-tools-19 lld-19 libclang-rt-19-dev; then
             installed=1
             break
         fi
         sudo apt-get clean
     done
     [ "$installed" = 1 ]
-    sudo timeout 300 apt-get install -y clang-format-19
     echo "BASALT_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19" >>"$GITHUB_ENV"
     ;;
 Darwin)
@@ -47,6 +46,22 @@ Darwin)
     cxx="$(find "$prefix" -name libc++.a | head -1)"
     lipo -archs "$cxx" | grep -q "$arch"
     echo "BASALT_CMAKE_ARGS=-DCMAKE_C_COMPILER=$llvm/bin/clang -DCMAKE_CXX_COMPILER=$llvm/bin/clang++ -DCMAKE_OSX_DEPLOYMENT_TARGET=$target \"-DCMAKE_CXX_STANDARD_LIBRARIES=-lc++ $cxx\" -DCMAKE_CXX_FLAGS=-D_LIBCPP_DISABLE_AVAILABILITY $cross" >>"$GITHUB_ENV"
+    ;;
+MINGW* | MSYS* | CYGWIN*)
+    args=""
+    if [ "${PROCESSOR_ARCHITECTURE:-}" = ARM64 ] || [ "${PROCESSOR_ARCHITEW6432:-}" = ARM64 ]; then
+        # An emulated x64 Clang targets x64 unless told otherwise.
+        if ! command -v clang >/dev/null; then
+            choco install llvm --no-progress -y
+            echo "C:\\Program Files\\LLVM\\bin" >>"$GITHUB_PATH"
+            export PATH="/c/Program Files/LLVM/bin:$PATH"
+        fi
+        if ! command -v ninja >/dev/null; then
+            choco install ninja --no-progress -y
+        fi
+        args="-DCMAKE_C_COMPILER_TARGET=aarch64-pc-windows-msvc -DCMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc"
+    fi
+    echo "BASALT_CMAKE_ARGS=$args" >>"$GITHUB_ENV"
     ;;
 *)
     echo "BASALT_CMAKE_ARGS=" >>"$GITHUB_ENV"

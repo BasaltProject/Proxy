@@ -10,6 +10,16 @@ set(BASALT_VERSION "26.3.0-dev" CACHE STRING "Version stamped into the binary an
 
 option(BASALT_BUILD_TESTS "Build the test executables" ON)
 option(BASALT_WERROR "Treat warnings as errors" OFF)
+option(BASALT_LINUX_MUSL "Build a fully static Linux musl executable (requires a musl toolchain)" OFF)
+if(ANDROID AND ANDROID_NATIVE_API_LEVEL LESS 29)
+    message(FATAL_ERROR "Android requires API 29 or newer for the native asynchronous DNS resolver")
+endif()
+if(BASALT_LINUX_MUSL)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "BASALT_LINUX_MUSL requires a Linux musl toolchain")
+    endif()
+    add_link_options(-static)
+endif()
 set(BASALT_SANITIZE "" CACHE STRING "Comma-separated sanitizers: address, undefined, thread")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
