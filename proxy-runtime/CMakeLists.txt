@@ -44,6 +44,9 @@ basalt_module(proxy-runtime-core
         src/antibot/NbtShape.cpp
         src/antibot/TextScan.cpp
         src/antibot/Antibot.cpp
+        src/antibot/AntibotLogin.cpp
+        src/antibot/AntibotLimbo.cpp
+        src/antibot/AntibotLists.cpp
         src/antibot/Captcha.cpp
         src/antibot/LimboAssets.cpp
         src/antibot/LimboRegistries.cpp
