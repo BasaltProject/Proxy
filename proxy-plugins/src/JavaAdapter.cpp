@@ -1,74 +1,6 @@
-#include <basalt/proxy/plugins/JarDetector.hpp>
-#include <basalt/proxy/plugins/JavaAdapter.hpp>
-#include <basalt/wire/common/json/Json.hpp>
-#include <basalt/wire/shim/ShimHost.hpp>
-#include <basalt/wire/text/ComponentJson.hpp>
-
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <filesystem>
-#include <map>
-#include <mutex>
-#include <set>
+#include "JavaMarshalling.hpp"
 
 namespace basalt::proxy::plugins {
-namespace {
-
-using runtime::DecisionKind;
-using wire::shim::ShimHost;
-
-struct PlayerRow {
-    std::string name;
-    std::string uuid;
-    std::string server;
-    std::string address;
-    std::uint16_t port = 0;
-    std::int64_t ping = -1;
-};
-
-std::string text(JNIEnv* env, jstring value) {
-    if (value == nullptr)
-        return {};
-    const char* chars = env->GetStringUTFChars(value, nullptr);
-    std::string result{chars};
-    env->ReleaseStringUTFChars(value, chars);
-    return result;
-}
-
-jobjectArray stringArray(JNIEnv* env, const std::vector<std::string>& values) {
-    jclass string = env->FindClass("java/lang/String");
-    jobjectArray array = env->NewObjectArray(static_cast<jsize>(values.size()), string, nullptr);
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        jstring item = env->NewStringUTF(values[i].c_str());
-        env->SetObjectArrayElement(array, static_cast<jsize>(i), item);
-        env->DeleteLocalRef(item);
-    }
-    env->DeleteLocalRef(string);
-    return array;
-}
-
-std::vector<std::string> strings(JNIEnv* env, jobjectArray array) {
-    std::vector<std::string> values;
-    if (array == nullptr)
-        return values;
-    const jsize size = env->GetArrayLength(array);
-    for (jsize i = 0; i < size; ++i) {
-        auto* item = static_cast<jstring>(env->GetObjectArrayElement(array, i));
-        values.push_back(text(env, item));
-        env->DeleteLocalRef(item);
-    }
-    return values;
-}
-
-std::optional<wire::text::Component> componentOf(std::string_view json) {
-    const auto parsed = wire::common::parseJson(json);
-    if (!parsed)
-        return std::nullopt;
-    return wire::text::componentJson::deserialize(*parsed);
-}
-
-} // namespace
 
 class JavaAdapter;
 static JavaAdapter* gAdapters[2] = {nullptr, nullptr};
@@ -292,46 +224,46 @@ public:
     static std::array<JNINativeMethod, 20> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
-             reinterpret_cast<void*>(nativeLog<Slot>)},
+             std::bit_cast<void*>(&nativeLog<Slot>)},
             {const_cast<char*>("connect"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             reinterpret_cast<void*>(nativeConnect<Slot>)},
+             std::bit_cast<void*>(&nativeConnect<Slot>)},
             {const_cast<char*>("kick"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)V"),
-             reinterpret_cast<void*>(nativeKick<Slot>)},
+             std::bit_cast<void*>(&nativeKick<Slot>)},
             {const_cast<char*>("tell"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)V"),
-             reinterpret_cast<void*>(nativeTell<Slot>)},
+             std::bit_cast<void*>(&nativeTell<Slot>)},
             {const_cast<char*>("send"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;[BZ)Z"),
-             reinterpret_cast<void*>(nativeSend<Slot>)},
+             std::bit_cast<void*>(&nativeSend<Slot>)},
             {const_cast<char*>("servers"), const_cast<char*>("()[Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativeServers<Slot>)},
+             std::bit_cast<void*>(&nativeServers<Slot>)},
             {const_cast<char*>("serverAddress"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativeServerAddress<Slot>)},
+             std::bit_cast<void*>(&nativeServerAddress<Slot>)},
             {const_cast<char*>("players"), const_cast<char*>("()[[Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativePlayers<Slot>)},
+             std::bit_cast<void*>(&nativePlayers<Slot>)},
             {const_cast<char*>("config"), const_cast<char*>("()[Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativeConfig<Slot>)},
+             std::bit_cast<void*>(&nativeConfig<Slot>)},
             {const_cast<char*>("channel"), const_cast<char*>("(Ljava/lang/String;Z)V"),
-             reinterpret_cast<void*>(nativeChannel<Slot>)},
+             std::bit_cast<void*>(&nativeChannel<Slot>)},
             {const_cast<char*>("hud"),
              const_cast<char*>("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;IIIF[B)Z"),
-             reinterpret_cast<void*>(nativeHud<Slot>)},
+             std::bit_cast<void*>(&nativeHud<Slot>)},
             {const_cast<char*>("permission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             reinterpret_cast<void*>(nativePermission<Slot>)},
+             std::bit_cast<void*>(&nativePermission<Slot>)},
             {const_cast<char*>("spoofChat"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             reinterpret_cast<void*>(nativeSpoofChat<Slot>)},
+             std::bit_cast<void*>(&nativeSpoofChat<Slot>)},
             {const_cast<char*>("permissionOverride"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)I"),
-             reinterpret_cast<void*>(nativePermissionOverride<Slot>)},
+             std::bit_cast<void*>(&nativePermissionOverride<Slot>)},
             {const_cast<char*>("permissionList"), const_cast<char*>("(Ljava/lang/String;)[Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativePermissionList<Slot>)},
+             std::bit_cast<void*>(&nativePermissionList<Slot>)},
             {const_cast<char*>("group"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
-             reinterpret_cast<void*>(nativeGroup<Slot>)},
+             std::bit_cast<void*>(&nativeGroup<Slot>)},
             {const_cast<char*>("setGroup"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             reinterpret_cast<void*>(nativeSetGroup<Slot>)},
+             std::bit_cast<void*>(&nativeSetGroup<Slot>)},
             {const_cast<char*>("setPermission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;I)V"),
-             reinterpret_cast<void*>(nativeSetPermission<Slot>)},
+             std::bit_cast<void*>(&nativeSetPermission<Slot>)},
             {const_cast<char*>("cookieRequest"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)J"),
-             reinterpret_cast<void*>(nativeCookieRequest<Slot>)},
+             std::bit_cast<void*>(&nativeCookieRequest<Slot>)},
             {const_cast<char*>("cookiePoll"), const_cast<char*>("(J)[[B"),
-             reinterpret_cast<void*>(nativeCookiePoll<Slot>)},
+             std::bit_cast<void*>(&nativeCookiePoll<Slot>)},
         }};
     }
 
