@@ -10,6 +10,7 @@
 #include <basalt/proxy/runtime/BuildInfo.hpp>
 #include <basalt/proxy/runtime/Cli.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
+#include <basalt/proxy/runtime/UpdateChecker.hpp>
 #include <basalt/wire/common/logging/LogOutput.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/common/logging/Panic.hpp>
@@ -314,6 +315,11 @@ int run(const cliCommand::Run& command) {
         bedrockPlayers.store(bedrock.get(), std::memory_order_release);
         logger.info([&bedrock] { return "Bedrock status on UDP port " + std::to_string(bedrock->port()) + "."; });
     }
+    std::jthread updateChecker;
+    if (configuration->runtime.updateChecker && updateChecker::parseVersion(buildInfo::kVersion).has_value()) {
+        updateChecker = std::jthread{
+            [&logger](std::stop_token stop) { updateChecker::checkAndAnnounce(buildInfo::kVersion, logger, stop); }};
+    }
     std::jthread console{[&](std::stop_token stop) {
         detail::runConsole(
             *runtime, configuration->backends, stopping, stop, reloadConfiguration,
@@ -331,6 +337,10 @@ int run(const cliCommand::Run& command) {
                                    }});
     }};
     const auto result = runtime->run(stopping.get_token());
+    if (updateChecker.joinable()) {
+        updateChecker.request_stop();
+        updateChecker.join();
+    }
     console.request_stop();
     console.join();
     bedrockPlayers.store(nullptr, std::memory_order_release);

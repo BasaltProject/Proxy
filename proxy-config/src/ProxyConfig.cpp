@@ -36,7 +36,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     reader.keys(runtime,
                 {"io-loops", "workers", "max-sessions", "max-pending-work", "max-buffered-bytes",
                  "session-buffer-bytes", "high-water-bytes", "low-water-bytes", "handshake-timeout-ms",
-                 "login-timeout-ms", "connect-timeout-ms", "read-timeout-ms", "write-timeout-ms"},
+                 "login-timeout-ms", "connect-timeout-ms", "read-timeout-ms", "write-timeout-ms", "update-checker"},
                 "runtime.");
     reader.integer(runtime, "io-loops", result.runtime.ioLoops, 1, 64, "runtime.");
     reader.integer(runtime, "workers", result.runtime.workers, 1, 64, "runtime.");
@@ -52,6 +52,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     reader.integer(runtime, "connect-timeout-ms", result.runtime.connectTimeoutMs, 1, 300000, "runtime.");
     reader.integer(runtime, "read-timeout-ms", result.runtime.readTimeoutMs, 1, 300000, "runtime.");
     reader.integer(runtime, "write-timeout-ms", result.runtime.writeTimeoutMs, 1, 300000, "runtime.");
+    reader.scalar(runtime, "update-checker", result.runtime.updateChecker, "runtime.");
     if (result.runtime.lowWaterBytes >= result.runtime.highWaterBytes ||
         result.runtime.highWaterBytes >= result.runtime.sessionBufferBytes)
         reader.fail("runtime", "requires low-water-bytes < high-water-bytes < session-buffer-bytes");

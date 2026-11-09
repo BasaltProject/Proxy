@@ -46,6 +46,7 @@ struct RuntimeConfig {
     std::uint32_t connectTimeoutMs = 10000;
     std::uint32_t readTimeoutMs = 30000;
     std::uint32_t writeTimeoutMs = 10000;
+    bool updateChecker = true;
 
     friend bool operator==(const RuntimeConfig&, const RuntimeConfig&) = default;
 };

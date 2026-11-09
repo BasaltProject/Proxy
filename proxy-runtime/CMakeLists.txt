@@ -43,6 +43,7 @@ basalt_module(proxy-runtime-core
         src/CookieCache.cpp
         src/IdentityRegistry.cpp
         src/ProxyRuntime.cpp
+        src/UpdateChecker.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
             basalt::wire-multiversion basalt::wire-auth basalt::wire-bedrock
 )

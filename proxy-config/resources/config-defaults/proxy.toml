@@ -31,6 +31,8 @@ login-timeout-ms = 30000
 connect-timeout-ms = 10000
 read-timeout-ms = 30000
 write-timeout-ms = 10000
+# Check GitHub at startup and warn when a newer release or nightly build is available.
+update-checker = true
 
 [admission]
 # Token buckets: sustained attempts per second and burst capacity, globally and per origin IP.

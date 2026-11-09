@@ -29,20 +29,26 @@ TEST_CASE("commented defaults produce online authentication, bounded owners "
     CHECK_FALSE(defaults->network.acceptTransfers);
     CHECK(defaults->runtime.ioLoops > 1);
     CHECK(defaults->runtime.maxBufferedBytes >= defaults->runtime.sessionBufferBytes);
+    CHECK(defaults->runtime.updateChecker);
     CHECK(defaults->translation == TranslationMode::Auto);
     REQUIRE(defaults->backends.size() == 1);
     CHECK(defaults->backends.front().forwarding == basalt::wire::auth::forwarding::ForwardingMode::None);
     CHECK_FALSE(defaults->backends.front().bungeeMessages);
     CHECK(defaults->defaultRoute == std::vector<std::string>{"lobby"});
+
+    const auto disabledUpdateCheck = decode("[runtime]\nupdate-checker = false");
+    REQUIRE(disabledUpdateCheck);
+    CHECK_FALSE(disabledUpdateCheck->runtime.updateChecker);
 }
 
 TEST_CASE("invalid network and resource policy fails before opening sockets") {
-    for (auto document : {"[network]\nport = -1", "[network]\nport = 65536", "[network]\nport = true",
-                          "[network]\nonline-mode = 'false'", "[network]\nbind = 'hostname.test'",
-                          "[network]\ndual-stack = true", "[network]\nonline_mod = false", "[runtime]\nio-loops = 0",
-                          "[runtime]\nworkers = 65", "[runtime]\nmax-buffered-bytes = 4096",
-                          "[runtime]\nlow-water-bytes = 4194304", "[runtime]\nlogin-timeout-ms = 0",
-                          "[admission]\nmax-origins = -1", "[translation]\nmode = 'server'", "network = false"}) {
+    for (auto document :
+         {"[network]\nport = -1", "[network]\nport = 65536", "[network]\nport = true",
+          "[network]\nonline-mode = 'false'", "[network]\nbind = 'hostname.test'", "[network]\ndual-stack = true",
+          "[network]\nonline_mod = false", "[runtime]\nio-loops = 0", "[runtime]\nworkers = 65",
+          "[runtime]\nmax-buffered-bytes = 4096", "[runtime]\nlow-water-bytes = 4194304",
+          "[runtime]\nlogin-timeout-ms = 0", "[runtime]\nupdate-checker = 'false'", "[admission]\nmax-origins = -1",
+          "[translation]\nmode = 'server'", "network = false"}) {
         CAPTURE(document);
         const auto result = decode(document);
         REQUIRE_FALSE(result);
