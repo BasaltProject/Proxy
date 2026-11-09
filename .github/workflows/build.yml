@@ -326,7 +326,7 @@ jobs:
           envs: VERSION CCACHE_DIR CCACHE_MAXSIZE
           cpu: 4
           mem: 8192
-          prepare: ${{ matrix.cross && 'pkg install -y cmake git curl zip unzip' || 'pkg install -y ccache cmake ninja git curl zip unzip' }}
+          prepare: ${{ matrix.cross && 'pkg install -y cmake git curl zip unzip' || 'pkg install -y ccache cmake ninja git curl zip unzip pkgconf' }}
           run: |
             set -eu
             if [ "${{ matrix.cross }}" = false ]; then
