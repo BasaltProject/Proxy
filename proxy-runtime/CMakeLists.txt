@@ -114,7 +114,7 @@ else()
     message(FATAL_ERROR "Unsupported release architecture: ${_processor}")
 endif()
 
-add_executable(basalt-proxy src/Main.cpp)
+add_executable(basalt-proxy src/Main.cpp src/MainPlugins.cpp)
 if(ANDROID)
     target_link_options(basalt-proxy PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
 endif()
