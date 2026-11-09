@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "basalt-proxy",
+  "version-semver": "26.3.0",
+  "builtin-baseline": "ec48c11eae9448c8c6e7739d93e06fa2433aa95f",
+  "dependencies": [
+    "c-ares",
+    "doctest",
+    "lua",
+    "mbedtls",
+    "monocypher",
+    "simdjson",
+    {
+      "name": "sqlite3",
+      "default-features": false,
+      "features": [
+        "omit-load-extension"
+      ]
+    },
+    "zlib",
+    "zstd"
+  ]
+}

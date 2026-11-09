@@ -100,7 +100,7 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           docker run --rm -e VERSION -e CCACHE_DIR=/src/build/musl-ccache -e CCACHE_MAXSIZE=1200M -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
-            apk add --no-cache ccache cmake ninja clang20 lld20 libc++-dev libc++-static llvm-libunwind-dev llvm-libunwind-static gcc g++ musl-dev linux-headers file binutils
+            apk add --no-cache ccache cmake ninja clang20 lld20 libc++-dev libc++-static llvm-libunwind-dev llvm-libunwind-static gcc g++ musl-dev linux-headers file binutils git curl zip unzip tar pkgconf
             ccache --zero-stats
             trap ".github/scripts/report-ccache.sh build/musl-ccache-summary.md" EXIT
             cmake --preset linux-musl -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
@@ -326,7 +326,7 @@ jobs:
           envs: VERSION CCACHE_DIR CCACHE_MAXSIZE
           cpu: 4
           mem: 8192
-          prepare: ${{ matrix.cross && 'pkg install -y cmake' || 'pkg install -y ccache cmake ninja' }}
+          prepare: ${{ matrix.cross && 'pkg install -y cmake git curl zip unzip' || 'pkg install -y ccache cmake ninja git curl zip unzip' }}
           run: |
             set -eu
             if [ "${{ matrix.cross }}" = false ]; then

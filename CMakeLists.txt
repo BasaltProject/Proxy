@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
 
+if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/wire/CMakeLists.txt)
+    message(FATAL_ERROR "wire/ is empty. Run: git submodule update --init")
+endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/wire/cmake/BasaltVcpkg.cmake)
+
 project(basalt-proxy
     VERSION 26.3.0
     DESCRIPTION "Basalt Proxy: a Minecraft proxy written from scratch"
