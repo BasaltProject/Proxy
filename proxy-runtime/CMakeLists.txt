@@ -174,6 +174,7 @@ basalt_test(proxy-runtime-backend-selection-test
 basalt_test(proxy-runtime-backend-login-test
     SOURCES
         test/BackendLoginTest.cpp
+        test/BackendForwardingTest.cpp
         test/CookieCacheTest.cpp
         test/CandidateSessionTest.cpp
     DEPENDS basalt::proxy-runtime-core basalt::wire-auth-test-support
