@@ -50,7 +50,7 @@ jobs:
 
       - name: Restore the libc++
         if: runner.os == 'macOS'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/libcxx-*
           key: libcxx-${{ inputs.target }}-${{ hashFiles('.github/scripts/select-compiler.sh') }}

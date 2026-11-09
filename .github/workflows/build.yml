@@ -90,7 +90,7 @@ jobs:
         with:
           submodules: true
           ref: ${{ inputs.ref }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/musl-ccache
           key: ccache-${{ matrix.target }}-clang20-${{ github.sha }}
@@ -309,7 +309,7 @@ jobs:
               readelf -l "$binary" | grep -F /libexec/ld-elf.so.1
               if readelf -d "$binary" | grep NEEDED | grep -E 'libc\+\+|libcxxrt'; then exit 1; fi
           done
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         if: ${{ !matrix.cross }}
         with:
           path: build/freebsd-ccache
