@@ -17,6 +17,7 @@
         "omit-load-extension"
       ]
     },
+    "usrsctp",
     "zlib",
     "zstd"
   ]
