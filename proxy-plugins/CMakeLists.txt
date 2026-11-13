@@ -25,5 +25,5 @@ basalt_test(proxy-plugins-test
     DEPENDS basalt::proxy-plugins
 )
 if(TARGET proxy-plugins-test)
-    target_compile_definitions(proxy-plugins-test PRIVATE BASALT_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-data")
+    target_compile_definitions(proxy-plugins-test PRIVATE BASALT_TEST_SCRATCH_DIR="test-data")
 endif()
