@@ -75,7 +75,7 @@ secret = ""
 # property-name = "safenet-token"
 # Let this server use the BungeeCord messaging channel (bungeecord:main) to ask the proxy for GetServer, GetServers,
 # PlayerCount, PlayerList, UUID, IP, ServerIP and Forward, and to move its players with Connect. Everything except
-# GetServer, GetServers, UUID and Connect also needs enabled = true in plugins.toml.
+# GetServer, GetServers, UUID and Connect also needs plugins enabled ([plugins] in proxy.toml).
 # Messages sent by a player's client are always discarded.
 bungee-messages = false
 

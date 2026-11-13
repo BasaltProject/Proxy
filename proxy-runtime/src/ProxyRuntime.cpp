@@ -271,7 +271,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.reload == fresh.reload, "[reload]");
     compare(current.health == fresh.health, "[health] in servers.toml");
     compare(current.statusRelay == fresh.statusRelay, "[status-relay] in servers.toml");
-    compare(current.plugins == fresh.plugins, "plugins.toml");
+    compare(current.plugins == fresh.plugins, "[plugins]");
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
         return std::unexpected("changing " + fixed + " requires a restart");

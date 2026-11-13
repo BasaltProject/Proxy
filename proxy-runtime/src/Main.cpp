@@ -133,7 +133,7 @@ int run(const cliCommand::Run& command) {
     std::atomic<proxy::plugins::PluginHost*> pluginHost{nullptr};
     std::atomic<detail::BedrockStatus*> bedrockPlayers{nullptr};
     std::atomic<ProxyRuntime*> runtimeRef{nullptr};
-    auto players = detail::PlayerDirectory::open(".basalt/players.db");
+    auto players = detail::PlayerDirectory::open(std::string{proxy::config::PluginsConfig::kDatabase});
     if (!players) {
         logger.error([&players] { return players.error(); });
         return 1;
@@ -529,6 +529,7 @@ int run(const cliCommand::Run& command) {
     };
     environment.enforceWhitelist = [&enforceWhitelist] { return enforceWhitelist.load(std::memory_order_relaxed); };
     detail::registerBuiltinCommands(environment);
+    detail::warnRetiredPluginFiles(command.configDirectory, logger);
     std::unique_ptr<proxy::plugins::PluginHost> plugins;
     if (configuration->plugins.enabled) {
         auto setup = detail::makePluginSetup(configuration, runtime, bedrockPlayers, tellPlayer, kickPlayer,
@@ -544,7 +545,7 @@ int run(const cliCommand::Run& command) {
     } else if (std::ranges::any_of(configuration->backends, [](const auto& b) { return b.bungeeMessages; })) {
         logger.warn([] {
             return std::string{"bungee-messages is on but plugins are disabled: only GetServer, GetServers, UUID and "
-                               "Connect are answered. Set enabled = true in plugins.toml for the rest."};
+                               "Connect are answered. Set enabled = true under [plugins] in proxy.toml for the rest."};
         });
     }
 #if !defined(_WIN32)
@@ -569,7 +570,7 @@ int run(const cliCommand::Run& command) {
         };
         add(command.configDirectory, false);
         if (configuration->plugins.enabled)
-            add(configuration->plugins.directory, true);
+            add(proxy::config::PluginsConfig::kDirectory, true);
         return seen;
     };
     std::jthread signals{[&](std::stop_token stop) {

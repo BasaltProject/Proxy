@@ -13,6 +13,7 @@ std::expected<std::unique_ptr<PlayerDirectory>, std::string> PlayerDirectory::op
     auto database = wire::storage::openPlayerDatabase(path, ddl);
     if (!database)
         return std::unexpected(database.error());
+    (*database)->exec("PRAGMA busy_timeout = 2000");
     return std::unique_ptr<PlayerDirectory>{new PlayerDirectory{std::move(*database)}};
 }
 

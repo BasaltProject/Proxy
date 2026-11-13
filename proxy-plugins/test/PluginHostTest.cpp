@@ -68,7 +68,7 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     write(root / "borrower" / "src" / "main.lua", "log.info('shared=' .. require('shared').value)\n"
                                                   "log.info('secret=' .. tostring(pcall(require, 'secret')))\n");
     manifest(root / "wants", "wants", "[capabilities]\ncommands = true\n");
-    write(root / "wants" / "src" / "main.lua", "log.info('must not run either')\n");
+    write(root / "wants" / "src" / "main.lua", "log.info('run: ' .. tostring(pcall(run, 'list')))\n");
     manifest(root / "plain", "plain");
     write(root / "plain" / "src" / "main.lua", "local ok, err = pcall(function() return store.k end)\n"
                                                "log.info('storage: ' .. tostring(ok) .. ' ' .. tostring(err))\n");
@@ -96,7 +96,7 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
     settings.limits.instructionsPerTurn = 20000;
     auto host = plugins::PluginHost::start(settings, hooks);
     REQUIRE(host);
-    CHECK((*host)->loaded() == 6);
+    CHECK((*host)->loaded() == 7);
     const auto seen = [&](const std::string& line) {
         std::unique_lock lock{mutex};
         return ready.wait_for(lock, 5s, [&] { return std::ranges::count(lines, line) >= 1; });
@@ -108,9 +108,9 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
         CHECK(std::ranges::count_if(
                   lines, [](const std::string& line) { return line.starts_with("child: did not load"); }) == 1);
         CHECK(std::ranges::count(lines, "child: must not run") == 0);
-        CHECK(std::ranges::count(lines, "wants: must not run either") == 0);
+        CHECK(std::ranges::count(lines, "wants: run: false") == 1);
         CHECK(std::ranges::count_if(lines, [](const std::string& line) {
-                  return line.starts_with("wants: did not load: it asks for commands");
+                  return line.starts_with("wants: asks for commands and the operator has not granted it");
               }) == 1);
         CHECK(std::ranges::count_if(lines, [](const std::string& line) {
                   return line.starts_with("plain: storage: false") && line.find("storage = true") != std::string::npos;
@@ -161,7 +161,7 @@ TEST_CASE("a runaway or broken plugin is contained and the others keep receiving
 
     write(root / "tools" / "src" / "main.lua", "cmd('hello', function(src) src:send('v2') end)\n");
     std::filesystem::remove_all(root / "greeter");
-    CHECK((*host)->reload() == 5);
+    CHECK((*host)->reload() == 6);
     CHECK((*host)->command("hello"));
     CHECK(seen("tools: v2"));
     (*host)->post({runtime::PlayerEventKind::kJoin, "Alex", "a", "uuid-2", {}});
@@ -194,7 +194,7 @@ TEST_CASE("plugin data persists across restarts and stays private to each plugin
     };
     plugins::PluginSettings settings;
     settings.directory = (root / "plugins").string();
-    settings.database = (root / "state" / "proxy.db").string();
+    settings.database = (root / "state" / "players.db").string();
 
     for (int run = 1; run <= 2; ++run) {
         auto host = plugins::PluginHost::start(settings, hooks);

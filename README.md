@@ -69,7 +69,7 @@ directory given with `--config <dir>`:
 
 ```
 config/
-  proxy.toml        network, runtime limits, admission, forwarding, logging, Bedrock, translation
+  proxy.toml        network, runtime limits, admission, forwarding, logging, Bedrock, translation, plugins
   servers.toml      the servers, their order, forced hosts, server groups, health checks and status relay
   server_list.toml  the multiplayer-list entry: MOTD, player sample, icon, profiles
   limits.toml       packet rate and chat/command spam limits per connection
@@ -78,7 +78,6 @@ config/
   messages.toml     kick and command messages
   antibot.toml      bot protection
   remote.toml       the HTTP administration API
-  plugins.toml      the Lua plugin runtime
   tab_list.toml  boss_bar.toml  scoreboard.toml  animations.toml
 ```
 
@@ -129,7 +128,8 @@ limbo world with movement and captcha checks, an exploit filter, blocklists and 
 ## Lua plugins
 
 Plugins are `.bppkg` packages written in Lua and run in a sandbox, so a broken plugin cannot take the proxy down. The
-API follows the server's: events, commands, players, servers, a store and packet access. Off by default.
+API follows the server's: events, commands, players, servers, a store and packet access. On by default, set under
+`[plugins]` in `proxy.toml`.
 
 ## BungeeCord and Velocity plugins
 

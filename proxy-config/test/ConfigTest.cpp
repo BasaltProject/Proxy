@@ -19,7 +19,7 @@ std::expected<ProxyConfig, std::string> decode(std::string_view proxy, std::stri
     auto l = toml::parse(limits);
     if (!p || !b || !l)
         return std::unexpected("synthetic fixture did not parse");
-    return fromToml(*p, *b, "config", nullptr, &*l);
+    return fromToml(*p, *b, "config", &*l);
 }
 } // namespace
 
@@ -63,7 +63,8 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
                           "[network]\nproxy-protocol = true",
                           "[network]\nproxy-protocol-trusted = ['not an address']",
                           "[general]\nusername-pattern = '['",
-                          "[query]\nport = 0"}) {
+                          "[query]\nport = 0",
+                          "[plugins.allow]\nx = ['fly']"}) {
         CAPTURE(document);
         const auto result = decode(document);
         REQUIRE_FALSE(result);

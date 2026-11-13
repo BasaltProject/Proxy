@@ -132,17 +132,19 @@ struct LoggingConfig {
 };
 
 struct PluginsConfig {
-    bool enabled = false;
-    std::string directory = "plugins";
-    std::string database = ".basalt/proxy.db";
+    static constexpr std::string_view kDirectory = "plugins";
+    /// Plugin data shares the players database, as on Basalt Server.
+    static constexpr std::string_view kDatabase = ".basalt/players.db";
+
+    bool enabled = true;
     std::int64_t instructionsPerTurn = 250000;
-    std::size_t memoryMib = 32;
+    std::size_t memoryMb = 32;
     std::size_t queueSize = 256;
     /// Packets larger than this go past plugin packet listeners untouched.
     std::size_t packetMaxKib = 256;
     /// How long a relayed packet waits for the plugin interpreter before it goes on untouched.
     std::int64_t packetTimeoutMs = 25;
-    /// Plugin id to the permissions the operator grants it; a manifest asking for more is not loaded.
+    /// Plugin id to the permissions the operator grants it; a plugin asking for more loads without the rest.
     std::map<std::string, std::vector<std::string>> allow;
 
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
@@ -243,10 +245,11 @@ struct ProxyConfig {
     std::vector<ServerGroup> serverGroups;
 };
 
-[[nodiscard]] std::expected<ProxyConfig, std::string>
-fromToml(const wire::common::toml::TomlTable& proxy, const wire::common::toml::TomlTable& servers,
-         std::string_view directory, const wire::common::toml::TomlTable* plugins = nullptr,
-         const wire::common::toml::TomlTable* limits = nullptr, const wire::common::toml::TomlTable* antibot = nullptr);
+[[nodiscard]] std::expected<ProxyConfig, std::string> fromToml(const wire::common::toml::TomlTable& proxy,
+                                                               const wire::common::toml::TomlTable& servers,
+                                                               std::string_view directory,
+                                                               const wire::common::toml::TomlTable* limits = nullptr,
+                                                               const wire::common::toml::TomlTable* antibot = nullptr);
 [[nodiscard]] std::expected<ProxyConfig, std::string> load(std::string_view directory);
 
 [[nodiscard]] wire::config::ConfigDirectory configDirectory(std::string_view directory);

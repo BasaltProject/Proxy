@@ -151,3 +151,30 @@ mode = "auto"
 whitelist = false
 # Kick the players already online who are not on the whitelist whenever it is switched on or a name leaves it.
 enforce-whitelist = false
+
+[plugins]
+# Whether the plugins folder is looked at. Off means no Lua package (.bppkg) there is loaded.
+enabled = true
+
+# What one plugin may run in a single turn, in Lua instructions. Refilled on every entry, so it caps one handler and
+# not the whole run.
+instructions-per-turn = 250000
+
+# The most memory one plugin's own objects may take, in megabytes.
+memory-mb = 32
+
+# Events waiting for the plugin thread. A full queue drops the newest event and counts it.
+queue-size = 256
+
+# Packet listeners (the packets permission) run while a packet is relayed. A packet larger than packet-max-kib goes past
+# them untouched, and one that waits longer than packet-timeout-ms for the plugin interpreter goes on untouched too.
+packet-max-kib = 256
+packet-timeout-ms = 25
+
+# What each plugin may reach beyond its own sandbox: "packets" sees and edits relayed packets, "network" talks past
+# the client, "commands" runs as the console. A plugin that asks for one and is not listed here loads without it and
+# says so. Plugin data needs storage = true or players_data = true in the plugin's own manifest, no grant: it is kept
+# in .basalt/players.db. Entries go below the header.
+[plugins.allow]
+# my_plugin = ["packets"]
+# lobby = ["network", "commands"]

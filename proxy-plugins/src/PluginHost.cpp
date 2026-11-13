@@ -43,17 +43,7 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
         host->database_ = wire::sql::Database::open(host->settings_.database);
         if (!host->database_)
             return std::unexpected("could not open the plugin database " + host->settings_.database);
-        const bool legacyStore = [&] {
-            auto table = host->database_->prepare("SELECT 1 FROM pragma_table_info('plugin_data')");
-            const bool exists = table.step();
-            auto column =
-                host->database_->prepare("SELECT 1 FROM pragma_table_info('plugin_data') WHERE name = 'uuid'");
-            return exists && !column.step();
-        }();
-        if (legacyStore)
-            host->database_->exec("DROP INDEX IF EXISTS plugin_data_by_plugin;"
-                                  "ALTER TABLE plugin_data RENAME TO plugin_data_v1;"
-                                  "ALTER TABLE player_data RENAME TO player_data_v1;");
+        host->database_->exec("PRAGMA busy_timeout = 2000");
         if (!host->database_->exec(wire::storage::schema::pluginDdl()))
             return std::unexpected("plugin database " + host->settings_.database + ": could not create its tables");
     }
@@ -138,19 +128,26 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
         return;
     }
     const auto granted = settings_.allow.find(id);
+    wire::plugins::PluginManifest effective = manifest;
     std::string missing;
+    std::string quoted;
     for (const wire::plugins::PluginPermission asked : manifest.capabilities.asks()) {
         const std::string_view label = wire::plugins::permissionName(asked);
-        const bool allowed =
-            granted != settings_.allow.end() && std::ranges::find(granted->second, label) != granted->second.end();
-        if (!allowed)
-            missing += (missing.empty() ? "" : ", ") + std::string{label};
+        if (granted != settings_.allow.end() && std::ranges::find(granted->second, label) != granted->second.end())
+            continue;
+        missing += (missing.empty() ? "" : ", ") + std::string{label};
+        quoted += (quoted.empty() ? "\"" : ", \"") + std::string{label} + "\"";
+        if (asked == wire::plugins::PluginPermission::Packets)
+            effective.capabilities.packets = false;
+        else if (asked == wire::plugins::PluginPermission::Network)
+            effective.capabilities.network.clear();
+        else
+            effective.capabilities.commands = false;
     }
-    if (!missing.empty()) {
-        report("did not load: it asks for " + missing + " and the operator has not granted it; add " + id +
-               " to [allow] in plugins.toml");
-        return;
-    }
+    const auto& warn = hooks_.warn ? hooks_.warn : hooks_.log;
+    if (!missing.empty() && warn)
+        warn(id, "asks for " + missing + " and the operator has not granted it, so it loads without it. Add " + id +
+                     " = [" + quoted + "] under [plugins.allow] in proxy.toml to allow it.");
     wire::common::toml::TomlTable config;
     {
         const wire::plugins::PluginFolder folder{*package, manifest, settings_.directory + "/" + id};
@@ -217,7 +214,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
         report("could not create the Lua state; plugin skipped");
         return;
     }
-    PluginApi::install(*this, *plugin, manifest, config);
+    PluginApi::install(*this, *plugin, effective, config);
     PluginApi::installMessaging(*this, *plugin);
     PluginApi::installHud(*this, *plugin);
     auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);

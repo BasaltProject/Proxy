@@ -74,6 +74,8 @@ struct PluginHooks {
     std::function<ProxyInfo()> info;
     std::function<bool(std::string_view player, std::string_view backend)> send;
     std::function<void(std::string_view plugin, std::string_view line)> log;
+    /// Something the operator should act on; falls back to `log` when unset.
+    std::function<void(std::string_view plugin, std::string_view line)> warn;
     /// Sends a chat line, written in MiniMessage, to a player's client.
     std::function<void(std::string_view player, std::string_view text)> tell;
     /// Disconnects a player in play; the reason is MiniMessage.

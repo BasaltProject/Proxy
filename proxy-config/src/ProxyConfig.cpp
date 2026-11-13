@@ -13,14 +13,13 @@
 namespace basalt::proxy::config {
 
 std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy, const detail::TomlTable& servers,
-                                                 std::string_view directory, const detail::TomlTable* pluginsTable,
-                                                 const detail::TomlTable* limitsTable,
+                                                 std::string_view directory, const detail::TomlTable* limitsTable,
                                                  const detail::TomlTable* antibotTable) {
     ProxyConfig result;
     detail::Reader reader{std::string{directory} + "/proxy.toml", {}};
     reader.keys(&proxy,
                 {"network", "general", "query", "runtime", "admission", "forwarding", "logging", "bedrock", "reload",
-                 "translation", "access"},
+                 "translation", "access", "plugins"},
                 "");
     const auto* network = reader.child(proxy, "network");
     reader.keys(network,
@@ -199,37 +198,27 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
     else
         reader.fail("translation.mode", "must be auto, proxy or off");
 
-    if (pluginsTable) {
-        detail::Reader plugins{std::string{directory} + "/plugins.toml", {}};
-        plugins.keys(pluginsTable,
-                     {"enabled", "directory", "database", "instructions-per-turn", "memory-mib", "queue-size",
-                      "packet-max-kib", "packet-timeout-ms", "allow"},
-                     "");
-        plugins.scalar(pluginsTable, "enabled", result.plugins.enabled, "");
-        plugins.scalar(pluginsTable, "directory", result.plugins.directory, "");
-        plugins.scalar(pluginsTable, "database", result.plugins.database, "");
-        plugins.integer(pluginsTable, "instructions-per-turn", result.plugins.instructionsPerTurn, 1000, 1000000000,
-                        "");
-        plugins.integer(pluginsTable, "memory-mib", result.plugins.memoryMib, 1, 1024, "");
-        plugins.integer(pluginsTable, "queue-size", result.plugins.queueSize, 1, 65536, "");
-        plugins.integer(pluginsTable, "packet-max-kib", result.plugins.packetMaxKib, 1, 2048, "");
-        plugins.integer(pluginsTable, "packet-timeout-ms", result.plugins.packetTimeoutMs, 1, 1000, "");
-        if (const auto* allow = plugins.child(*pluginsTable, "allow")) {
-            for (const auto& id : allow->keys()) {
-                auto names = plugins.strings(allow->find(id), "allow." + id);
-                for (const auto& name : names)
-                    if (name != "commands" && name != "network" && name != "packets")
-                        plugins.fail("allow." + id, "grants unknown permission '" + name + "'");
-                result.plugins.allow.emplace(id, std::move(names));
-            }
+    const auto* plugins = reader.child(proxy, "plugins");
+    reader.keys(
+        plugins,
+        {"enabled", "instructions-per-turn", "memory-mb", "queue-size", "packet-max-kib", "packet-timeout-ms", "allow"},
+        "plugins.");
+    reader.scalar(plugins, "enabled", result.plugins.enabled, "plugins.");
+    reader.integer(plugins, "instructions-per-turn", result.plugins.instructionsPerTurn, 1000, 1000000000, "plugins.");
+    reader.integer(plugins, "memory-mb", result.plugins.memoryMb, 1, 1024, "plugins.");
+    reader.integer(plugins, "queue-size", result.plugins.queueSize, 1, 65536, "plugins.");
+    reader.integer(plugins, "packet-max-kib", result.plugins.packetMaxKib, 1, 2048, "plugins.");
+    reader.integer(plugins, "packet-timeout-ms", result.plugins.packetTimeoutMs, 1, 1000, "plugins.");
+    if (const auto* allow = plugins ? reader.child(*plugins, "allow") : nullptr) {
+        for (const auto& id : allow->keys()) {
+            auto names = reader.strings(allow->find(id), "plugins.allow." + id);
+            for (const auto& name : names)
+                if (name != "commands" && name != "network" && name != "packets")
+                    reader.fail("plugins.allow." + id, "grants unknown permission '" + name + "'");
+            result.plugins.allow.emplace(id, std::move(names));
         }
-        if (result.plugins.database.empty() || result.plugins.database.size() > 4096)
-            plugins.fail("database", "must be a path of 1..4096 bytes");
-        if (result.plugins.directory.empty() || result.plugins.directory.size() > 4096)
-            plugins.fail("directory", "must be a path of 1..4096 bytes");
-        if (plugins.error)
-            return std::unexpected(*plugins.error);
     }
+
     if (limitsTable) {
         detail::Reader limits{std::string{directory} + "/limits.toml", {}};
         limits.keys(limitsTable, {"packets", "spam"}, "");
@@ -288,16 +277,13 @@ std::expected<ProxyConfig, std::string> load(std::string_view directory) {
     auto servers = files.load("servers.toml", kServersDefaultToml);
     if (!servers)
         return std::unexpected(servers.error());
-    auto plugins = files.load("plugins.toml", kPluginsDefaultToml);
-    if (!plugins)
-        return std::unexpected(plugins.error());
     auto limits = files.load("limits.toml", kLimitsDefaultToml);
     if (!limits)
         return std::unexpected(limits.error());
     auto antibot = files.load("antibot.toml", kAntibotDefaultToml);
     if (!antibot)
         return std::unexpected(antibot.error());
-    return fromToml(*proxy, *servers, directory, &*plugins, &*limits, &*antibot);
+    return fromToml(*proxy, *servers, directory, &*limits, &*antibot);
 }
 
 } // namespace basalt::proxy::config

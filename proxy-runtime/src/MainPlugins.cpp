@@ -7,9 +7,11 @@
 #include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
+#include <basalt/wire/sql/Sqlite.hpp>
 
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 
 #if defined(BASALT_HAS_SHIM)
 #include <basalt/proxy/bungee/BungeeAdapter.hpp>
@@ -20,6 +22,32 @@ using namespace basalt;
 
 namespace basalt::proxy::runtime::detail {
 
+void warnRetiredPluginFiles(std::string_view configDirectory, const wire::common::Logger& logger) {
+    std::error_code error;
+    const std::filesystem::path oldConfig = std::filesystem::path{configDirectory} / "plugins.toml";
+    if (std::filesystem::exists(oldConfig, error))
+        logger.warn([&oldConfig] {
+            return oldConfig.string() + " is no longer read: its settings go under [plugins] in proxy.toml, with " +
+                   "the grants under [plugins.allow], and the plugins folder and database are fixed.";
+        });
+    const std::string oldDatabase = ".basalt/proxy.db";
+    if (!std::filesystem::is_regular_file(oldDatabase, error))
+        return;
+    auto database = wire::sql::Database::open(oldDatabase);
+    if (!database)
+        return;
+    bool holdsData = false;
+    for (const std::string& table : database->tables()) {
+        auto rows = database->prepare("SELECT 1 FROM \"" + table + "\" LIMIT 1");
+        holdsData = holdsData || rows.step();
+    }
+    if (holdsData)
+        logger.warn([&oldDatabase] {
+            return oldDatabase + " holds plugin data from an older version and is no longer read: plugin data now " +
+                   "lives in " + std::string{config::PluginsConfig::kDatabase} + ". It is left as it is.";
+        });
+}
+
 PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string>& configuration,
                             std::expected<ProxyRuntime, std::string>& runtime,
                             std::atomic<BedrockStatus*>& bedrockPlayers,
@@ -29,11 +57,11 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
                             PermissionService& permissions,
                             const std::shared_ptr<wire::plugins::PacketRegistry>& packetRegistry) {
     proxy::plugins::PluginSettings settings;
-    settings.directory = configuration->plugins.directory;
-    settings.database = configuration->plugins.database;
+    settings.directory = config::PluginsConfig::kDirectory;
+    settings.database = config::PluginsConfig::kDatabase;
     settings.allow = configuration->plugins.allow;
     settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
-    settings.limits.memoryBytes = configuration->plugins.memoryMib * 1024 * 1024;
+    settings.limits.memoryBytes = configuration->plugins.memoryMb * 1024 * 1024;
     settings.queueSize = configuration->plugins.queueSize;
     settings.packets = packetRegistry;
     settings.packetTimeout = std::chrono::milliseconds{configuration->plugins.packetTimeoutMs};
@@ -149,6 +177,9 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
     };
     hooks.log = [](std::string_view plugin, std::string_view line) {
         wire::common::Logger{"Plugin " + std::string{plugin}}.info([&line] { return std::string{line}; });
+    };
+    hooks.warn = [](std::string_view plugin, std::string_view line) {
+        wire::common::Logger{"Plugin " + std::string{plugin}}.warn([&line] { return std::string{line}; });
     };
     return PluginSetup{std::move(settings), std::move(hooks)};
 }
