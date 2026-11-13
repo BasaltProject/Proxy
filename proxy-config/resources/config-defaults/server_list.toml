@@ -46,6 +46,9 @@ hide-online-players = false
 # How many player names the hover list shows at most, as vanilla's twelve (Spigot's sample-count). 0 shows none.
 sample-size = 12
 
+# The slots the list shows; profiles without their own inherit it. The real cap is max-sessions in proxy.toml.
+max-players = 1000
+
 [profiles.legacy]
 # Gradients are RGB text, and RGB text arrived in 1.16: an older client renders
 # the profile above as flat white and loses the effect entirely. Same layout,
