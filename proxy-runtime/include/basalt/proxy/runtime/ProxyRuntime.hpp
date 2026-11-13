@@ -34,6 +34,8 @@ struct ProxyConfig;
 
 namespace basalt::proxy::runtime {
 
+using MessageArgs = std::vector<std::pair<std::string_view, std::string>>;
+
 enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin, kLatency, kAntibot };
 
 struct PlayerEvent {
@@ -204,7 +206,7 @@ struct RuntimeServices {
     std::function<std::optional<std::string>(std::string_view player, std::string_view uuid, std::string_view address)>
         playerLogin = {};
     /// The text of one of the proxy's own refusals by its messages.toml key; empty keeps the built-in English one.
-    std::function<std::string(std::string_view key)> kickText = {};
+    std::function<std::string(std::string_view key, const MessageArgs& args)> kickText = {};
     /// Where the antibot keeps verified players; the writers run under a lock and must only queue their work.
     std::function<std::vector<VerifiedRecord>(std::size_t limit)> verifiedLoad = {};
     std::function<void(std::string_view name, std::string_view origin, std::int64_t expiresUnixSeconds)> verifiedSave =

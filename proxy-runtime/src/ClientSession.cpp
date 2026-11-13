@@ -58,7 +58,7 @@ ClientSession::ClientSession(
     std::function<void(std::string_view, std::string_view)> playerKick,
     std::function<void(std::string_view, std::int32_t)> statusPing,
     std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin,
-    std::function<std::string(std::string_view)> kickText,
+    std::function<std::string(std::string_view, const MessageArgs&)> kickText,
     std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions,
     std::function<std::optional<std::string>()> loadingMessage, ClientAccess access,
     std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)> pluginMessage,
@@ -635,7 +635,7 @@ bool ClientSession::continueJoin() {
 bool ClientSession::kickClient(std::string_view key, std::string_view fallback) {
     if (!inPlay())
         return false;
-    const std::string text = kickText_ ? kickText_(key) : std::string{};
+    const std::string text = kickText_ ? kickText_(key, {}) : std::string{};
     kick(text.empty() ? fallback : std::string_view{text});
     return true;
 }

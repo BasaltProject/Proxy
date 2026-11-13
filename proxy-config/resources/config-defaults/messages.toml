@@ -28,6 +28,9 @@ already-connected = "<red>This player is already connected.</red>"
 # Authentication failed or could not be completed.
 login-failed = "<red>Login could not be completed.</red>"
 
+# Told in chat when a server refuses a move to it. %server% is its name and %reason% what it answered.
+connect-failed = "<red>Could not connect to %server%:</red> <gray>%reason%</gray>"
+
 # What /kick tells the player. %reason% is the reason typed after the name.
 kicked = "<red>You have been kicked from this network.</red>\n<gray>%reason%</gray>"
 

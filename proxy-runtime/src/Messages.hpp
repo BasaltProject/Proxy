@@ -1,6 +1,7 @@
 #pragma once
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/proxy/runtime/ProxyRuntime.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/config/BasicPlaceholders.hpp>
 #include <basalt/wire/config/LiveValue.hpp>
@@ -11,8 +12,6 @@
 #include <vector>
 
 namespace basalt::proxy::runtime::detail {
-
-using MessageArgs = std::vector<std::pair<std::string_view, std::string>>;
 
 /// The texts of messages.toml: MiniMessage with %name% arguments and the shared %basalt_*% placeholders.
 class Messages {

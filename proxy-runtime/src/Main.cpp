@@ -293,7 +293,7 @@ int run(const cliCommand::Run& command) {
     services.verifiedPurge = [&players](std::int64_t now, std::int32_t batch, std::size_t keep) {
         (*players)->purgeVerified(now, batch, keep);
     };
-    services.kickText = [&messages](std::string_view key) { return messages.kick(key); };
+    services.kickText = [&messages](std::string_view key, const MessageArgs& args) { return messages.kick(key, args); };
     services.playerChat = [&pluginHost](std::string_view player, std::string_view message) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kChat, std::string{player}, {}, {}, std::string{message}});

@@ -102,7 +102,7 @@ struct CandidateFixture {
             chat, std::function<void(std::string_view, std::string_view)>{},
             std::function<void(std::string_view, std::int32_t)>{},
             std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)>{},
-            std::function<std::string(std::string_view)>{},
+            std::function<std::string(std::string_view, const basalt::proxy::runtime::MessageArgs&)>{},
             std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)>{},
             std::function<std::optional<std::string>()>{}, ClientAccess{},
             std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)>{}, decide);
@@ -267,9 +267,19 @@ TEST_CASE("a session prepares a second backend while its public connection remai
     const auto finished = success();
     const std::vector<std::uint8_t> ack{1, 3};
     const std::vector<std::uint8_t> keepalive{9, 0x2d, 0, 0, 0, 0, 0, 0, 0, 99};
+    const auto skipNotice = [&](std::vector<std::uint8_t> bytes, std::size_t expected) {
+        if (bytes.size() >= 2 && bytes[1] == basalt::wire::protocol::play::SystemChatPacket::kId) {
+            bytes.erase(bytes.begin(), bytes.begin() + std::min<std::ptrdiff_t>(std::ssize(bytes), bytes[0] + 1));
+            if (bytes.size() < expected) {
+                const auto rest = fixture.read(fixture.client, expected - bytes.size());
+                bytes.insert(bytes.end(), rest.begin(), rest.end());
+            }
+        }
+        return bytes;
+    };
     const auto relayActive = [&] {
         REQUIRE(active.write(keepalive));
-        auto reply = fixture.read(fixture.client, keepalive.size());
+        auto reply = skipNotice(fixture.read(fixture.client, keepalive.size()), keepalive.size());
         REQUIRE(reply.size() == keepalive.size());
         REQUIRE(reply[1] == 0x2d);
         reply[1] = 0x1c;
@@ -327,7 +337,7 @@ TEST_CASE("a session prepares a second backend while its public connection remai
         auto marker = keepalive;
         marker.back() = 100;
         REQUIRE(active.write(marker));
-        auto published = fixture.read(fixture.client, marker.size());
+        auto published = skipNotice(fixture.read(fixture.client, marker.size()), marker.size());
         REQUIRE(published.size() == marker.size());
         published[1] = 0x1c;
         marker[1] = 0x1c;

@@ -87,7 +87,7 @@ public:
         std::function<void(std::string_view, std::int32_t)> statusPing = {},
         std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin =
             {},
-        std::function<std::string(std::string_view)> kickText = {},
+        std::function<std::string(std::string_view, const MessageArgs&)> kickText = {},
         std::function<std::optional<std::vector<std::string>>(std::string_view, std::string_view)> commandSuggestions =
             {},
         std::function<std::optional<std::string>()> loadingMessage = {}, ClientAccess access = {},
@@ -245,6 +245,7 @@ private:
     [[nodiscard]] bool acceptOrigin(std::string_view address, std::uint16_t port);
     [[nodiscard]] bool beginJoin();
     [[nodiscard]] bool kickClient(std::string_view key, std::string_view fallback);
+    void reportSwitchFailure(std::string_view reason);
     /// A verdict when the packet is not to travel on, which is what `packet()` then returns; empty to relay it.
     [[nodiscard]] std::optional<bool> limited(std::int32_t id);
     [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
@@ -377,7 +378,7 @@ private:
     std::function<void(std::string_view, std::string_view)> playerKick_;
     std::function<void(std::string_view, std::int32_t)> statusPing_;
     std::function<std::optional<std::string>(std::string_view, std::string_view, std::string_view)> playerLogin_;
-    std::function<std::string(std::string_view)> kickText_;
+    std::function<std::string(std::string_view, const MessageArgs&)> kickText_;
     std::function<std::optional<std::string>()> loadingMessage_;
     std::vector<std::string> backendCommands_;
     std::function<std::vector<PlayerCommandSpec>(std::string_view)> playerCommandSpecs_;

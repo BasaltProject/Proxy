@@ -198,7 +198,7 @@ bool ClientSession::limboTimer(Clock::time_point now) {
 }
 
 wire::text::Component ClientSession::antibotText(std::string_view key) const {
-    std::string text = kickText_ ? kickText_(key) : std::string{};
+    std::string text = kickText_ ? kickText_(key, {}) : std::string{};
     if (limboRun_ && limboRun_->chatCheck()) {
         const auto config = access_.policy->antibot.config();
         for (const auto& [token, value] :

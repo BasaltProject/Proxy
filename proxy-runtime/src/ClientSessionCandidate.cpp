@@ -4,16 +4,32 @@
 #include "RelayCounters.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
+#include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
 #include <basalt/wire/protocol/configuration/ConfigurationPackets.hpp>
 #include <basalt/wire/protocol/cookie/CookiePackets.hpp>
 #include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/login/LoginPluginPackets.hpp>
+#include <basalt/wire/text/ComponentJson.hpp>
+#include <basalt/wire/text/Serializers.hpp>
 
 #include <utility>
 
 namespace basalt::proxy::runtime::detail {
+
+namespace {
+
+std::string disconnectReason(wire::io::ByteBuffer& frame) {
+    const auto reason = wire::protocol::readString(frame);
+    if (frame.failed())
+        return {};
+    const auto json = wire::common::parseJson(reason);
+    return json ? wire::text::toPlainText(wire::text::componentJson::deserialize(*json)) : std::string{};
+}
+
+} // namespace
 
 bool ClientSession::prepareBackend(std::size_t target) {
     if (closing_ || recovering_ || state_ != State::kPlay || Clock::now() >= deadline() || !activeBackend_ ||
@@ -163,6 +179,21 @@ bool ClientSession::acknowledgePreparedChange() {
     return true;
 }
 
+void ClientSession::reportSwitchFailure(std::string_view reason) {
+    if (!candidateBackend_ || !profile_)
+        return;
+    const std::string& server = backends_[candidateBackend_->attempt().target].name;
+    const std::string shown = reason.empty() ? std::string{"the server did not accept the login"} : std::string{reason};
+    wire::common::Logger{"Proxy"}.info(
+        [&] { return profile_->name + " could not connect to " + server + ": " + shown; });
+    const std::string text =
+        kickText_ ? kickText_("connect-failed", {{"server", server}, {"reason", shown}}) : std::string{};
+    if (text.empty())
+        tell(wire::text::Component::text("Could not connect to " + server + ": " + shown));
+    else
+        tell(text);
+}
+
 void ClientSession::discardCandidate() {
     changeWhenPrepared_ = false;
     cancelConnectionAttempt();
@@ -172,11 +203,12 @@ void ClientSession::discardCandidate() {
 }
 
 bool ClientSession::candidateReady(const wire::io::IoReady& event) {
-    const auto reject = [this] {
+    const auto reject = [this](std::string_view reason = {}) {
         if (switchingBackend_)
             return false;
         if (recovering_)
             return recoveryFailed();
+        reportSwitchFailure(reason);
         discardCandidate();
         return true;
     };
@@ -230,6 +262,8 @@ bool ClientSession::candidateReady(const wire::io::IoReady& event) {
             candidateBackend_.reset();
             return route();
         }
+    } else if (id == wire::protocol::login::LoginDisconnectPacket::kId) {
+        return reject(disconnectReason(frame_));
     } else {
         return reject();
     }

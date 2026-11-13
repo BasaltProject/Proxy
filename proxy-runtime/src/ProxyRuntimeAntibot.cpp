@@ -157,7 +157,7 @@ std::optional<std::string> ProxyRuntime::bedrockLogin(std::string_view address, 
         (!authenticated || (!xuid.empty() && xuid.size() <= 20 &&
                             std::ranges::all_of(xuid, [](unsigned char c) { return std::isdigit(c) != 0; })));
     const auto say = [this](std::string_view key, std::string_view fallback) {
-        const std::string text = impl_->services.kickText ? impl_->services.kickText(key) : std::string{};
+        const std::string text = impl_->services.kickText ? impl_->services.kickText(key, {}) : std::string{};
         return text.empty() ? std::string{fallback} : wire::text::toPlainText(wire::text::miniMessage::parse(text));
     };
     if (!shape) {

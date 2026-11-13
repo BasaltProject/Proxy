@@ -29,7 +29,7 @@ bool ClientSession::refuseMiniMessage(std::string_view text) {
 }
 
 bool ClientSession::refuseWith(std::string_view key, std::string_view fallback) {
-    const std::string text = kickText_ ? kickText_(key) : std::string{};
+    const std::string text = kickText_ ? kickText_(key, {}) : std::string{};
     return text.empty() ? refuse(fallback) : refuseMiniMessage(text);
 }
 
