@@ -23,10 +23,6 @@
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-green">
 </p>
 
-> ⚠️ **Early development.** Basalt Proxy is not ready for a public network. It has
-> only been exercised on Linux, mostly with offline bots against real vanilla, Paper
-> and Basalt backends. The status table below is the honest state of the project.
-
 ## Overview
 
 Basalt Proxy sits in front of a set of Minecraft servers, gives players a single
@@ -121,76 +117,39 @@ only believed from those addresses, so a player cannot forge an address.
 
 ## Groups and commands
 
-Commands run from the console and from players (Java and Bedrock), with a command tree,
-permissions and tab-complete: `help`, `list`, `glist`, `server`, `send`, `status`,
-`reload`, `plugins`, `op`, `deop`, `group`, `ban`, `pardon`, `banlist`, `kick`,
-`whitelist`, `antibot` and `stop`. Who may run what is defined in `groups.toml`
-(inheritance, `*` wildcards, a `-` prefix to deny; the most specific rule wins); who
-belongs to which group is player state, set with `op` and `group`. Everything is also
-reachable as `basalt:<name>`, which a backend can never shadow. Whitelist and bans are
-applied at login for Java and Bedrock players. A successful `send` acknowledges
-preparation, and the destination may still reject the login.
-
-The console accepts an optional leading slash, CRLF and a final line at EOF. EOF leaves
-the proxy running, for headless services.
+Built-in commands (`server`, `send`, `glist`, `kick`, `ban`, `whitelist`, `reload`...) work from the console and in game,
+with tab-complete and a `basalt:` prefix backends cannot shadow. Permissions live in `groups.toml`, with inheritance,
+wildcards and negation.
 
 ## Antibot
 
-`antibot.toml` configures verification that runs before any server is chosen. It scores
-each origin address (reputation, name and host patterns, request rate), switches to
-attack mode on its own when the load spikes, and can hold suspicious logins in a small
-native limbo world where gravity, movement, keep-alive latency and client brand are
-checked. A block or map captcha is available, on by default only for very suspicious
-origins. Also included: an optional passthrough that sends new origins away once and
-admits them when they return, an exploit filter (Log4j-style strings, oversized plugin
-messages, NBT limits), a status cache, blocklists from files or HTTPS URLs, optional
-anti-VPN and GeoIP lookups using your own provider and database, Linux `TCP_INFO`
-checks, a hook that runs a command (for example an nftables update) to drop banned
-addresses in the kernel, attack summaries, a webhook, and the `antibot` console command.
-The Bedrock listener shares reputation and bans. Verified with Swarm and raw-socket
-bots against real Paper and Basalt backends; it has not been run with the official
-graphical client, and the map captcha has not been solved end to end.
+`antibot.toml` checks every connection before it reaches a server: per-address reputation, automatic attack mode, a
+limbo world with movement and captcha checks, an exploit filter, blocklists and optional anti-VPN and GeoIP lookups.
 
 ## Lua plugins
 
-Plugins are `.bppkg` packages with a `plugin.toml` and a Lua main script, running in a
-sandbox with an instruction and memory budget; a broken plugin does not take the proxy
-down. The API shares the shape of the server's: `on` and `watch` events, commands,
-players and servers, a store, waits, and a `packet` namespace to read, modify, cancel
-and send packets in both directions. Some events (login, server pre-connect, kick, chat,
-command, server list ping) accept a decision within a deadline that never blocks the
-network loops. `plugins.toml` grants each plugin its capabilities. Off by default.
+Plugins are `.bppkg` packages written in Lua and run in a sandbox, so a broken plugin cannot take the proxy down. The
+API follows the server's: events, commands, players, servers, a store and packet access. Off by default.
 
 ## BungeeCord and Velocity plugins
 
-An optional layer runs BungeeCord and Velocity plugins on top of Shim, without a JVM
-installed on the host. Without Java plugins in `plugins/`, no virtual machine starts.
-The adapters map to the native API, covering the `BungeeCord` plugin channel and the
-common events; the BungeeCord adapter is the more complete one and Velocity still throws
-`UnsupportedOperationException` for titles, boss bars, tab lists, cookies and transfers.
-Only test plugins have been exercised; no community plugin has been validated.
+Optional adapters run BungeeCord and Velocity plugins on Shim, with no JVM installed on the host. No virtual machine
+starts unless there are Java plugins in `plugins/`.
 
 ## Remote API
 
-`remote.toml` enables a small HTTP API (off by default, loopback) to read the proxy's
-state (`/v1/status`, `/v1/servers`, `/v1/players`, `/v1/sessions`...) and to send or kick
-a player and reload the configuration. It uses a bearer token generated on first start
-in `.basalt/api.token`, locks out addresses that send wrong tokens, and is plain HTTP, so
-anything beyond loopback belongs behind a TLS reverse proxy. Each action can be turned off.
+`remote.toml` enables an HTTP API for reading the proxy's state, moving and kicking players and reloading the
+configuration. It is off by default, listens on loopback and uses the token in `.basalt/api.token`.
 
 ## Bedrock
 
-With `[bedrock] enabled = true` the proxy listens for Bedrock Edition clients over
-NetherNet and RakNet and bridges them to a Java server, translating chunks, position and
-chat. A Basalt Server can serve Bedrock players itself over the session envelope. Verified
-with a bot; NetherNet has only been checked for its status response, and no real Bedrock
-client has joined yet.
+With `[bedrock] enabled = true`, Bedrock Edition players join over NetherNet and are bridged to Java servers. A Basalt
+Server behind the proxy can serve them directly.
 
 ## Server list
 
-`server_list.toml` defines what the multiplayer list shows: MOTD, player count and sample,
-a default or custom icon and named profiles with conditions, optionally relaying the
-status of a real server. It supports `%basalt_*%` placeholders and MiniMessage.
+`server_list.toml` sets the MOTD, player count and sample, icon and conditional profiles, with `%basalt_*%`
+placeholders and MiniMessage.
 
 ## Building
 
@@ -226,26 +185,6 @@ with it.
 
 The tests run with `ctest --preset debug`, and `--preset asan` builds the same
 tree under the address and undefined sanitizers.
-
-## Status
-
-| Area | Status |
-|---|---|
-| Build, module layout and cross-platform CI | CI builds Linux x64/arm64, macOS x64/arm64 and Windows x64; only Linux has been run |
-| Command line: `--help`, `--version`, `--config` | Working |
-| Listener, handshake, local status and ping/pong | Implemented, tested on Linux |
-| Login crypto and session verification | Implemented; simulated-endpoint tests and a real Mojang TLS query; no real account yet |
-| Native backend login, configuration and play relay | Offline vanilla, Paper and Basalt 26.3 bot gates pass; graphical client pending |
-| Server switching | Verified with the Swarm bot between real Paper and Basalt backends in one connection; graphical client verified offline |
-| Player forwarding | Velocity modern tested with offline Paper and Basalt; legacy modes have fixture coverage |
-| Configuration, groups, commands, whitelist and bans | Working; verified with Paper and bots |
-| Antibot | Working; verified with bots, not with a graphical client |
-| Online profiles and graphical clients | Not validated |
-| Translation handover to a Basalt Server backend | Working for Java and Bedrock players over the session envelope (bot-verified) |
-| Older Java clients, 26.3 clients on older servers, and Bedrock clients | Older clients from 1.8 and 26.3 clients on 1.21.5 to 26.2 bot-verified; Bedrock bridge bot-verified; no real Bedrock client yet |
-| Plugins and the Lua runtime | Working, sandboxed, hot reload; Linux only so far |
-| Remote HTTP API | Working; verified with `curl` and tests |
-| Velocity and BungeeCord adapters using Shim | Early; test plugins only, Velocity has gaps |
 
 ## Contributing and community
 

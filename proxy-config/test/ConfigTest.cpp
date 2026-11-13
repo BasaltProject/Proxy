@@ -131,4 +131,3 @@ TEST_CASE("the shipped groups and commands files parse and keep the default and 
     REQUIRE(commands);
     CHECK(basalt::wire::config::CommandsConfig::parse(*commands, "commands.toml"));
 }
-

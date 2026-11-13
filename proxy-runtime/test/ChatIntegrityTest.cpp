@@ -66,4 +66,3 @@ TEST_CASE("the guard follows a signed chain and refuses what a backend would ref
     const auto broken = guard.serverbound(play::ChatMessagePacket::kId, bodyOf(signedChat(player, 4, "x", kNow)), kNow);
     CHECK(broken.key == "chat.disabled.chain_broken");
 }
-
