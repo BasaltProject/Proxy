@@ -2,8 +2,6 @@
 
 #include "BedrockStatus.hpp"
 
-#include <basalt/proxy/bungee/BungeeAdapter.hpp>
-#include <basalt/proxy/velocity/VelocityAdapter.hpp>
 #include <basalt/wire/common/logging/Logger.hpp>
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/protocol/PacketNames.hpp>
@@ -12,6 +10,11 @@
 
 #include <chrono>
 #include <cstdlib>
+
+#if defined(BASALT_HAS_SHIM)
+#include <basalt/proxy/bungee/BungeeAdapter.hpp>
+#include <basalt/proxy/velocity/VelocityAdapter.hpp>
+#endif
 
 using namespace basalt;
 

@@ -119,7 +119,7 @@ std::optional<AddressRange> AddressRange::parse(std::string_view text) {
 
 bool AddressRange::contains(const Bytes& address) const noexcept {
     const std::size_t whole = prefixBits_ / 8;
-    if (!std::equal(base_.begin(), base_.begin() + whole, address.begin()))
+    if (!std::equal(base_.begin(), base_.begin() + static_cast<std::ptrdiff_t>(whole), address.begin()))
         return false;
     const unsigned rest = prefixBits_ % 8;
     if (rest == 0)

@@ -15,7 +15,7 @@ namespace basalt::proxy::runtime::antibot {
 namespace {
 constexpr int kMaxWebhooksInFlight = 2;
 
-std::string quoted(std::string_view text) {
+std::string jsonQuoted(std::string_view text) {
     std::string out{"\""};
     for (const char c : text) {
         if (c == '"' || c == '\\')
@@ -68,7 +68,7 @@ void AttackReport::post(std::string_view kind, const std::string& text) {
         return;
     }
     std::thread{[this, url = config->webhookUrl, trust = config->webhookTrustPem,
-                 body = "{\"event\":" + quoted(kind) + ",\"content\":" + quoted(text) + "}"] {
+                 body = "{\"event\":" + jsonQuoted(kind) + ",\"content\":" + jsonQuoted(text) + "}"] {
         const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t*>(body.data()), body.size()};
         const auto sent = wire::auth::httpsPost(url, bytes, "Content-Type: application/json\r\n", {.trustPem = trust});
         if (!sent || !sent->ok())
