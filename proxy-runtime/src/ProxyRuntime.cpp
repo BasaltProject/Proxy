@@ -172,12 +172,12 @@ std::expected<void, std::string> ProxyRuntime::run(std::stop_token stop) {
                 });
             });
         if (impl_->config.general.enforceSecureProfile && impl_->config.network.onlineMode)
-            impl_->serviceKeys = std::jthread([this] {
+            impl_->serviceKeys = std::jthread([impl = impl_.get()] {
                 auto keys =
-                    impl_->services.servicesKeys
-                        ? impl_->services.servicesKeys()
+                    impl->services.servicesKeys
+                        ? impl->services.servicesKeys()
                         : std::make_shared<const wire::auth::ServicesKeySet>(wire::auth::ServicesKeySet::fetch());
-                impl_->access.setServices(std::move(keys));
+                impl->access.setServices(std::move(keys));
             });
         for (std::size_t i = 0; i < impl_->owners.size(); ++i)
             impl_->threads.emplace_back([this, i] { impl_->owners[i]->run(i == 0); });
