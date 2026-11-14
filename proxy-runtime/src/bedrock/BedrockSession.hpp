@@ -68,6 +68,16 @@ public:
 
 private:
     [[nodiscard]] bool openLink();
+    [[nodiscard]] std::unique_ptr<JavaLink> makeLink(const config::BackendConfig& target);
+    [[nodiscard]] bool delegates(const config::BackendConfig& target) const;
+    void pendingPlay(std::int32_t id, std::span<const std::uint8_t> body);
+    void pumpPending();
+    void commitSwitch();
+    void abandonSwitch(const std::string& reason);
+    void forgetEntities();
+    void forgetBackend();
+    void hopTo(std::int32_t dimension);
+    void heldSlotChanged(std::span<const std::uint8_t> body);
     void fromJava(std::int32_t id, std::span<const std::uint8_t> body);
     void joined(std::span<const std::uint8_t> body);
     void listed(std::span<const std::uint8_t> body);
@@ -167,6 +177,14 @@ private:
     bool turnedAway_ = false;
     bool announced_ = false;
     std::unique_ptr<JavaLink> link_;
+    std::unique_ptr<JavaLink> pending_;
+    std::uint32_t serials_ = 0;
+    std::uint32_t linkSerial_ = 0;
+    std::uint32_t pendingSerial_ = 0;
+    config::BackendConfig pendingBackend_;
+    std::vector<std::string> pendingBiomes_;
+    std::optional<std::string> pendingFailure_;
+    std::chrono::steady_clock::time_point pendingSince_{};
     std::vector<std::string> biomeKeys_;
     std::unordered_map<std::string, std::string> names_;
     std::unordered_map<std::string, std::vector<wire::protocol::login::GameProfileProperty>> textures_;
@@ -241,13 +259,13 @@ private:
     std::int32_t clientDimension_ = 0;
     std::int32_t gamemode_ = 0;
     bool spawned_ = false;
+    bool playing_ = false;
     bool teleported_ = false;
     bool arriving_ = false;
     std::int32_t acceptedTeleport_ = -1;
     std::chrono::steady_clock::time_point holdPositionsUntil_{};
     std::chrono::steady_clock::time_point lastPosition_{};
     std::optional<wire::protocol::play::ServerboundPositionLookPacket> pendingMove_;
-    int traced_ = 0;
     std::int32_t arrivalInputs_ = 0;
     std::size_t chunks_ = 0;
     float x_ = 0.0F;

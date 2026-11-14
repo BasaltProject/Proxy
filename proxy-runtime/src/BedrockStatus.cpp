@@ -135,7 +135,7 @@ bool BedrockStatus::start() {
                         if (!client.session->switchTo(*target)) {
                             wire::common::Logger{"Bedrock"}.warn(
                                 [&] { return "Could not move " + order.player + " to " + target->name + "."; });
-                            client.session->kick("The server could not be reached.");
+                            client.session->tell("<red>Could not connect you to " + target->name + ".</red>");
                         }
                     }
                 }

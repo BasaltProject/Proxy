@@ -171,6 +171,7 @@ void BedrockSession::chunk(std::span<const std::uint8_t> body) {
     out.writeBytes(column);
     sendBedrock(BedrockPacket::LevelChunk, out);
     chunks_++;
+    spawn();
 }
 
 void BedrockSession::mapChanged(std::span<const std::uint8_t> body) {
@@ -240,9 +241,12 @@ void BedrockSession::spawn() {
         announced_ = true;
         events_({runtime::PlayerEventKind::kJoin, javaName_, backend_.name, javaUuid_, {}});
     }
-    wire::io::ByteBuffer out;
-    bedrock::writePlayStatus(out, bedrock::PlayStatus::PlayerSpawn);
-    sendBedrock(BedrockPacket::PlayStatus, out);
+    if (!playing_) {
+        playing_ = true;
+        wire::io::ByteBuffer out;
+        bedrock::writePlayStatus(out, bedrock::PlayStatus::PlayerSpawn);
+        sendBedrock(BedrockPacket::PlayStatus, out);
+    }
     flushPendingSpawns();
 }
 

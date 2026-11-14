@@ -21,6 +21,7 @@ basalt_module(proxy-runtime-core
         src/bedrock/BedrockMessages.cpp
         src/bedrock/BedrockPlayerState.cpp
         src/bedrock/BedrockSession.cpp
+        src/bedrock/BedrockSwitch.cpp
         src/bedrock/BedrockWindows.cpp
         src/bedrock/BedrockWorld.cpp
         src/BackendChangeRequest.cpp

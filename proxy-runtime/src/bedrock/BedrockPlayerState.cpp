@@ -154,13 +154,7 @@ void BedrockSession::useDimension(std::int32_t dimension) {
     minSection_ = dimension == 0 ? kOverworldMinSection : 0;
 }
 
-void BedrockSession::changeDimension() {
-    wire::io::ByteBuffer out;
-    const float eye = y_ + bedrock::kPlayerEyeHeight;
-    bedrock::writeChangeDimension(out, static_cast<bedrock::BedrockDimension>(dimension_), x_, eye, z_, false);
-    sendBedrock(BedrockPacket::ChangeDimension, out);
-    clientDimension_ = dimension_;
-}
+void BedrockSession::changeDimension() { hopTo(dimension_); }
 
 void BedrockSession::respawned(std::span<const std::uint8_t> body) {
     wire::io::ByteBuffer in;
@@ -169,23 +163,7 @@ void BedrockSession::respawned(std::span<const std::uint8_t> body) {
     respawning_ = true;
     if (!packet || dimensionOf(packet->spawnInfo.dimensionName) == dimension_)
         return;
-    for (const auto& [id, uuid] : others_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
-        sendBedrock(BedrockPacket::RemoveEntity, gone);
-        gone.clear();
-        bedrock::writePlayerListRemove(gone, std::span{&uuid, 1}, connection_.protocolVersion());
-        sendBedrock(BedrockPacket::PlayerList, gone);
-    }
-    for (const std::int32_t id : mobs_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
-        sendBedrock(BedrockPacket::RemoveEntity, gone);
-    }
-    others_.clear();
-    mobs_.clear();
-    nameTags_.clear();
-    waitingItems_.clear();
+    forgetEntities();
     chunks_ = 0;
     useDimension(dimensionOf(packet->spawnInfo.dimensionName));
     changeDimension();

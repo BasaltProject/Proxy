@@ -94,18 +94,9 @@ bool BedrockSession::begin() {
 bool BedrockSession::openLink() {
     joinStarted_ = std::chrono::steady_clock::now();
     lastFromJava_ = joinStarted_;
-    JavaLink::Events events;
-    events.play = [this](std::int32_t id, std::span<const std::uint8_t> body) { fromJava(id, body); };
-    events.registry = [this](const std::string& registry, std::vector<std::string> keys) {
-        if (registry == "minecraft:worldgen/biome")
-            biomeKeys_ = std::move(keys);
-    };
-    events.closed = [this](const std::string& reason) { leave(reason); };
-    events.relay = [this](std::span<const std::uint8_t> packet) { relayFromBackend(packet); };
-    link_ = std::make_unique<JavaLink>(backend_, profile_, address_, port_, std::move(events), forwarding_.get(),
-                                       connection_.login().xuid);
-    delegated_ = forwarding_ != nullptr && forwarding_->delegateBedrock &&
-                 backend_.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
+    link_ = makeLink(backend_);
+    linkSerial_ = serials_;
+    delegated_ = delegates(backend_);
     if (delegated_) {
         const bedrock::LoginRequest& login = connection_.login();
         wire::protocol::sessionEnvelope::BedrockIdentity identity;
@@ -123,71 +114,37 @@ bool BedrockSession::openLink() {
     return link_->begin(kConnectBudget);
 }
 
-bool BedrockSession::switchTo(config::BackendConfig target) {
-    if (!started_ || link_ == nullptr)
-        return false;
-    for (const auto& [id, uuid] : others_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
-        sendBedrock(BedrockPacket::RemoveEntity, gone);
-        gone.clear();
-        bedrock::writePlayerListRemove(gone, std::span{&uuid, 1}, connection_.protocolVersion());
-        sendBedrock(BedrockPacket::PlayerList, gone);
-    }
-    for (const std::int32_t id : mobs_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeRemoveEntity(gone, static_cast<std::int64_t>(runtimeId(id)));
-        sendBedrock(BedrockPacket::RemoveEntity, gone);
-    }
-    for (const std::int32_t effect : effects_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeMobEffect(gone, kSelfRuntimeId, bedrock::BedrockEffectEvent::Remove, effect, 0, false, 0, false);
-        sendBedrock(BedrockPacket::MobEffect, gone);
-    }
-    effects_.clear();
-    others_.clear();
-    mobs_.clear();
-    nameTags_.clear();
-    waitingItems_.clear();
-    for (const auto& [key, entity] : bossBars_) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeBossEvent(gone, entity, bedrock::BedrockBossAction::Remove, "", 0.0F,
-                                connection_.protocolVersion());
-        sendBedrock(BedrockPacket::BossEvent, gone);
-    }
-    if (!sidebar_.empty()) {
-        wire::io::ByteBuffer gone;
-        bedrock::writeRemoveObjective(gone, sidebar_);
-        sendBedrock(BedrockPacket::RemoveObjective, gone);
-    }
-    names_.clear();
-    textures_.clear();
-    skins_ = std::make_shared<bedrock::SkinCache>();
-    bossBars_.clear();
-    objectives_.clear();
-    sidebar_.clear();
-    biomeKeys_.clear();
-    inventory_ = {};
-    chunks_ = 0;
-    spawned_ = false;
-    pendingSpawns_.clear();
-    teleported_ = false;
-    acceptedTeleport_ = -1;
-    sneaking_ = false;
-    pendingMove_.reset();
-    switching_ = true;
-    // The client keeps a world for as long as it stays in a dimension, so it is sent to another and brought back.
-    wire::io::ByteBuffer out;
-    const float eye = y_ + bedrock::kPlayerEyeHeight;
-    bedrock::writeChangeDimension(out, bedrock::BedrockDimension::Nether, x_, eye, z_, false);
-    sendBedrock(BedrockPacket::ChangeDimension, out);
-    out.clear();
-    bedrock::writeChangeDimension(out, bedrock::BedrockDimension::Overworld, x_, eye, z_, false);
-    sendBedrock(BedrockPacket::ChangeDimension, out);
-    connection_.flush();
-    clientDimension_ = 0;
-    backend_ = std::move(target);
-    return openLink();
+std::unique_ptr<JavaLink> BedrockSession::makeLink(const config::BackendConfig& target) {
+    const std::uint32_t serial = ++serials_;
+    const auto pending = [this, serial] { return pending_ != nullptr && serial == pendingSerial_; };
+    JavaLink::Events events;
+    events.play = [this, serial, pending](std::int32_t id, std::span<const std::uint8_t> body) {
+        if (pending())
+            pendingPlay(id, body);
+        else if (serial == linkSerial_)
+            fromJava(id, body);
+    };
+    events.registry = [this, pending](const std::string& registry, std::vector<std::string> keys) {
+        if (registry == "minecraft:worldgen/biome")
+            (pending() ? pendingBiomes_ : biomeKeys_) = std::move(keys);
+    };
+    events.closed = [this, serial, pending](const std::string& reason) {
+        if (pending())
+            pendingFailure_ = reason;
+        else if (serial == linkSerial_)
+            leave(reason);
+    };
+    events.relay = [this, serial](std::span<const std::uint8_t> packet) {
+        if (serial == linkSerial_)
+            relayFromBackend(packet);
+    };
+    return std::make_unique<JavaLink>(target, profile_, address_, port_, std::move(events), forwarding_.get(),
+                                      connection_.login().xuid);
+}
+
+bool BedrockSession::delegates(const config::BackendConfig& target) const {
+    return forwarding_ != nullptr && forwarding_->delegateBedrock &&
+           target.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
 }
 
 void BedrockSession::tell(std::string_view miniMessage) {
@@ -215,6 +172,7 @@ void BedrockSession::pump() {
         sendJava(play::ServerboundPositionLookPacket::kId, out);
         tickEnded();
     }
+    pumpPending();
     if (!delegated_ && !spawned_ && now - joinStarted_ > kJoinBudget)
         leave("The server took too long to let you in.");
     else if (now - lastFromJava_ > kSilenceBudget)
@@ -324,6 +282,8 @@ void BedrockSession::fromJava(std::int32_t id, std::span<const std::uint8_t> bod
         effectGiven(body);
     else if (id == play::RemoveMobEffectPacket::kId)
         effectRemoved(body);
+    else if (id == play::SetHeldSlotPacket::kId)
+        heldSlotChanged(body);
     else if (id == play::CommandsPacket::kId)
         commandList(body);
     else if (id == play::PlayDisconnectPacket::kId)
@@ -338,11 +298,15 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     if (!login || (started_ && !switching_))
         return;
     useDimension(dimensionOf(login->spawnInfo.dimensionName));
+    selfEntity_ = login->entityId;
+    gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
     if (switching_) {
         switching_ = false;
-        gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
+        wire::io::ByteBuffer mode;
+        bedrock::writeSetPlayerGameType(mode, gamemode_);
+        sendBedrock(BedrockPacket::SetPlayerGameType, mode);
         if (dimension_ != clientDimension_)
-            changeDimension();
+            hopTo(dimension_);
         return;
     }
     started_ = true;
@@ -355,8 +319,6 @@ void BedrockSession::joined(std::span<const std::uint8_t> body) {
     info.x = x_;
     info.y = y_ + bedrock::kPlayerEyeHeight;
     info.z = z_;
-    selfEntity_ = login->entityId;
-    gamemode_ = static_cast<std::int32_t>(login->spawnInfo.gamemode);
     info.playerGameType = gamemode_;
     info.vanillaVersion = "1.26.50";
     info.serverId = "basalt-proxy";

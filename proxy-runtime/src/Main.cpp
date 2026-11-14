@@ -652,8 +652,12 @@ int run(const cliCommand::Run& command) {
             },
             *language, [&runtime](std::string_view name) { return runtime->backendConfig(name); }, nativeForwarding,
             configuration->network.onlineMode, configuration->admission,
-            detail::BedrockSession::Commands{
-                playerCommand, playerCommandSpecs, {}, [&runtime] { return runtime->backendNames(); }, loginGate});
+            detail::BedrockSession::Commands{playerCommand, playerCommandSpecs,
+                                             [&bedrockPlayers](std::string_view player, std::string_view backend) {
+                                                 auto* side = bedrockPlayers.load(std::memory_order_acquire);
+                                                 return side != nullptr && side->connect(player, backend);
+                                             },
+                                             [&runtime] { return runtime->backendNames(); }, loginGate});
         bedrock->guard(
             {[&runtime](std::string_view address, bool connecting) {
                  return runtime->bedrockOffline(address, connecting);
