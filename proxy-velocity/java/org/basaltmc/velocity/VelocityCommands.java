@@ -3,6 +3,9 @@ package org.basaltmc.velocity;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.Command;
@@ -18,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 
 final class VelocityCommands implements CommandManager {
     private final Map<String, Command> commands = new LinkedHashMap<>();
@@ -92,12 +97,21 @@ final class VelocityCommands implements CommandManager {
 
     @Override
     public void register(BrigadierCommand command) {
-        dispatcher.getRoot().addChild(command.getNode());
-        commands.put(command.getNode().getLiteral().toLowerCase(Locale.ROOT), command);
+        register(metaBuilder(command).build(), command);
     }
 
     @Override
     public void register(CommandMeta meta, Command command) {
+        if (command instanceof BrigadierCommand brigadier) {
+            final LiteralCommandNode<CommandSource> node = brigadier.getNode();
+            dispatcher.getRoot().addChild(node);
+            for (final String alias : meta.getAliases()) {
+                if (!alias.equalsIgnoreCase(node.getLiteral())) {
+                    dispatcher.getRoot().addChild(LiteralArgumentBuilder.<CommandSource>literal(alias.toLowerCase(Locale.ROOT))
+                            .requires(node.getRequirement()).executes(node.getCommand()).redirect(node).build());
+                }
+            }
+        }
         for (final String alias : meta.getAliases()) {
             commands.put(alias.toLowerCase(Locale.ROOT), command);
             metas.put(alias.toLowerCase(Locale.ROOT), meta);
@@ -140,7 +154,14 @@ final class VelocityCommands implements CommandManager {
         try {
             if (command instanceof BrigadierCommand) {
                 final ParseResults<CommandSource> parsed = dispatcher.parse(trimmed, source);
-                dispatcher.execute(parsed);
+                if (parsed.getContext().getNodes().isEmpty()) {
+                    return CompletableFuture.completedFuture(false);
+                }
+                try {
+                    dispatcher.execute(parsed);
+                } catch (final CommandSyntaxException invalid) {
+                    source.sendMessage(Component.text(invalid.getMessage(), NamedTextColor.RED));
+                }
             } else if (command instanceof SimpleCommand simple) {
                 final String[] arguments = rest.isEmpty() ? new String[0] : rest.split(" ");
                 final SimpleCommand.Invocation invocation = new SimpleCommand.Invocation() {
@@ -159,11 +180,10 @@ final class VelocityCommands implements CommandManager {
                         return arguments;
                     }
                 };
-                if (simple.hasPermission(invocation)) {
-                    simple.execute(invocation);
-                } else {
-                    return CompletableFuture.completedFuture(true);
+                if (!simple.hasPermission(invocation)) {
+                    return CompletableFuture.completedFuture(false);
                 }
+                simple.execute(invocation);
             } else if (command instanceof RawCommand raw) {
                 final RawCommand.Invocation invocation = new RawCommand.Invocation() {
                     @Override
@@ -181,12 +201,13 @@ final class VelocityCommands implements CommandManager {
                         return rest;
                     }
                 };
-                if (raw.hasPermission(invocation)) {
-                    raw.execute(invocation);
+                if (!raw.hasPermission(invocation)) {
+                    return CompletableFuture.completedFuture(false);
                 }
+                raw.execute(invocation);
             }
         } catch (final Throwable error) {
-            Natives.log("the command " + root + " failed: " + error);
+            Failures.log("the command " + root + " failed", error);
         }
         return CompletableFuture.completedFuture(true);
     }

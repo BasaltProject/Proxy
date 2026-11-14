@@ -122,7 +122,7 @@ bool ClientSession::decided(std::uint64_t token, const DecisionResult& result, b
         if (!expired && !result.text.empty()) {
             frame_.clear();
             protocol::varInt::write(frame_, protocol::play::PlayDisconnectPacket::kId);
-            protocol::play::PlayDisconnectPacket{wire::text::miniMessage::parse(result.text)}.write(frame_);
+            protocol::play::PlayDisconnectPacket{decisionText(result.text, result.textJson)}.write(frame_);
             return queuePacket(frame_.readable());
         }
         return queuePacket(held_);
@@ -134,7 +134,7 @@ bool ClientSession::decided(std::uint64_t token, const DecisionResult& result, b
         const auto body = view.readable();
         if (result.deny && !expired) {
             if (!result.reason.empty())
-                tell(result.reason);
+                tell(decisionText(result.reason, result.reasonJson));
             return applyChatVerdict(denyChat(id, body));
         }
         if (!expired && !result.text.empty()) {
@@ -148,14 +148,15 @@ bool ClientSession::decided(std::uint64_t token, const DecisionResult& result, b
     }
     if (result.deny && !expired) {
         if (inPlay) {
-            tell(result.reason.empty() ? std::string_view{"<red>You cannot connect to that server."} : result.reason);
+            tell(result.reason.empty() ? wire::text::miniMessage::parse("<red>You cannot connect to that server.")
+                                       : decisionText(result.reason, result.reasonJson));
             return true;
         }
         closing_ = true;
         frame_.clear();
         protocol::varInt::write(frame_, protocol::login::LoginDisconnectPacket::kId);
-        protocol::login::LoginDisconnectPacket{
-            wire::text::miniMessage::parse(result.reason.empty() ? std::string_view{"Disconnected"} : result.reason)}
+        protocol::login::LoginDisconnectPacket{result.reason.empty() ? wire::text::Component::text("Disconnected")
+                                                                     : decisionText(result.reason, result.reasonJson)}
             .write(frame_);
         return queuePacket(frame_.readable());
     }

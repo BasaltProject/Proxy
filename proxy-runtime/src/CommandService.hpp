@@ -6,6 +6,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -25,6 +26,9 @@ public:
     /// True when the line names a command, which is then queued; false leaves it for the backend.
     [[nodiscard]] bool submit(CommandSource source, std::string line);
 
+    /// Offered the console lines no registered command takes; true when it took the line. Set before any line runs.
+    void consoleFallback(std::function<bool(std::string_view)> fallback) { consoleFallback_ = std::move(fallback); }
+
 private:
     void work(std::stop_token stop);
 
@@ -35,6 +39,7 @@ private:
 
     CommandDispatcher* dispatcher_;
     const Messages* messages_;
+    std::function<bool(std::string_view)> consoleFallback_;
     std::mutex mutex_;
     std::condition_variable_any wake_;
     std::deque<Job> queue_;

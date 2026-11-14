@@ -8,6 +8,7 @@
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
+#include <basalt/wire/protocol/login/LoginPackets.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
 #include <basalt/wire/protocol/play/CommandPackets.hpp>
 #include <basalt/wire/protocol/play/HudPackets.hpp>
@@ -172,8 +173,17 @@ void ClientSession::kick(std::string_view reason) {
 }
 
 void ClientSession::kick(const wire::text::Component& component) {
-    if (!inPlay())
+    if (!inPlay()) {
+        if (closing_ || !profile_ || protocolState() != wire::protocol::ProtocolState::Login)
+            return;
+        closing_ = true;
+        closeBackends();
+        frame_.clear();
+        wire::protocol::varInt::write(frame_, wire::protocol::login::LoginDisconnectPacket::kId);
+        wire::protocol::login::LoginDisconnectPacket{component}.write(frame_);
+        static_cast<void>(queuePacket(frame_.readable()));
         return;
+    }
     closing_ = true;
     closeBackends();
     frame_.clear();

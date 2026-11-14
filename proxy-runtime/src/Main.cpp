@@ -209,6 +209,10 @@ int run(const cliCommand::Run& command) {
     dispatcher.renderCustomWith([&messages](std::string_view text) { return messages.fill(text); });
     dispatcher.configure(std::make_shared<const wire::config::CommandsConfig>(std::move(*commandsConfig)));
     detail::CommandService commandService{dispatcher, messages};
+    commandService.consoleFallback([&pluginHost](std::string_view line) {
+        auto* host = pluginHost.load(std::memory_order_acquire);
+        return host != nullptr && host->command(line);
+    });
     const wire::common::Logger consoleLogger{"Console"};
     const CommandSource consoleSource{"CONSOLE", true, [&consoleLogger](std::string_view miniMessage) {
                                           consoleLogger.info([&] { return detail::Messages::plain(miniMessage); });

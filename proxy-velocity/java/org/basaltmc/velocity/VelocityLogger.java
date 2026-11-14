@@ -24,7 +24,7 @@ final class VelocityLogger extends AbstractLogger {
     @Override
     protected void handleNormalizedLoggingCall(Level level, Marker marker, String message, Object[] args, Throwable error) {
         final String line = MessageFormatter.arrayFormat(message, args).getMessage();
-        Natives.log("[" + owner + "] " + (level == Level.INFO ? "" : level + ": ") + line + (error == null ? "" : " " + error));
+        Natives.log("[" + owner + "] " + (level == Level.INFO ? "" : level + ": ") + line + (error == null ? "" : " " + Failures.describe(error)));
     }
 
     @Override

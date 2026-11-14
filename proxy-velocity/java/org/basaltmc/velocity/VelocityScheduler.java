@@ -7,6 +7,7 @@ import com.velocitypowered.api.scheduler.TaskStatus;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -14,8 +15,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 final class VelocityScheduler implements Scheduler {
-    private final ScheduledExecutorService pool = Executors.newScheduledThreadPool(2, runnable -> {
+    private final ScheduledExecutorService pool = Executors.newSingleThreadScheduledExecutor(runnable -> {
         final Thread thread = new Thread(runnable, "Basalt Velocity scheduler");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final ExecutorService workers = Executors.newCachedThreadPool(runnable -> {
+        final Thread thread = new Thread(runnable, "Basalt Velocity task");
         thread.setDaemon(true);
         return thread;
     });
@@ -31,17 +37,22 @@ final class VelocityScheduler implements Scheduler {
         volatile ScheduledFuture<?> future;
         volatile TaskStatus status = TaskStatus.SCHEDULED;
 
-        Task(Object plugin, Consumer<ScheduledTask> body) {
+        final ClassLoader loader;
+
+        Task(Object plugin, Object source, Consumer<ScheduledTask> body) {
             this.plugin = plugin;
             this.body = body;
+            this.loader = source.getClass().getClassLoader();
         }
 
         @Override
         public void run() {
+            final Thread thread = Thread.currentThread();
+            thread.setContextClassLoader(loader);
             try {
                 body.accept(this);
             } catch (final Throwable error) {
-                Natives.log("a scheduled task failed: " + error);
+                Failures.log("a scheduled task failed", error);
             } finally {
                 if (repeat <= 0 && status == TaskStatus.SCHEDULED) {
                     status = TaskStatus.FINISHED;
@@ -107,20 +118,21 @@ final class VelocityScheduler implements Scheduler {
         public ScheduledTask schedule() {
             tasks.add(task);
             task.future = task.repeat > 0
-                    ? pool.scheduleAtFixedRate(task, task.delayUnit.toMillis(task.delay), task.repeatUnit.toMillis(task.repeat), TimeUnit.MILLISECONDS)
-                    : pool.schedule(task, task.delayUnit.toMillis(task.delay), TimeUnit.MILLISECONDS);
+                    ? pool.scheduleAtFixedRate(() -> workers.execute(task), task.delayUnit.toMillis(task.delay),
+                            task.repeatUnit.toMillis(task.repeat), TimeUnit.MILLISECONDS)
+                    : pool.schedule(() -> workers.execute(task), task.delayUnit.toMillis(task.delay), TimeUnit.MILLISECONDS);
             return task;
         }
     }
 
     @Override
     public TaskBuilder buildTask(Object plugin, Runnable body) {
-        return new Builder(new Task(plugin, self -> body.run()));
+        return new Builder(new Task(plugin, body, self -> body.run()));
     }
 
     @Override
     public TaskBuilder buildTask(Object plugin, Consumer<ScheduledTask> body) {
-        return new Builder(new Task(plugin, body));
+        return new Builder(new Task(plugin, body, body));
     }
 
     @Override
@@ -139,5 +151,6 @@ final class VelocityScheduler implements Scheduler {
             task.cancel();
         }
         pool.shutdownNow();
+        workers.shutdownNow();
     }
 }

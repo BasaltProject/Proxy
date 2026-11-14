@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PluginInternal.hpp"
+
 #include <basalt/proxy/plugins/JarDetector.hpp>
 #include <basalt/proxy/plugins/JavaAdapter.hpp>
 #include <basalt/wire/common/json/Json.hpp>
@@ -30,6 +32,51 @@ struct PlayerRow {
     std::uint16_t port = 0;
     std::int64_t ping = -1;
 };
+
+/// A facade's decision answer: deny, reason, redirect, text, max, online, then for a ping the JSON flags ("r", "t"),
+/// and "=" prefixed version name, protocol, newline separated sample and icon data URI, each empty when kept.
+inline std::optional<runtime::DecisionResult> decisionOf(const std::vector<std::string>& answer, bool ping) {
+    if (answer.size() < 6)
+        return std::nullopt;
+    runtime::DecisionResult result;
+    result.deny = answer[0] == "1";
+    result.reason = answer[1];
+    result.redirect = answer[2];
+    result.text = answer[3];
+    if (answer.size() > 6) {
+        result.reasonJson = answer[6].contains('r');
+        result.textJson = answer[6].contains('t');
+    }
+    if (!ping)
+        return result;
+    if (const auto max = std::stoll(answer[4]); max >= 0)
+        result.maxPlayers = static_cast<std::int32_t>(max);
+    if (const auto online = std::stoll(answer[5]); online >= 0)
+        result.online = static_cast<std::int32_t>(online);
+    const auto given = [&answer](std::size_t at) -> std::optional<std::string_view> {
+        if (answer.size() <= at || !answer[at].starts_with('='))
+            return std::nullopt;
+        return std::string_view{answer[at]}.substr(1);
+    };
+    if (const auto name = given(7))
+        result.versionName = std::string{name->substr(0, kMaxSampleLine)};
+    if (answer.size() > 8)
+        if (const auto protocol = std::stoll(answer[8]); protocol >= 0 && protocol <= 0x7fffffff)
+            result.versionProtocol = static_cast<std::int32_t>(protocol);
+    if (const auto lines = given(9)) {
+        std::vector<std::string> sample;
+        std::string_view rest = *lines;
+        while (!rest.empty() && sample.size() < kMaxSampleLines) {
+            const auto end = rest.find('\n');
+            sample.emplace_back(rest.substr(0, std::min(end, kMaxSampleLine)));
+            rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+        }
+        result.sample = std::move(sample);
+    }
+    if (const auto icon = given(10))
+        result.favicon = faviconOf(*icon);
+    return result;
+}
 
 inline std::string text(JNIEnv* env, jstring value) {
     if (value == nullptr)

@@ -25,6 +25,8 @@ void CommandService::run(const CommandSource& source, std::string_view line) {
     case CommandOutcome::kFailed:
         return;
     case CommandOutcome::kUnknown:
+        if (source.console && consoleFallback_ && consoleFallback_(line))
+            return;
         source.reply(messages_->command("unknown"));
         return;
     case CommandOutcome::kDenied:

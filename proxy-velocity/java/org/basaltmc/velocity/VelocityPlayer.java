@@ -6,6 +6,7 @@ import com.google.common.io.ByteStreams;
 import com.velocitypowered.api.network.HandshakeIntent;
 import com.velocitypowered.api.network.ProtocolState;
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.api.permission.PermissionFunction;
 import com.velocitypowered.api.permission.Tristate;
 import com.velocitypowered.api.proxy.ConnectionRequestBuilder;
 import com.velocitypowered.api.proxy.Player;
@@ -37,6 +38,9 @@ final class VelocityPlayer implements Player {
     private volatile long ping;
     private final UUID session = UUID.randomUUID();
     private Locale locale;
+    private static final long kJoinMillis = 60_000;
+    private volatile long joiningSince;
+    private volatile PermissionFunction permissions;
     private final VelocityTabList tabList;
     private final PlayerPacks packs = new PlayerPacks(this);
 
@@ -56,6 +60,31 @@ final class VelocityPlayer implements Player {
         }
         return text.substring(0, 8) + "-" + text.substring(8, 12) + "-" + text.substring(12, 16) + "-" + text.substring(16, 20)
                 + "-" + text.substring(20);
+    }
+
+    /** Marks a player the proxy has not listed yet, still logging in, so a sync keeps it for a while. */
+    VelocityPlayer markJoining() {
+        joiningSince = System.currentTimeMillis();
+        return this;
+    }
+
+    boolean stillJoining() {
+        return joiningSince != 0 && System.currentTimeMillis() - joiningSince < kJoinMillis;
+    }
+
+    void joined() {
+        joiningSince = 0;
+    }
+
+    void permissions(PermissionFunction function) {
+        permissions = function;
+    }
+
+    Tristate nativePermission(String permission) {
+        if (Natives.permission(name, permission)) {
+            return Tristate.TRUE;
+        }
+        return Natives.permissionOverride(name, permission) == 0 ? Tristate.FALSE : Tristate.UNDEFINED;
     }
 
     void update(String server, long ping) {
@@ -458,10 +487,8 @@ final class VelocityPlayer implements Player {
 
     @Override
     public Tristate getPermissionValue(String permission) {
-        if (Natives.permission(name, permission)) {
-            return Tristate.TRUE;
-        }
-        return Natives.permissionOverride(name, permission) == 0 ? Tristate.FALSE : Tristate.UNDEFINED;
+        final PermissionFunction function = permissions;
+        return function != null ? function.getPermissionValue(permission) : nativePermission(permission);
     }
 
     @Override

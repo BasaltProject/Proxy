@@ -116,20 +116,7 @@ public:
                  if (result != nullptr)
                      env->DeleteLocalRef(result);
              });
-        if (answer.size() < 6)
-            return std::nullopt;
-        runtime::DecisionResult result;
-        result.deny = answer[0] == "1";
-        result.reason = answer[1];
-        result.redirect = answer[2];
-        result.text = answer[3];
-        if (request.kind == DecisionKind::kPing) {
-            if (const auto max = std::stoll(answer[4]); max >= 0)
-                result.maxPlayers = static_cast<std::int32_t>(max);
-            if (const auto online = std::stoll(answer[5]); online >= 0)
-                result.online = static_cast<std::int32_t>(online);
-        }
-        return result;
+        return decisionOf(answer, request.kind == DecisionKind::kPing);
     }
 
     void notify(const runtime::PlayerEvent& event) override {
@@ -169,7 +156,8 @@ public:
         JNIEnv* env = shim_->env();
         if (kind != nullptr && env != nullptr) {
             std::vector<std::string> fields{
-                event.player, event.uuid, event.backend, event.address, std::to_string(event.port), {}, event.backend};
+                event.player, event.uuid,   event.backend, event.address, std::to_string(event.port),
+                event.from,   event.backend};
             if (event.kind == Kind::kSettings) {
                 fields = settingsFields(*event.settings);
                 fields.insert(fields.begin(), event.player);

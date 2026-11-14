@@ -8,6 +8,7 @@ work="$(mktemp -d)"
 cp="$(ls "$out"/velocity/lib/*.jar | tr '\n' ':')"
 mkdir -p "$work/classes"
 javac --release 21 -proc:none -cp "$cp" -d "$work/classes" $(find "$here/../java" -name '*.java')
+cp -r "$here/../resources/." "$work/classes/"
 jar --create --file "$out/velocity/basalt-velocity.jar" -C "$work/classes" .
 [ -d "$here/../test-plugin/src" ] || exit 0
 mkdir -p "$work/test-classes" "$out/test"

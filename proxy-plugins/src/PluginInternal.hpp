@@ -63,6 +63,13 @@ struct PluginHost::Timer {
 /// A component read from JSON text, or nothing when the text is not valid component JSON.
 [[nodiscard]] std::optional<wire::text::Component> componentOfJson(std::string_view json);
 
+/// The PNG bytes of a `data:image/png;base64,` icon; empty for an empty text, nothing when it does not decode.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> faviconOf(std::string_view dataUri);
+
+/// Limits on what a ping decision may put in the server list.
+inline constexpr std::size_t kMaxSampleLines = 32;
+inline constexpr std::size_t kMaxSampleLine = 256;
+
 /// The bit a decision event sets in PluginHost::deciders_, or 0 when the event is not a decision.
 [[nodiscard]] unsigned decisionBit(std::string_view event);
 [[nodiscard]] unsigned decisionBit(runtime::DecisionKind kind);

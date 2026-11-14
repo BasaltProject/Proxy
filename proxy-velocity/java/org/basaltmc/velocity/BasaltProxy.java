@@ -68,7 +68,7 @@ final class BasaltProxy implements ProxyServer {
         for (final String[] row : Natives.players()) {
             fresh.put(row[0].toLowerCase(Locale.ROOT), row);
         }
-        players.keySet().removeIf(key -> !fresh.containsKey(key));
+        players.entrySet().removeIf(entry -> !fresh.containsKey(entry.getKey()) && !entry.getValue().stillJoining());
         for (final Map.Entry<String, String[]> entry : fresh.entrySet()) {
             final String[] row = entry.getValue();
             final VelocityPlayer known = players.get(entry.getKey());
@@ -76,6 +76,7 @@ final class BasaltProxy implements ProxyServer {
                 players.put(entry.getKey(), new VelocityPlayer(row[0], row[1], row[2], row[3], Integer.parseInt(row[4]), Long.parseLong(row[5])));
             } else {
                 known.update(row[2], Long.parseLong(row[5]));
+                known.joined();
             }
         }
         servers.clear();

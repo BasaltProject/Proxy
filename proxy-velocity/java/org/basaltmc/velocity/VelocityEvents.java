@@ -43,7 +43,7 @@ final class VelocityEvents implements EventManager {
 
     @Override
     public void register(Object plugin, Object listener) {
-        for (final Method method : listener.getClass().getDeclaredMethods()) {
+        for (final Method method : subscribers(listener.getClass())) {
             final Subscribe subscribe = method.getAnnotation(Subscribe.class);
             if (subscribe == null || method.getParameterCount() < 1) {
                 continue;
@@ -70,11 +70,19 @@ final class VelocityEvents implements EventManager {
         }
     }
 
+    private static List<Method> subscribers(Class<?> type) {
+        final List<Method> methods = new ArrayList<>();
+        for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+            methods.addAll(java.util.Arrays.asList(current.getDeclaredMethods()));
+        }
+        return methods;
+    }
+
     private static Object invoke(Method method, Object listener, Object event, Continuation continuation) {
         try {
             return continuation == null ? method.invoke(listener, event) : method.invoke(listener, event, continuation);
         } catch (final java.lang.reflect.InvocationTargetException error) {
-            Natives.log("an event handler failed: " + error.getCause());
+            Failures.log("an event handler failed", error.getCause());
         } catch (final ReflectiveOperationException error) {
             Natives.log("an event handler could not run: " + error);
         }
@@ -100,16 +108,20 @@ final class VelocityEvents implements EventManager {
             }
         }
         matching.sort(Comparator.comparingInt(Registration::priority));
+        final Thread thread = Thread.currentThread();
+        final ClassLoader previous = thread.getContextClassLoader();
         for (final Registration registration : matching) {
-            final EventTask task;
+            final Object owner = registration.listener() != null ? registration.listener() : registration.handler();
+            thread.setContextClassLoader(owner.getClass().getClassLoader());
             try {
-                task = registration.handler().executeAsync(event);
+                final EventTask task = registration.handler().executeAsync(event);
+                if (task != null) {
+                    wait(task);
+                }
             } catch (final Throwable error) {
-                Natives.log("an event handler failed: " + error);
-                continue;
-            }
-            if (task != null) {
-                wait(task);
+                Failures.log("an event handler failed", error);
+            } finally {
+                thread.setContextClassLoader(previous);
             }
         }
         return CompletableFuture.completedFuture(event);
@@ -132,7 +144,9 @@ final class VelocityEvents implements EventManager {
         };
         try {
             if (task.requiresAsync()) {
+                final ClassLoader loader = Thread.currentThread().getContextClassLoader();
                 final Thread thread = new Thread(() -> task.execute(continuation), "Basalt Velocity event");
+                thread.setContextClassLoader(loader);
                 thread.setDaemon(true);
                 thread.start();
             } else {
@@ -142,10 +156,10 @@ final class VelocityEvents implements EventManager {
                 Natives.log("an event handler did not finish in time");
             }
         } catch (final Throwable error) {
-            Natives.log("an event task failed: " + error);
+            Failures.log("an event task failed", error);
         }
         if (failure.get() != null) {
-            Natives.log("an event task failed: " + failure.get());
+            Failures.log("an event task failed", failure.get());
         }
     }
 

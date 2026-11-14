@@ -1,6 +1,50 @@
 #include "ProxyRuntimeImpl.hpp"
 
+#include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/text/ComponentJson.hpp>
+
 namespace basalt::proxy::runtime {
+
+wire::text::Component decisionText(std::string_view text, bool json) {
+    if (json) {
+        if (const auto parsed = wire::common::parseJson(text))
+            return wire::text::componentJson::deserialize(*parsed);
+        return wire::text::Component::text(std::string{text});
+    }
+    return wire::text::miniMessage::parse(text);
+}
+
+namespace {
+
+void applyPingChanges(wire::protocol::status::ServerStatusPayload& payload, const DecisionResult& changes) {
+    if (!changes.text.empty())
+        payload.description = decisionText(changes.text, changes.textJson);
+    if (changes.maxPlayers && payload.players)
+        payload.players->max = *changes.maxPlayers;
+    if (changes.online && payload.players)
+        payload.players->online = *changes.online;
+    if (changes.versionName || changes.versionProtocol) {
+        auto version = payload.version.value_or(wire::protocol::status::ServerStatusPayload::Version{});
+        version.name = changes.versionName.value_or(version.name);
+        version.protocol = changes.versionProtocol.value_or(version.protocol);
+        payload.version = std::move(version);
+    }
+    if (changes.sample && payload.players) {
+        constexpr std::string_view kNoPlayer = "00000000-0000-0000-0000-000000000000";
+        payload.players->sample.clear();
+        for (const std::string& line : *changes.sample)
+            payload.players->sample.push_back({line, std::string{kNoPlayer}});
+    }
+    if (changes.favicon) {
+        if (changes.favicon->empty())
+            payload.favicon.reset();
+        else
+            payload.favicon = *changes.favicon;
+    }
+}
+
+} // namespace
+
 ProxyRuntime::ProxyRuntime(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 
 ProxyRuntime::ProxyRuntime(ProxyRuntime&&) noexcept = default;
@@ -98,14 +142,8 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
                           .version = protocol::status::ServerStatusPayload::Version{std::string{buildInfo::kVersion},
                                                                                     buildInfo::kProtocolVersion},
                           .favicon = std::vector<std::uint8_t>{icon.begin(), icon.end()}};
-            if (changes != nullptr) {
-                if (!changes->text.empty())
-                    payload.description = wire::text::miniMessage::parse(changes->text);
-                if (changes->maxPlayers && payload.players)
-                    payload.players->max = *changes->maxPlayers;
-                if (changes->online && payload.players)
-                    payload.players->online = *changes->online;
-            }
+            if (changes != nullptr)
+                applyPingChanges(payload, *changes);
             payload.enforcesSecureChat = state->config.general.enforceSecureProfile && state->config.network.onlineMode;
             wire::io::ByteBuffer body{1024}, framed{1024};
             protocol::varInt::write(body, protocol::status::StatusResponsePacket::kId);

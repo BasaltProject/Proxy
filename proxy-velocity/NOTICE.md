@@ -6,7 +6,7 @@ This module adapts the shape of the published Velocity plugin API onto Basalt Pr
 - The logic lives in native code (`proxy-plugins`) and in the runtime. This module only maps names and shapes
   and holds no mechanics of its own.
 - Nothing here is Velocity source code. Bodies are written from the documented behavior.
-- Java plugins run on Basalt Shim through JNI, built with a small constructor injector instead of Guice. The Velocity
+- Java plugins run on Basalt Shim through JNI and are built through Guice, as Velocity does. The Velocity
   API jar and its dependencies are downloaded by `scripts/fetch-deps.sh`, checked against their published SHA-1, and are
   never stored in this repository.
 

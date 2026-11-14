@@ -248,7 +248,18 @@ struct DecisionResult {
     std::string text;
     std::optional<std::int32_t> maxPlayers;
     std::optional<std::int32_t> online;
+    /// reason or text hold component JSON instead of MiniMessage.
+    bool reasonJson = false;
+    bool textJson = false;
+    /// For a ping: the version line and protocol, the hover lines, and the icon as PNG (empty drops it).
+    std::optional<std::string> versionName;
+    std::optional<std::int32_t> versionProtocol;
+    std::optional<std::vector<std::string>> sample;
+    std::optional<std::vector<std::uint8_t>> favicon;
 };
+
+/// The component a decision's reason or text stands for, read as JSON or as MiniMessage.
+[[nodiscard]] wire::text::Component decisionText(std::string_view text, bool json);
 
 struct VerifiedRecord {
     std::string name;

@@ -30,7 +30,13 @@ public final class BasaltBungee {
     private static BasaltProxy proxy;
     private static final long WAIT_MILLIS = 2500;
 
+    private static final ClassLoader kPluginContext = new PluginContextLoader();
+
     private BasaltBungee() {}
+
+    private static void enter() {
+        Thread.currentThread().setContextClassLoader(kPluginContext);
+    }
 
     static BasaltProxy proxy() {
         return proxy;
@@ -38,6 +44,7 @@ public final class BasaltBungee {
 
     /** Starts the proxy facade and loads the plugins in the folder. */
     public static void boot(String folder) {
+        enter();
         final java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
         for (final java.util.logging.Handler handler : root.getHandlers()) {
             root.removeHandler(handler);
@@ -49,7 +56,7 @@ public final class BasaltBungee {
                 if (message.startsWith("Could not initialize LibraryLoader")) {
                     return;
                 }
-                Natives.log(message);
+                Natives.log(record.getThrown() == null ? message : message + ": " + Failures.describe(record.getThrown()));
             }
 
             @Override
@@ -132,11 +139,13 @@ public final class BasaltBungee {
 
     /** Runs a console line; true when it named a registered command. */
     public static boolean console(String line) {
+        enter();
         return proxy.getPluginManager().dispatchCommand(proxy.getConsole(), line);
     }
 
     /** Disables the plugins and stops the scheduler. */
     public static void shutdown() {
+        enter();
         for (final Plugin plugin : proxy.getPluginManager().getPlugins()) {
             try {
                 plugin.onDisable();
@@ -165,8 +174,35 @@ public final class BasaltBungee {
         return proxy.remember(new BasaltPlayer(f[0], f[1], f[2], f[3], Integer.parseInt(f[4]), -1));
     }
 
+    private static final String kPingVersion = "Basalt Proxy";
+
     private static String reasonOf(BaseComponent[] reason) {
-        return reason == null || reason.length == 0 ? "" : MiniMessages.of(reason);
+        return reason == null || reason.length == 0 ? "" : net.md_5.bungee.chat.ComponentSerializer.toString(reason);
+    }
+
+    /** A denial whose reason, or a kick whose new text, is component JSON. */
+    private static String[] answerJson(boolean cancelled, String reason, String server, String text) {
+        return new String[] {cancelled ? "1" : "0", reason, server == null ? "" : server, text, "-1", "-1", "rt"};
+    }
+
+    private static String[] pingAnswer(ServerPing response, int protocol) {
+        final BaseComponent description = response.getDescriptionComponent();
+        final String motd = description == null ? "" : net.md_5.bungee.chat.ComponentSerializer.toString(description);
+        final ServerPing.Players players = response.getPlayers();
+        final long online = players == null || players.getOnline() == proxy.getOnlineCount() ? -1 : players.getOnline();
+        final ServerPing.Protocol version = response.getVersion();
+        final boolean changed = version != null && (!kPingVersion.equals(version.getName()) || version.getProtocol() != protocol);
+        final StringBuilder sample = new StringBuilder();
+        final boolean sampled = players != null && players.getSample() != null && players.getSample().length > 0;
+        if (sampled) {
+            for (final ServerPing.PlayerInfo entry : players.getSample()) {
+                sample.append(sample.isEmpty() ? "" : "\n").append(entry.getName());
+            }
+        }
+        return new String[] {"0", "", "", motd.equals("{\"text\":\"\"}") ? "" : motd,
+                Long.toString(players == null ? -1 : players.getMax()), Long.toString(online), "t",
+                changed ? "=" + version.getName() : "", changed ? Integer.toString(version.getProtocol()) : "-1",
+                sampled ? "=" + sample : "", response.getFaviconObject() == null ? "" : "=" + response.getFaviconObject().getEncoded()};
     }
 
     /** kind is login, preconnect, kick, chat, command, ping; f is name, uuid, server, address, port, host, text. */
@@ -177,6 +213,7 @@ public final class BasaltBungee {
     }
 
     public static String[] decide(String kind, String[] f) {
+        enter();
         proxy.sync();
         switch (kind) {
             case "login": {
@@ -186,14 +223,14 @@ public final class BasaltBungee {
                 call(pre);
                 waitFor(done);
                 if (pre.isCancelled()) {
-                    return answer(true, reasonOf(pre.getCancelReasonComponents()), null, null, -1, -1);
+                    return answerJson(true, reasonOf(pre.getCancelReasonComponents()), null, "");
                 }
                 final CompletableFuture<Boolean> second = new CompletableFuture<>();
                 final LoginEvent login = new LoginEvent(pending, (result, error) -> second.complete(true));
                 call(login);
                 waitFor(second);
-                return answer(login.isCancelled(), login.isCancelled() ? reasonOf(login.getCancelReasonComponents()) : "", null,
-                        null, -1, -1);
+                return answerJson(login.isCancelled(), login.isCancelled() ? reasonOf(login.getCancelReasonComponents()) : "", null,
+                        "");
             }
             case "preconnect": {
                 final BasaltPlayer player = playerOf(f);
@@ -215,8 +252,8 @@ public final class BasaltBungee {
                 call(event);
                 final ServerInfo redirect = event.isCancelled() ? event.getCancelServer() : null;
                 final String text = new TextComponent(event.getKickReasonComponent()).toPlainText();
-                return answer(false, text.equals(f[6]) ? "" : MiniMessages.of(event.getKickReasonComponent()),
-                        redirect == null ? "" : redirect.getName(), null, -1, -1);
+                return answerJson(false, "", redirect == null ? "" : redirect.getName(),
+                        text.equals(f[6]) ? "" : reasonOf(event.getKickReasonComponent()));
             }
             case "chat": {
                 final BasaltPlayer player = playerOf(f);
@@ -231,18 +268,15 @@ public final class BasaltBungee {
             }
             case "ping": {
                 final BasaltPending pending = new BasaltPending("", "", f[3], 0, f[5]);
-                final ServerPing ping = new ServerPing(new ServerPing.Protocol("Basalt Proxy", Integer.parseInt(f[6].isEmpty() ? "0" : f[6])),
+                final int protocol = Integer.parseInt(f[6].isEmpty() ? "0" : f[6]);
+                final ServerPing ping = new ServerPing(new ServerPing.Protocol(kPingVersion, protocol),
                         new ServerPing.Players(-1, proxy.getOnlineCount(), null),
                         "", (net.md_5.bungee.api.Favicon) null);
                 final CompletableFuture<Boolean> done = new CompletableFuture<>();
                 final ProxyPingEvent event = new ProxyPingEvent(pending, ping, (result, error) -> done.complete(true));
                 call(event);
                 waitFor(done);
-                final ServerPing response = event.getResponse();
-                final String motd = response.getDescriptionComponent() == null ? ""
-                          : MiniMessages.of(response.getDescriptionComponent());
-                final long online = response.getPlayers().getOnline() == proxy.getOnlineCount() ? -1 : response.getPlayers().getOnline();
-                return answer(false, null, null, motd, response.getPlayers().getMax(), online);
+                return pingAnswer(event.getResponse(), protocol);
             }
             default:
                 return answer(false, null, null, null, -1, -1);
@@ -259,6 +293,7 @@ public final class BasaltBungee {
 
     /** kind is join, switch or quit. */
     public static void notifyPlayer(String kind, String[] f) {
+        enter();
         if (kind.equals("settings")) {
             proxy.sync();
             final BasaltPlayer known = proxy.playerNamed(f[0]);
@@ -276,7 +311,7 @@ public final class BasaltBungee {
                 }
                 break;
             case "switch":
-                call(new ServerSwitchEvent(player, proxy.getServerInfo(f[6])));
+                call(new ServerSwitchEvent(player, proxy.getServerInfo(f[5])));
                 break;
             case "quit":
                 call(new PlayerDisconnectEvent(player));
@@ -288,6 +323,7 @@ public final class BasaltBungee {
 
     /** Returns true when a handler cancelled the message. */
     public static boolean message(String player, String channel, byte[] data, boolean fromBackend) {
+        enter();
         proxy.sync();
         final BasaltPlayer who = proxy.playerNamed(player);
         if (who == null) {

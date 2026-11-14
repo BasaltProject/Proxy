@@ -9,6 +9,7 @@ import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.connection.PreLoginEvent;
+import com.velocitypowered.api.event.permission.PermissionsSetupEvent;
 import com.velocitypowered.api.event.player.KickedFromServerEvent;
 import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
@@ -19,6 +20,7 @@ import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
+import com.velocitypowered.api.permission.PermissionProvider;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerPing;
@@ -75,21 +77,44 @@ public final class BasaltVelocity {
                 text == null ? "" : text, Long.toString(max), Long.toString(online)};
     }
 
+    /** A denial whose reason, or a kick whose new text, is component JSON. */
+    private static String[] answerJson(boolean cancelled, String reason, String text) {
+        return new String[] {cancelled ? "1" : "0", reason, "", text, "-1", "-1", "rt"};
+    }
+
+    private static String[] pingAnswer(ServerPing response, int protocol) {
+        final Component description = response.getDescriptionComponent();
+        final String motd = description == null || description.equals(Component.empty()) ? "" : Text.json(description);
+        final long max = response.getPlayers().map(ServerPing.Players::getMax).orElse(-1);
+        final long online = response.getPlayers().map(ServerPing.Players::getOnline).filter(n -> n != proxy.getPlayerCount()).orElse(-1);
+        final ServerPing.Version version = response.getVersion();
+        final boolean changed = version != null && (!version.getName().equals(kPingVersion) || version.getProtocol() != protocol);
+        final StringBuilder sample = new StringBuilder();
+        response.getPlayers().ifPresent(players -> players.getSample().forEach(
+                entry -> sample.append(sample.isEmpty() ? "" : "\n").append(entry.getName())));
+        final boolean sampled = response.getPlayers().map(players -> !players.getSample().isEmpty()).orElse(false);
+        return new String[] {"0", "", "", motd, Long.toString(max), Long.toString(online), "t",
+                changed ? "=" + version.getName() : "", changed ? Integer.toString(version.getProtocol()) : "-1",
+                sampled ? "=" + sample : "", response.getFavicon().map(icon -> "=" + icon.getBase64Url()).orElse("")};
+    }
+
     private static VelocityPlayer playerOf(String[] f) {
         proxy.sync();
         final VelocityPlayer known = proxy.playerNamed(f[0]);
         if (known != null) {
             return known;
         }
-        return proxy.remember(new VelocityPlayer(f[0], f[1], f[2], f[3], Integer.parseInt(f[4]), -1));
+        return proxy.remember(new VelocityPlayer(f[0], f[1], f[2], f[3], Integer.parseInt(f[4]), -1).markJoining());
     }
 
     private static <E> E fire(E event) {
         return proxy.getEventManager().fire(event).join();
     }
 
+    private static final String kPingVersion = "Basalt Proxy";
+
     private static String reasonOf(Optional<Component> reason) {
-        return reason.map(Text::mini).orElse("");
+        return reason.map(Text::json).orElse("");
     }
 
     /** kind is login, preconnect, kick, chat, command, ping; f is name, uuid, server, address, port, host, text. */
@@ -107,10 +132,13 @@ public final class BasaltVelocity {
                 final java.util.UUID id = f[1].isEmpty() ? null : java.util.UUID.fromString(VelocityPlayer.dashed(f[1]));
                 final PreLoginEvent pre = fire(new PreLoginEvent(pending, f[0], id));
                 if (!pre.getResult().isAllowed()) {
-                    return answer(true, reasonOf(pre.getResult().getReasonComponent()), null, null, -1, -1);
+                    return answerJson(true, reasonOf(pre.getResult().getReasonComponent()), "");
                 }
-                final LoginEvent login = fire(new LoginEvent(playerOf(f)));
-                return answer(!login.getResult().isAllowed(), reasonOf(login.getResult().getReasonComponent()), null, null, -1, -1);
+                final VelocityPlayer player = playerOf(f);
+                final PermissionProvider natives = subject -> player::nativePermission;
+                player.permissions(fire(new PermissionsSetupEvent(player, natives)).createFunction(player));
+                final LoginEvent login = fire(new LoginEvent(player));
+                return answerJson(!login.getResult().isAllowed(), reasonOf(login.getResult().getReasonComponent()), "");
             }
             case "preconnect": {
                 final VelocityPlayer player = playerOf(f);
@@ -146,8 +174,8 @@ public final class BasaltVelocity {
                     return answer(false, null, redirect.getServer().getServerInfo().getName(), null, -1, -1);
                 }
                 if (result instanceof KickedFromServerEvent.DisconnectPlayer disconnect) {
-                    final String text = Text.mini(disconnect.getReasonComponent());
-                    return answer(false, text.equals(Text.mini(original)) ? "" : text, null, null, -1, -1);
+                    final Component reason = disconnect.getReasonComponent();
+                    return answerJson(false, "", reason.equals(original) ? "" : Text.json(reason));
                 }
                 return answer(false, null, null, null, -1, -1);
             }
@@ -171,15 +199,11 @@ public final class BasaltVelocity {
             }
             case "ping": {
                 final VelocityPending pending = new VelocityPending(f[3], 0, f[5], true);
+                final int protocol = f[6].isEmpty() ? 0 : Integer.parseInt(f[6]);
                 final ServerPing ping = ServerPing.builder()
-                        .version(new ServerPing.Version(f[6].isEmpty() ? 0 : Integer.parseInt(f[6]), "Basalt Proxy"))
+                        .version(new ServerPing.Version(protocol, kPingVersion))
                         .onlinePlayers(proxy.getPlayerCount()).maximumPlayers(-1).description(Component.empty()).build();
-                final ProxyPingEvent event = fire(new ProxyPingEvent(pending, ping));
-                final ServerPing response = event.getPing();
-                final String motd = Text.mini(response.getDescriptionComponent());
-                final long max = response.getPlayers().map(ServerPing.Players::getMax).orElse(-1);
-                final long online = response.getPlayers().map(ServerPing.Players::getOnline).filter(n -> n != proxy.getPlayerCount()).orElse(-1);
-                return answer(false, null, null, motd, max, online);
+                return pingAnswer(fire(new ProxyPingEvent(pending, ping)).getPing(), protocol);
             }
             default:
                 return answer(false, null, null, null, -1, -1);
@@ -216,12 +240,14 @@ public final class BasaltVelocity {
                     fire(new ServerPostConnectEvent(player, null));
                 });
                 break;
-            case "switch":
+            case "switch": {
+                final RegisteredServer previous = proxy.getServer(f[5]).orElse(null);
                 proxy.getServer(f[6]).ifPresent(server -> {
-                    fire(new ServerConnectedEvent(player, server, null));
-                    fire(new ServerPostConnectEvent(player, null));
+                    fire(new ServerConnectedEvent(player, server, previous));
+                    fire(new ServerPostConnectEvent(player, previous));
                 });
                 break;
+            }
             case "quit":
                 fire(new DisconnectEvent(player, DisconnectEvent.LoginStatus.SUCCESSFUL_LOGIN));
                 break;

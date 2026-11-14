@@ -94,6 +94,9 @@ final class BasaltProxy extends ProxyServer {
 
     @Override
     public String getTranslation(String name, Object... args) {
+        if ("no_permission".equals(name)) {
+            return net.md_5.bungee.api.ChatColor.RED + "You do not have permission to use this command.";
+        }
         return name;
     }
 

@@ -15,8 +15,13 @@ import net.md_5.bungee.api.scheduler.TaskScheduler;
 
 final class BasaltScheduler implements TaskScheduler {
     private final AtomicInteger ids = new AtomicInteger();
-    private final ScheduledExecutorService pool = Executors.newScheduledThreadPool(2, runnable -> {
+    private final ScheduledExecutorService pool = Executors.newSingleThreadScheduledExecutor(runnable -> {
         final Thread thread = new Thread(runnable, "Basalt Bungee scheduler");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final ExecutorService workers = Executors.newCachedThreadPool(runnable -> {
+        final Thread thread = new Thread(runnable, "Basalt Bungee task");
         thread.setDaemon(true);
         return thread;
     });
@@ -59,10 +64,11 @@ final class BasaltScheduler implements TaskScheduler {
 
     private Runnable guarded(Task task, boolean once) {
         return () -> {
+            Thread.currentThread().setContextClassLoader(task.owner.getClass().getClassLoader());
             try {
                 task.body.run();
             } catch (final Throwable error) {
-                Natives.log("task of " + task.owner.getDescription().getName() + " failed: " + error);
+                Failures.log("task of " + task.owner.getDescription().getName() + " failed", error);
             } finally {
                 if (once) {
                     tasks.remove(task.id);
@@ -105,7 +111,8 @@ final class BasaltScheduler implements TaskScheduler {
     public ScheduledTask schedule(Plugin owner, Runnable body, long delay, TimeUnit unit) {
         final Task task = new Task(owner, body);
         tasks.put(task.id, task);
-        task.future = pool.schedule(guarded(task, true), delay, unit);
+        final Runnable run = guarded(task, true);
+        task.future = pool.schedule(() -> workers.execute(run), delay, unit);
         return task;
     }
 
@@ -113,16 +120,18 @@ final class BasaltScheduler implements TaskScheduler {
     public ScheduledTask schedule(Plugin owner, Runnable body, long delay, long period, TimeUnit unit) {
         final Task task = new Task(owner, body);
         tasks.put(task.id, task);
-        task.future = pool.scheduleAtFixedRate(guarded(task, false), delay, Math.max(1, period), unit);
+        final Runnable run = guarded(task, false);
+        task.future = pool.scheduleAtFixedRate(() -> workers.execute(run), delay, Math.max(1, period), unit);
         return task;
     }
 
     void stop() {
         pool.shutdownNow();
+        workers.shutdownNow();
     }
 
     @Override
     public Unsafe unsafe() {
-        return plugin -> (ExecutorService) pool;
+        return plugin -> workers;
     }
 }
