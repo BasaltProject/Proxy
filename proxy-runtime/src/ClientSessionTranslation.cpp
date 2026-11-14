@@ -85,14 +85,25 @@ bool ClientSession::upgrades(std::int32_t backendProtocol) const {
     return clientProtocol_ == 0 && !translation_ && upwardVerified(backendProtocol);
 }
 
+wire::multiversion::java::JavaChain* ClientSession::upwardFor(const BackendLogin& target) {
+    for (UpwardChain& slot : upward_)
+        if (slot.chain && slot.serial == target.serial())
+            return slot.chain.get();
+    std::uint64_t other = 0;
+    for (const BackendLogin* endpoint : {activeBackend_.get(), candidateBackend_.get()})
+        if (endpoint && endpoint != &target)
+            other = endpoint->serial();
+    UpwardChain& slot = upward_[0].chain && upward_[0].serial == other ? upward_[1] : upward_[0];
+    slot.chain = wire::multiversion::java::javaTranslators::upChainFor(target.protocol());
+    slot.serial = target.serial();
+    return slot.chain.get();
+}
+
 bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, bool synthetic) {
     namespace protocol = wire::protocol;
-    if (!upward_ || upwardProtocol_ != backend()->protocol()) {
-        upwardProtocol_ = backend()->protocol();
-        upward_ = wire::multiversion::java::javaTranslators::upChainFor(upwardProtocol_);
-        if (!upward_)
-            return false;
-    }
+    auto* upward = upwardFor(*backend());
+    if (!upward)
+        return false;
     wire::io::ByteBuffer view;
     view.writeBytes(frame);
     const auto id = protocol::varInt::read(view);
@@ -109,21 +120,18 @@ bool ClientSession::upgradeFrame(std::span<const std::uint8_t> frame, bool synth
         ok = backendFrame(whole.readable());
     };
     if (synthetic)
-        upward_->chain().clientboundFrom(upward_->chain().linksUpTo(wire::multiversion::protocolVersions::kV1_20_2),
-                                         protocol::ProtocolState::Configuration, id, body, emit);
+        upward->chain().clientboundFrom(upward->chain().linksUpTo(wire::multiversion::protocolVersions::kV1_20_2),
+                                        protocol::ProtocolState::Configuration, id, body, emit);
     else
-        upward_->chain().clientbound(protocolState(), id, body, emit);
+        upward->chain().clientbound(protocolState(), id, body, emit);
     return ok;
 }
 
 bool ClientSession::downgradeFrame(BackendLogin& target, std::span<const std::uint8_t> frame) {
     namespace protocol = wire::protocol;
-    if (!upward_ || upwardProtocol_ != target.protocol()) {
-        upwardProtocol_ = target.protocol();
-        upward_ = wire::multiversion::java::javaTranslators::upChainFor(upwardProtocol_);
-        if (!upward_)
-            return false;
-    }
+    auto* upward = upwardFor(target);
+    if (!upward)
+        return false;
     const auto phase = target.phase();
     const auto state = phase == BackendLogin::Phase::kPlay            ? protocol::ProtocolState::Play
                        : phase == BackendLogin::Phase::kConfiguration ? protocol::ProtocolState::Configuration
@@ -135,7 +143,7 @@ bool ClientSession::downgradeFrame(BackendLogin& target, std::span<const std::ui
         return false;
     const std::vector<std::uint8_t> body{view.readable().begin(), view.readable().end()};
     bool ok = true;
-    upward_->chain().serverbound(state, id, body, [&](std::int32_t downId, std::span<const std::uint8_t> bytes) {
+    upward->chain().serverbound(state, id, body, [&](std::int32_t downId, std::span<const std::uint8_t> bytes) {
         if (!ok)
             return;
         wire::io::ByteBuffer whole;

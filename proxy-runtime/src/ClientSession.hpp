@@ -240,8 +240,15 @@ private:
     [[nodiscard]] bool queueTranslated(std::span<const std::uint8_t> packet);
     std::unique_ptr<wire::multiversion::java::JavaChain> translation_;
     std::unique_ptr<IdRenumbering> ids_;
-    std::unique_ptr<wire::multiversion::java::JavaChain> upward_;
-    std::int32_t upwardProtocol_ = 0;
+
+    struct UpwardChain {
+        std::unique_ptr<wire::multiversion::java::JavaChain> chain;
+        std::uint64_t serial = 0;
+    };
+
+    /// One chain per backend connection, so nothing an earlier server sent is translated against a later one.
+    std::array<UpwardChain, 2> upward_;
+    [[nodiscard]] wire::multiversion::java::JavaChain* upwardFor(const BackendLogin& target);
     [[nodiscard]] bool upgrades(std::int32_t backendProtocol) const;
     [[nodiscard]] bool upgradeFrame(std::span<const std::uint8_t> frame, bool synthetic = false);
     [[nodiscard]] bool bridges(std::int32_t backendProtocol) const;

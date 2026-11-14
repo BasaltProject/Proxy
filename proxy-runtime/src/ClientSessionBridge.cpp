@@ -4,6 +4,7 @@
 #include "RouteVersions.hpp"
 
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
+#include <basalt/wire/multiversion/java/JavaTranslators.hpp>
 #include <basalt/wire/multiversion/java/LoginCodec.hpp>
 #include <basalt/wire/nbt/NbtIO.hpp>
 #include <basalt/wire/protocol/ProtocolBuffer.hpp>
@@ -33,9 +34,37 @@ std::int32_t backendLoginId(std::int32_t protocol) {
     case 755:
         return 38;
     case 754:
+    case 753:
+    case 751:
         return 36;
+    case 736:
+    case 735:
+    case 498:
+    case 490:
+    case 485:
+    case 480:
+    case 477:
+    case 404:
+    case 401:
+    case 393:
+        return 37;
+    case 578:
+    case 575:
+    case 573:
+        return 38;
     case 340:
+    case 338:
+    case 335:
+    case 316:
+    case 315:
+    case 210:
+    case 110:
+    case 109:
+    case 108:
+    case 107:
         return 35;
+    case 47:
+        return 1;
     default:
         return 40;
     }
@@ -54,6 +83,29 @@ bool ClientSession::bridgeBackendLogin(std::span<const std::uint8_t> frame) {
     if (protocol::varInt::read(view) != backendLoginId(backend()->protocol()))
         return false;
     bridgeLogin_.assign(frame.begin(), frame.end());
+    constexpr std::int32_t kCodecProtocol = 754;
+    if (backend()->protocol() < kCodecProtocol) {
+        auto* upward = upwardFor(*backend());
+        if (!upward)
+            return false;
+        std::vector<std::uint8_t> shaped;
+        const std::vector<std::uint8_t> raw{view.readable().begin(), view.readable().end()};
+        upward->chain().clientboundUpTo(upward->chain().linksUpTo(kCodecProtocol), protocol::ProtocolState::Play,
+                                        backendLoginId(backend()->protocol()), raw,
+                                        [&](std::int32_t id, std::span<const std::uint8_t> bytes) {
+                                            if (!shaped.empty())
+                                                return;
+                                            wire::io::ByteBuffer whole;
+                                            protocol::varInt::write(whole, id);
+                                            whole.writeBytes(bytes);
+                                            shaped.assign(whole.readable().begin(), whole.readable().end());
+                                        });
+        if (shaped.empty())
+            return false;
+        view = wire::io::ByteBuffer{};
+        view.writeBytes(shaped);
+        (void)protocol::varInt::read(view);
+    }
     (void)view.readInt();
     (void)view.readByte();
     (void)view.readByte();
@@ -130,6 +182,11 @@ bool ClientSession::bridgedConfiguration(std::int32_t id, std::span<const std::u
     backend()->expectWriteUntil(Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs});
     backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
     readDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs};
+    wire::io::IoReady buffered;
+    buffered.handle = backend()->handle();
+    for (std::size_t frames = 0; frames < kRelayBatch && relayBuffered(); ++frames)
+        if (!backendEvent(buffered))
+            return false;
     return true;
 }
 

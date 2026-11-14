@@ -80,7 +80,16 @@ bool upwardVerified(std::int32_t protocol) noexcept {
            protocol == versions::kV1_20_2 || protocol == versions::kV1_20 || protocol == versions::kV1_19_4 ||
            protocol == versions::kV1_19_3 || protocol == versions::kV1_19_1 || protocol == versions::kV1_19 ||
            protocol == versions::kV1_18_2 || protocol == versions::kV1_18 || protocol == versions::kV1_17_1 ||
-           protocol == versions::kV1_17 || protocol == versions::kV1_16_4;
+           protocol == versions::kV1_17 || protocol == versions::kV1_16_4 || protocol == versions::kV1_16_3 ||
+           protocol == versions::kV1_16_2 || protocol == versions::kV1_16_1 || protocol == versions::kV1_16 ||
+           protocol == versions::kV1_15_2 || protocol == versions::kV1_15_1 || protocol == versions::kV1_15 ||
+           protocol == versions::kV1_14_4 || protocol == versions::kV1_14_3 || protocol == versions::kV1_14_2 ||
+           protocol == versions::kV1_14_1 || protocol == versions::kV1_14 || protocol == versions::kV1_13_2 ||
+           protocol == versions::kV1_13_1 || protocol == versions::kV1_13 || protocol == versions::kV1_12_2 ||
+           protocol == versions::kV1_12_1 || protocol == versions::kV1_12 || protocol == versions::kV1_11_1 ||
+           protocol == versions::kV1_11 || protocol == versions::kV1_10 || protocol == versions::kV1_9_4 ||
+           protocol == versions::kV1_9_2 || protocol == versions::kV1_9_1 || protocol == versions::kV1_9 ||
+           protocol == versions::kV1_8;
 }
 
 LoginFinishedTail loginFinishedTail(std::int32_t protocol) noexcept {
