@@ -92,4 +92,24 @@ std::vector<DetectedJar> detectJars(std::string_view directory, const PlatformCh
     return found;
 }
 
+std::expected<std::filesystem::path, std::string> stageJars(const std::vector<DetectedJar>& jars, ForeignKind kind,
+                                                            const std::filesystem::path& facadeRoot) {
+    namespace fs = std::filesystem;
+    const fs::path folder = facadeRoot / kStagedJarsFolder;
+    std::error_code error;
+    fs::remove_all(folder, error);
+    if (!fs::create_directories(folder, error) && error)
+        return std::unexpected("could not create " + folder.string() + ": " + error.message());
+    for (const DetectedJar& jar : jars) {
+        if (jar.kind != kind)
+            continue;
+        const fs::path source{jar.path};
+        const fs::path target = folder / source.filename();
+        fs::create_hard_link(source, target, error);
+        if (error && !fs::copy_file(source, target, fs::copy_options::overwrite_existing, error))
+            return std::unexpected("could not stage " + source.string() + ": " + error.message());
+    }
+    return fs::absolute(folder);
+}
+
 } // namespace basalt::proxy::plugins

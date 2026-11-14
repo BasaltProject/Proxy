@@ -7,6 +7,23 @@
 namespace basalt::proxy::runtime::detail {
 namespace {
 using wire::common::placeholder::lowercaseAscii;
+namespace permissions = wire::permissions;
+} // namespace
+
+PermissionService::PermissionService(PlayerDirectory& players, wire::config::GroupsConfig initial,
+                                     const OnlineRoster& roster)
+    : players_(&players), roster_(&roster), groups_(std::move(initial)) {
+    defaultProvider_ =
+        chain_.provide({.id = "groups",
+                        .priority = permissions::kPriorityDefault,
+                        .check =
+                            [this](const permissions::Query& query) {
+                                if (query.subject().isConsole())
+                                    return permissions::Tristate::kTrue;
+                                const auto value = decideByDefault(query.subject().name, query.node());
+                                return value ? permissions::tristateOf(*value) : permissions::Tristate::kUndefined;
+                            },
+                        .meta = {}});
 }
 
 void PermissionService::reload(wire::config::GroupsConfig groups) { groups_.replace(std::move(groups)); }
@@ -34,7 +51,17 @@ void PermissionService::onLogin(std::string_view uuid, std::string_view name) {
 }
 
 bool PermissionService::has(const CommandSource& source, std::string_view node) const {
-    return source.console || hasPlayer(source.name, node);
+    return source.console ? chain_.has(permissions::Subject::console(), node) : hasPlayer(source.name, node);
+}
+
+bool PermissionService::hasPlayer(std::string_view name, std::string_view node) const {
+    if (chain_.onlyDefault())
+        return chain_.has(permissions::Subject::player({}, name), node);
+    const auto online = roster_->find(name);
+    if (!online)
+        return chain_.has(permissions::Subject::player({}, name), node);
+    return chain_.has(permissions::Subject::player(online->uuid, online->name), node,
+                      permissions::Context{online->backend, {}, {}});
 }
 
 void PermissionService::setOverride(std::string_view name, std::string_view node, std::optional<bool> value) {
@@ -84,7 +111,7 @@ std::vector<std::string> PermissionService::effective(std::string_view name) con
     return patterns;
 }
 
-bool PermissionService::hasPlayer(std::string_view name, std::string_view node) const {
+std::optional<bool> PermissionService::decideByDefault(std::string_view name, std::string_view node) const {
     {
         const std::lock_guard lock{mutex_};
         if (const auto player = overrides_.find(lowercaseAscii(name)); player != overrides_.end())
@@ -92,7 +119,7 @@ bool PermissionService::hasPlayer(std::string_view name, std::string_view node) 
                 return found->second;
     }
     const auto stored = storedGroup(name);
-    return groups_.current()->resolve(stored ? std::optional<std::string_view>{*stored} : std::nullopt, node);
+    return groups_.current()->decide(stored ? std::optional<std::string_view>{*stored} : std::nullopt, node);
 }
 
 std::string PermissionService::groupOf(std::string_view name) const {

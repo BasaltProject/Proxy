@@ -1,4 +1,5 @@
 #include "JavaMarshalling.hpp"
+#include "JavaPermissions.hpp"
 
 namespace basalt::proxy::plugins {
 
@@ -8,9 +9,25 @@ static JavaAdapter* gAdapters[2] = {nullptr, nullptr};
 class JavaAdapter final : public ForeignAdapter {
 public:
     JavaAdapter(std::shared_ptr<ShimHost> shim, PluginHooks hooks, JavaSpec spec)
-        : shim_(std::move(shim)), hooks_(std::move(hooks)), spec_(std::move(spec)) {}
+        : shim_(std::move(shim)), hooks_(std::move(hooks)), spec_(std::move(spec)),
+          permissions_(
+              hooks_, spec_.label, wire::permissions::kPriorityAdapter + (spec_.kind == ForeignKind::kBungee ? 10 : 0),
+              [this](const std::string& player, const std::string& node, int rest) {
+                  return providedPermission(player, node, rest);
+              },
+              [this](const std::string& player, const std::string& key) { return providedMeta(player, key); },
+              [this](const std::string& player) -> std::optional<std::pair<std::string, std::string>> {
+                  const std::lock_guard lock{mutex_};
+                  const auto found = players_.find(player);
+                  if (found == players_.end())
+                      return std::nullopt;
+                  return std::pair{found->second.uuid, found->second.server};
+              }) {}
+
+    [[nodiscard]] JavaPermissions& permissions() noexcept { return permissions_; }
 
     ~JavaAdapter() override {
+        permissions_.retire();
         if (JNIEnv* env = shim_->env()) {
             call(env, "shutdown", "()V",
                  [&](jclass facade, jmethodID method) { env->CallStaticVoidMethod(facade, method); });
@@ -226,7 +243,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 25> methodTable() {
+    static std::array<JNINativeMethod, 28> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              std::bit_cast<void*>(&nativeLog<Slot>)},
@@ -252,19 +269,19 @@ public:
              const_cast<char*>("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;IIIF[B)Z"),
              std::bit_cast<void*>(&nativeHud<Slot>)},
             {const_cast<char*>("permission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             std::bit_cast<void*>(&nativePermission<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::permission<Slot>)},
             {const_cast<char*>("spoofChat"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
              std::bit_cast<void*>(&nativeSpoofChat<Slot>)},
             {const_cast<char*>("permissionOverride"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)I"),
-             std::bit_cast<void*>(&nativePermissionOverride<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::permissionOverride<Slot>)},
             {const_cast<char*>("permissionList"), const_cast<char*>("(Ljava/lang/String;)[Ljava/lang/String;"),
-             std::bit_cast<void*>(&nativePermissionList<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::permissionList<Slot>)},
             {const_cast<char*>("group"), const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
-             std::bit_cast<void*>(&nativeGroup<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::group<Slot>)},
             {const_cast<char*>("setGroup"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Z"),
-             std::bit_cast<void*>(&nativeSetGroup<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::setGroup<Slot>)},
             {const_cast<char*>("setPermission"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;I)V"),
-             std::bit_cast<void*>(&nativeSetPermission<Slot>)},
+             std::bit_cast<void*>(&javaPermissionNatives::setPermission<Slot>)},
             {const_cast<char*>("cookieRequest"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)J"),
              std::bit_cast<void*>(&nativeCookieRequest<Slot>)},
             {const_cast<char*>("cookiePoll"), const_cast<char*>("(J)[[B"),
@@ -280,6 +297,12 @@ public:
              std::bit_cast<void*>(&nativeRegisterServer<Slot>)},
             {const_cast<char*>("unregisterServer"), const_cast<char*>("(Ljava/lang/String;)Z"),
              std::bit_cast<void*>(&nativeUnregisterServer<Slot>)},
+            {const_cast<char*>("permissionValue"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)I"),
+             std::bit_cast<void*>(&javaPermissionNatives::permissionValue<Slot>)},
+            {const_cast<char*>("permissionProvider"), const_cast<char*>("(ZZ)V"),
+             std::bit_cast<void*>(&javaPermissionNatives::permissionProvider<Slot>)},
+            {const_cast<char*>("permissionMeta"), const_cast<char*>("(Z)V"),
+             std::bit_cast<void*>(&javaPermissionNatives::permissionMeta<Slot>)},
         }};
     }
 
@@ -318,6 +341,44 @@ private:
         }
         if (hooks_.log)
             hooks_.log(spec_.logName, line);
+    }
+
+    [[nodiscard]] int providedPermission(const std::string& player, const std::string& node, int rest) const {
+        JNIEnv* env = shim_->env();
+        int answer = -1;
+        if (env == nullptr)
+            return answer;
+        call(env, "providedPermission", "(Ljava/lang/String;Ljava/lang/String;I)I",
+             [&](jclass facade, jmethodID method) {
+                 jstring name = env->NewStringUTF(player.c_str());
+                 jstring asked = env->NewStringUTF(node.c_str());
+                 const jint value = env->CallStaticIntMethod(facade, method, name, asked, rest);
+                 if (!env->ExceptionCheck())
+                     answer = value;
+                 env->DeleteLocalRef(asked);
+                 env->DeleteLocalRef(name);
+             });
+        return answer;
+    }
+
+    [[nodiscard]] std::optional<std::string> providedMeta(const std::string& player, const std::string& key) const {
+        JNIEnv* env = shim_->env();
+        std::optional<std::string> answer;
+        if (env == nullptr)
+            return answer;
+        call(env, "providedMeta", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+             [&](jclass facade, jmethodID method) {
+                 jstring name = env->NewStringUTF(player.c_str());
+                 jstring asked = env->NewStringUTF(key.c_str());
+                 auto* value = static_cast<jstring>(env->CallStaticObjectMethod(facade, method, name, asked));
+                 if (!env->ExceptionCheck() && value != nullptr)
+                     answer = impl::text(env, value);
+                 if (value != nullptr)
+                     env->DeleteLocalRef(value);
+                 env->DeleteLocalRef(asked);
+                 env->DeleteLocalRef(name);
+             });
+        return answer;
     }
 
     [[nodiscard]] std::vector<std::string> callStrings(JNIEnv* env, const char* name) const {
@@ -476,67 +537,11 @@ private:
     }
 
     template <int Slot>
-    static jboolean nativePermission(JNIEnv* env, jclass, jstring player, jstring node) {
-        return gAdapters[Slot] != nullptr && gAdapters[Slot]->hooks_.hasPermission &&
-                       gAdapters[Slot]->hooks_.hasPermission(text(env, player), text(env, node))
-                   ? JNI_TRUE
-                   : JNI_FALSE;
-    }
-
-    template <int Slot>
     static jboolean nativeSpoofChat(JNIEnv* env, jclass, jstring player, jstring line) {
         auto* self = gAdapters[Slot];
         return self != nullptr && self->hooks_.spoofChat && self->hooks_.spoofChat(text(env, player), text(env, line))
                    ? JNI_TRUE
                    : JNI_FALSE;
-    }
-
-    template <int Slot>
-    static jint nativePermissionOverride(JNIEnv* env, jclass, jstring player, jstring node) {
-        auto* self = gAdapters[Slot];
-        return self != nullptr && self->hooks_.permissionOverride
-                   ? self->hooks_.permissionOverride(text(env, player), text(env, node))
-                   : -1;
-    }
-
-    template <int Slot>
-    static jobjectArray nativePermissionList(JNIEnv* env, jclass, jstring player) {
-        auto* self = gAdapters[Slot];
-        const std::vector<std::string> nodes = self != nullptr && self->hooks_.permissionList
-                                                   ? self->hooks_.permissionList(text(env, player))
-                                                   : std::vector<std::string>{};
-        jclass type = env->FindClass("java/lang/String");
-        jobjectArray result = env->NewObjectArray(static_cast<jsize>(nodes.size()), type, nullptr);
-        for (std::size_t at = 0; at < nodes.size(); ++at) {
-            jstring node = env->NewStringUTF(nodes[at].c_str());
-            env->SetObjectArrayElement(result, static_cast<jsize>(at), node);
-            env->DeleteLocalRef(node);
-        }
-        env->DeleteLocalRef(type);
-        return result;
-    }
-
-    template <int Slot>
-    static jstring nativeGroup(JNIEnv* env, jclass, jstring player) {
-        auto* self = gAdapters[Slot];
-        const std::string group =
-            self != nullptr && self->hooks_.groupOf ? self->hooks_.groupOf(text(env, player)) : "";
-        return env->NewStringUTF(group.c_str());
-    }
-
-    template <int Slot>
-    static jboolean nativeSetGroup(JNIEnv* env, jclass, jstring player, jstring group) {
-        auto* self = gAdapters[Slot];
-        return self != nullptr && self->hooks_.setGroup && self->hooks_.setGroup(text(env, player), text(env, group))
-                   ? JNI_TRUE
-                   : JNI_FALSE;
-    }
-
-    template <int Slot>
-    static void nativeSetPermission(JNIEnv* env, jclass, jstring player, jstring node, jint value) {
-        auto* self = gAdapters[Slot];
-        if (self != nullptr && self->hooks_.setPermission)
-            self->hooks_.setPermission(text(env, player), text(env, node), value);
     }
 
     template <int Slot>
@@ -689,34 +694,12 @@ private:
 
     std::map<jlong, PingSlot> pings_;
     std::atomic<jlong> nextCookie_{1};
+    JavaPermissions permissions_;
 };
 
-namespace {
-
-constexpr std::string_view kStagedFolder = "staged-plugins";
-
-/// A fresh folder holding only the jars of one facade, linked where the file system allows and copied otherwise.
-std::expected<std::filesystem::path, std::string> stageJars(const std::vector<DetectedJar>& jars, ForeignKind kind,
-                                                            const std::filesystem::path& facadeRoot) {
-    namespace fs = std::filesystem;
-    const fs::path folder = facadeRoot / kStagedFolder;
-    std::error_code error;
-    fs::remove_all(folder, error);
-    if (!fs::create_directories(folder, error) && error)
-        return std::unexpected("could not create " + folder.string() + ": " + error.message());
-    for (const DetectedJar& jar : jars) {
-        if (jar.kind != kind)
-            continue;
-        const fs::path source{jar.path};
-        const fs::path target = folder / source.filename();
-        fs::create_hard_link(source, target, error);
-        if (error && !fs::copy_file(source, target, fs::copy_options::overwrite_existing, error))
-            return std::unexpected("could not stage " + source.string() + ": " + error.message());
-    }
-    return fs::absolute(folder);
+JavaPermissions* javaPermissionsOf(int slot) {
+    return gAdapters[slot] != nullptr ? &gAdapters[slot]->permissions() : nullptr;
 }
-
-} // namespace
 
 std::unique_ptr<ForeignAdapter> createJavaAdapter(const JavaRuntimeOptions& options, const PluginHooks& hooks,
                                                   JavaSpec spec) {
@@ -733,7 +716,7 @@ std::unique_ptr<ForeignAdapter> createJavaAdapter(const JavaRuntimeOptions& opti
     const fs::path facadeRoot = root / (spec.kind == ForeignKind::kBungee ? "bungee" : "velocity");
     if (!has(spec.kind)) {
         std::error_code ignored;
-        fs::remove_all(facadeRoot / kStagedFolder, ignored);
+        fs::remove_all(facadeRoot / kStagedJarsFolder, ignored);
         return nullptr;
     }
     static std::weak_ptr<ShimHost> weak;

@@ -123,6 +123,7 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
         return commandService.submit(consoleSource, std::string{line});
     };
     hooks.commands = &dispatcher;
+    hooks.permissions = &permissions.chain();
     hooks.hasPermission = [&permissions](std::string_view player, std::string_view node) {
         return permissions.hasPlayer(player, node);
     };

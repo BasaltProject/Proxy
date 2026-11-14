@@ -5,6 +5,7 @@
 #include <basalt/wire/lua/LuaArgs.hpp>
 #include <basalt/wire/lua/LuaCall.hpp>
 #include <basalt/wire/lua/LuaRef.hpp>
+#include <basalt/wire/permissions/PermissionChain.hpp>
 #include <basalt/wire/plugins/CommandSpec.hpp>
 #include <basalt/wire/plugins/EventPriority.hpp>
 #include <basalt/wire/plugins/PluginText.hpp>
@@ -16,6 +17,39 @@ inline constexpr std::chrono::milliseconds kTick{50};
 inline constexpr std::size_t kMaxSourceBytes = 1024 * 1024;
 
 using Priority = wire::plugins::EventPriority;
+
+struct PluginHost::PermissionSlot {
+    Plugin* plugin = nullptr;
+    wire::lua::LuaRef check;
+    wire::lua::LuaRef meta;
+    wire::permissions::ProviderHandle handle;
+    std::atomic<bool> alive{true};
+
+    /// Must run on the plugin thread, holding the interpreter, while the plugin's sandbox still exists.
+    void retire() {
+        alive.store(false, std::memory_order_release);
+        handle.remove();
+        check.release();
+        meta.release();
+    }
+};
+
+/// Retires every Lua provider of a plugin before its sandbox goes away.
+struct PluginHost::PermissionSlots {
+    std::vector<std::shared_ptr<PermissionSlot>> slots;
+
+    PermissionSlots() = default;
+    PermissionSlots(const PermissionSlots&) = delete;
+    PermissionSlots& operator=(const PermissionSlots&) = delete;
+
+    ~PermissionSlots() { clear(); }
+
+    void clear() {
+        for (auto& slot : slots)
+            slot->retire();
+        slots.clear();
+    }
+};
 
 struct PluginHost::Plugin {
     struct Handler {
@@ -30,6 +64,7 @@ struct PluginHost::Plugin {
     std::string version;
     PluginHost* host = nullptr;
     std::unique_ptr<wire::lua::LuaSandbox> sandbox;
+    PermissionSlots permissionSlots;
     std::map<std::string, std::vector<Handler>, std::less<>> handlers;
     std::vector<wire::lua::LuaRef> onEnable;
     std::vector<wire::lua::LuaRef> onDisable;
@@ -80,6 +115,7 @@ struct PluginApi {
                         const wire::common::toml::TomlTable& config);
     static void installMessaging(PluginHost& host, PluginHost::Plugin& plugin);
     static void installHud(PluginHost& host, PluginHost::Plugin& plugin);
+    static void installPermissions(PluginHost& host, PluginHost::Plugin& plugin);
     static void pushPlayer(wire::lua::LuaArgs& lua, PluginHost::Plugin& plugin, const PluginHost::Player& player);
 };
 

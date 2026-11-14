@@ -8,6 +8,7 @@ PluginHost::~PluginHost() {
     shutdown();
     const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
     dropPacketListeners();
+    dropPermissionProviders();
 }
 
 void PluginHost::dropPacketListeners() {
@@ -217,6 +218,7 @@ void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& packa
     PluginApi::install(*this, *plugin, effective, config);
     PluginApi::installMessaging(*this, *plugin);
     PluginApi::installHud(*this, *plugin);
+    PluginApi::installPermissions(*this, *plugin);
     auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);
     if (!chunk) {
         report("compile failed: " + chunk.error().message);
@@ -247,6 +249,7 @@ std::size_t PluginHost::reload() {
     {
         const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
         dropPacketListeners();
+        dropPermissionProviders();
         {
             std::unique_lock lock{commandsMutex_};
             commands_.clear();

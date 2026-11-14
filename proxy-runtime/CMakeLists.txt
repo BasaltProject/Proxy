@@ -86,7 +86,7 @@ basalt_module(proxy-runtime-core
         src/ProxyRuntimeServers.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
             basalt::wire-multiversion basalt::wire-auth basalt::wire-chat basalt::wire-bedrock basalt::wire-config basalt::wire-storage
-            basalt::wire-plugins basalt::wire-remote
+            basalt::wire-plugins basalt::wire-remote basalt::wire-permissions
 )
 
 # Only this file sees the version, so stamping a new one does not recompile (or invalidate the cache of) the rest.

@@ -167,7 +167,7 @@ int run(const cliCommand::Run& command) {
         }
     }
     detail::OnlineRoster roster;
-    detail::PermissionService permissions{**players, std::move(*groups)};
+    detail::PermissionService permissions{**players, std::move(*groups), roster};
     detail::Messages messages{
         std::move(*messageSet),
         wire::config::BasicFacts{

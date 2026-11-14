@@ -1,10 +1,12 @@
 #pragma once
 
+#include "OnlineRoster.hpp"
 #include "PlayerDirectory.hpp"
 
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/wire/config/LiveValue.hpp>
 #include <basalt/wire/config/Permissions.hpp>
+#include <basalt/wire/permissions/PermissionChain.hpp>
 
 #include <map>
 #include <mutex>
@@ -15,18 +17,21 @@
 
 namespace basalt::proxy::runtime::detail {
 
-/// Who may do what: groups.toml says what a group can do, players.db says who is in which group.
+/// Who may do what, asked through the permission chain; groups.toml and players.db are its default provider.
 class PermissionService {
 public:
-    PermissionService(PlayerDirectory& players, wire::config::GroupsConfig initial)
-        : players_(&players), groups_(std::move(initial)) {}
+    PermissionService(PlayerDirectory& players, wire::config::GroupsConfig initial, const OnlineRoster& roster);
 
     void reload(wire::config::GroupsConfig groups);
 
-    /// The console may do everything.
+    [[nodiscard]] wire::permissions::PermissionChain& chain() noexcept { return chain_; }
+
     [[nodiscard]] bool has(const CommandSource& source, std::string_view node) const;
 
     [[nodiscard]] bool hasPlayer(std::string_view name, std::string_view node) const;
+
+    /// What the session overrides, players.db and groups.toml alone answer; nothing when no rule names the node.
+    [[nodiscard]] std::optional<bool> decideByDefault(std::string_view name, std::string_view node) const;
 
     /// A per-session override of one node for a player, kept until the proxy stops; nullopt removes it.
     void setOverride(std::string_view name, std::string_view node, std::optional<bool> value);
@@ -61,10 +66,13 @@ private:
     [[nodiscard]] std::optional<std::string> storedGroup(std::string_view name) const;
 
     PlayerDirectory* players_;
+    const OnlineRoster* roster_;
     wire::config::LiveValue<wire::config::GroupsConfig> groups_;
     mutable std::mutex mutex_;
     mutable std::map<std::string, std::optional<std::string>, std::less<>> cache_;
     std::map<std::string, std::map<std::string, bool, std::less<>>, std::less<>> overrides_;
+    wire::permissions::PermissionChain chain_;
+    wire::permissions::ProviderHandle defaultProvider_;
 };
 
 } // namespace basalt::proxy::runtime::detail

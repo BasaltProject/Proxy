@@ -14,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <functional>
@@ -29,6 +30,13 @@
 #include <thread>
 #include <variant>
 #include <vector>
+
+namespace basalt::wire::permissions {
+class PermissionChain;
+struct Subject;
+struct Context;
+enum class Tristate : std::uint8_t;
+} // namespace basalt::wire::permissions
 
 namespace basalt::proxy::plugins {
 
@@ -84,8 +92,10 @@ struct PluginHooks {
     std::function<bool(std::string_view line)> console;
     /// Where plugin commands are registered, so players and the console reach them like the proxy's own.
     runtime::CommandDispatcher* commands = nullptr;
-    /// Whether a player's group grants a permission node.
+    /// Whether the permission chain grants a player a node.
     std::function<bool(std::string_view player, std::string_view node)> hasPermission;
+    /// Where plugins ask and provide permissions; unset leaves the permissions global without providers.
+    wire::permissions::PermissionChain* permissions = nullptr;
     /// Makes the player say a line, or run it as a command when it starts with a slash, unsigned.
     std::function<bool(std::string_view player, std::string_view text)> spoofChat;
     /// -1 when the player has no override of the node, otherwise 0 (denied) or 1 (granted).
@@ -185,6 +195,8 @@ private:
     struct Plugin;
     struct Entry;
     struct Timer;
+    struct PermissionSlot;
+    struct PermissionSlots;
 
     PluginHost(PluginSettings settings, PluginHooks hooks);
 
@@ -194,6 +206,11 @@ private:
     void run(std::stop_token stop);
     void shutdown();
     void dropPacketListeners();
+    void dropPermissionProviders();
+    /// Runs a Lua provider from any thread; a meta answer comes back, a check answer goes in `answer`.
+    std::optional<std::string> callProvider(PermissionSlot& slot, bool meta, const wire::permissions::Subject& subject,
+                                            std::string_view text, const wire::permissions::Context& context,
+                                            wire::permissions::Tristate& answer);
     void listPlugins();
 
     struct ConsoleCall {

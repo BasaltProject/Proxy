@@ -6,15 +6,16 @@ basalt_module(proxy-plugins
         src/PluginDecisions.cpp
         src/PluginMessagingApi.cpp
         src/PluginHudApi.cpp
+        src/PluginPermissionsApi.cpp
         src/PluginHost.cpp
         src/PluginHostEvents.cpp
         src/PluginHostMessaging.cpp
-    DEPENDS basalt::proxy-runtime-core basalt::wire-lua basalt::wire-plugins basalt::wire-sqlite basalt::wire-storage
+    DEPENDS basalt::proxy-runtime-core basalt::wire-lua basalt::wire-permissions basalt::wire-plugins basalt::wire-sqlite basalt::wire-storage
     PRIVATE_DEPENDS basalt::lua
 )
 
 if(TARGET basalt::wire-shim)
-    target_sources(proxy-plugins PRIVATE src/JavaAdapter.cpp src/JavaHud.cpp)
+    target_sources(proxy-plugins PRIVATE src/JavaAdapter.cpp src/JavaHud.cpp src/JavaPermissions.cpp)
     target_link_libraries(proxy-plugins PUBLIC basalt::wire-shim)
     target_compile_definitions(proxy-plugins PUBLIC BASALT_HAS_SHIM=1)
 endif()
