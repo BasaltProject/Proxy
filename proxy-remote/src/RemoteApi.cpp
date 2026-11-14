@@ -114,6 +114,8 @@ struct RemoteApi::Impl {
         object.set("bytes-toward-servers", num(runtime.bytesTowardBackends()));
         object.set("logins", num(stats.logins));
         object.set("server-changes", num(stats.backendChanges));
+        object.set("logins-translated-by-servers", num(stats.delegatedLogins));
+        object.set("logins-translated-by-proxy", num(stats.translatedLogins));
         object.set("sessions-ended-in", obj(std::move(ended)));
         return ok(std::move(object));
     }

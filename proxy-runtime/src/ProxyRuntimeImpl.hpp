@@ -87,7 +87,7 @@ loadForwarding(const config::ProxyConfig& config) {
         return std::unexpected(signing.error());
     return std::make_shared<const detail::NativeForwarding>(
         detail::NativeForwarding{std::move(*signing), config.forwarding.proxyId, config.network.onlineMode,
-                                 config.translation == config::TranslationMode::Auto});
+                                 detail::delegatesTranslation(config.translation)});
 }
 } // namespace impl
 

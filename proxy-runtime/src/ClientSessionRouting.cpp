@@ -149,12 +149,14 @@ bool ClientSession::dial() {
     if (!dialAttempt_ || dialAttempt_->target >= backends_->size())
         return false;
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
-    const std::int32_t speaks = speaksTo((*backends_)[candidateBackend_->attempt().target], clientProtocol_);
+    const auto& target = (*backends_)[candidateBackend_->attempt().target];
+    const std::int32_t speaks = speaksTo(target, clientProtocol_);
     candidateBackend_->useIds(rawProtocol(speaks) ? ids_.get() : nullptr);
+    if (carriesClient(target, clientProtocol_))
+        candidateBackend_->carryClient(clientProtocol_);
     dialAttempt_.reset();
-    if (!profile_ ||
-        !candidateBackend_->start((*backends_)[candidateBackend_->attempt().target], *profile_, virtualHost_,
-                                  virtualPort_, clientAddress(), clientPort(), nativeForwarding_, speaks)) {
+    if (!profile_ || !candidateBackend_->start(target, *profile_, virtualHost_, virtualPort_, clientAddress(),
+                                               clientPort(), nativeForwarding_, logsInWith(target, clientProtocol_))) {
         if (recovering_)
             return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {

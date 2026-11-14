@@ -1,5 +1,6 @@
 #pragma once
 
+#include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/wire/auth/forwarding/BasaltForwarding.hpp>
 
 #include <optional>
@@ -14,5 +15,9 @@ struct NativeForwarding {
     bool delegate = true;
     bool delegateBedrock = false;
 };
+
+[[nodiscard]] constexpr bool delegatesTranslation(config::TranslationMode mode) noexcept {
+    return mode == config::TranslationMode::Auto || mode == config::TranslationMode::Server;
+}
 
 } // namespace basalt::proxy::runtime::detail

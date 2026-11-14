@@ -142,8 +142,14 @@ watch-files = false
 interval-ms = 2000
 
 [translation]
-# auto: capable Basalt Server translates; otherwise Proxy needs a verified route.
-# proxy: force translation here. off: require compatible client/server protocols.
+# Who turns an older client's protocol into the one a server speaks.
+#   "auto"    a Basalt Server (forwarding = "basalt", protocol "client" or "auto") translates its own players and the
+#             proxy only relays; every other server is translated for here. Clients before 1.13 reach that server over
+#             the session envelope, so it needs `session-envelope = true` in its [network.forwarding].
+#   "server"  as auto, but the proxy never translates: a client reaches only a server that speaks its version or
+#             translates it itself.
+#   "proxy"   the proxy translates every player, even towards a Basalt Server.
+#   "off"     nothing is translated here and the envelope is not offered: client and server must speak the same version.
 mode = "auto"
 
 [access]

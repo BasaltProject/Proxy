@@ -68,8 +68,7 @@ bool ClientSession::preLoginPacket(std::int32_t id) {
                     translatedClientVerified(hello->protocolVersion) || backendVerified(hello->protocolVersion))) {
             const auto candidates = routes_->select(hello->hostName);
             if (!candidates.empty() && std::ranges::none_of(candidates, [&](std::size_t target) {
-                    return resolveRoute(hello->protocolVersion, speaksTo((*backends_)[target], hello->protocolVersion))
-                        .has_value();
+                    return routeAllowed(hello->protocolVersion, (*backends_)[target]);
                 }))
                 return refuseWith("no-compatible-server", "No server here can take your game version.");
             if (hello->protocolVersion != buildInfo::kProtocolVersion) {

@@ -78,6 +78,9 @@ public:
         bedrockProtocol_ = protocol;
     }
 
+    /// Logs in on the native protocol and asks the backend, through the envelope, to translate this client protocol.
+    void carryClient(std::int32_t protocol) { carried_ = protocol; }
+
     [[nodiscard]] bool delegated() const { return envelopeActive_; }
 
     [[nodiscard]] const std::string& disconnectMessage() const { return disconnectMessage_; }
@@ -160,6 +163,7 @@ private:
     bool envelopeActive_ = false;
     std::optional<wire::protocol::sessionEnvelope::BedrockIdentity> bedrockIdentity_;
     std::int32_t bedrockProtocol_ = 0;
+    std::int32_t carried_ = 0;
     std::string disconnectMessage_;
     std::optional<wire::protocol::sessionEnvelope::EnvelopeEndpoint> envelope_;
     std::uint8_t origin_ = 0;
@@ -173,6 +177,7 @@ private:
     wire::io::ByteBuffer input_;
     wire::io::ByteBuffer output_;
     wire::io::ByteBuffer frame_;
+    wire::io::ByteBuffer wrapped_;
     std::uint64_t serial_;
     bool allocationReady_ = false;
     Phase phase_ = Phase::kUnstarted;

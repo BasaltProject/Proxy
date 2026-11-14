@@ -58,7 +58,7 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
                           "[runtime]\nlogin-timeout-ms = 0",
                           "[runtime]\nupdate-checker = 'false'",
                           "[admission]\nmax-origins = -1",
-                          "[translation]\nmode = 'server'",
+                          "[translation]\nmode = 'backend'",
                           "network = false",
                           "[network]\nproxy-protocol = true",
                           "[network]\nproxy-protocol-trusted = ['not an address']",

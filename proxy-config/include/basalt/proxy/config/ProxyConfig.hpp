@@ -26,7 +26,7 @@ class TomlTable;
 
 namespace basalt::proxy::config {
 
-enum class TranslationMode { Auto, Proxy, Off };
+enum class TranslationMode { Auto, Proxy, Server, Off };
 enum class ColorMode { Auto, Always, Never };
 
 struct NetworkConfig {

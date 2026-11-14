@@ -13,6 +13,8 @@ RelayStats relayStats() noexcept {
     RelayStats stats;
     stats.logins = counters.logins.load(std::memory_order_relaxed);
     stats.backendChanges = counters.backendChanges.load(std::memory_order_relaxed);
+    stats.delegatedLogins = counters.delegatedLogins.load(std::memory_order_relaxed);
+    stats.translatedLogins = counters.translatedLogins.load(std::memory_order_relaxed);
     for (std::size_t phase = 0; phase < stats.endedIn.size(); ++phase)
         stats.endedIn[phase] = counters.endedIn[phase].load(std::memory_order_relaxed);
     return stats;

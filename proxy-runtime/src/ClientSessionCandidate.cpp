@@ -282,8 +282,9 @@ bool ClientSession::candidateReady(const wire::io::IoReady& event) {
         if (!endpoint.answerPluginQuery(frame_))
             return reject();
     } else if (id == wire::protocol::login::LoginFinishedPacket::kId) {
-        if (!endpoint.acceptLogin(frame_))
+        if (!endpoint.acceptLogin(frame_) || (legacyRaw_ && !rawProtocol(endpoint.protocol())))
             return reject();
+        countTranslator(endpoint);
         if (event.closed && recovering_ && !switchingBackend_) {
             candidateBackend_.reset();
             return route();

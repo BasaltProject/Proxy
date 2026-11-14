@@ -60,8 +60,8 @@ host = "127.0.0.1"
 port = 25566
 # The Java protocol this server speaks. A number is a fixed version. "client" is for a server that speaks whatever
 # version each player connects with, as a Basalt Server does for the older versions it translates itself. "auto" is
-# "client" for a server with forwarding = "basalt" (the proxy still translates clients older than 1.13, which cannot
-# carry its login query) and the newest protocol otherwise. Compatibility is checked for each client and server pair.
+# "client" for a server with forwarding = "basalt" and the newest protocol otherwise; [translation] in proxy.toml says
+# who translates. Compatibility is checked for each client and server pair.
 # A server on 26.2 (776), 26.1 (775), 1.21.11 (774), 1.21.9 or 1.21.10 (773), 1.21.7 or 1.21.8 (772), 1.21.6 (771)
 # or 1.21.5 (770) can serve current clients too, translated upward by the proxy.
 protocol = 777

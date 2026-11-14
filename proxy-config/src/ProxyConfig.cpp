@@ -193,10 +193,12 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         result.translation = TranslationMode::Auto;
     else if (mode == "proxy")
         result.translation = TranslationMode::Proxy;
+    else if (mode == "server")
+        result.translation = TranslationMode::Server;
     else if (mode == "off")
         result.translation = TranslationMode::Off;
     else
-        reader.fail("translation.mode", "must be auto, proxy or off");
+        reader.fail("translation.mode", "must be auto, proxy, server or off");
 
     const auto* plugins = reader.child(proxy, "plugins");
     reader.keys(plugins,

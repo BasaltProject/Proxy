@@ -297,7 +297,16 @@ private:
 
     [[nodiscard]] std::optional<bool> screenExploits(std::int32_t id);
     config::TranslationMode translationMode_;
+    static constexpr std::int32_t kFirstWithLoginQueries = 393;
+    /// A Basalt Server that translates a client too old to carry the login query: it logs in on the native protocol
+    /// and the envelope then carries the client's own.
+    [[nodiscard]] bool carriesClient(const config::BackendConfig& backend, std::int32_t client) const;
     [[nodiscard]] std::int32_t speaksTo(const config::BackendConfig& backend, std::int32_t client) const;
+    [[nodiscard]] std::int32_t logsInWith(const config::BackendConfig& backend, std::int32_t client) const;
+    [[nodiscard]] bool translatesHere() const;
+    void countTranslator(const BackendLogin& target) const;
+    /// A first server that did not take the envelope for a client before 1.13 leaves the translation here, if allowed.
+    [[nodiscard]] bool translateUncarried();
     [[nodiscard]] bool routeAllowed(std::int32_t client, const config::BackendConfig& backend) const;
     bool awaitingJoin_ = false;
     [[nodiscard]] bool acceptsBackend(const config::BackendConfig& backend) const;

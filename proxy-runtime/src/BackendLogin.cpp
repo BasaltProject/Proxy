@@ -27,7 +27,8 @@ std::atomic<std::uint64_t> gNextSerial{1};
 BackendLogin::BackendLogin(wire::io::TcpConnection connection, std::pmr::memory_resource& memory,
                            BackendAttempt attempt)
     : memory_(memory), attempt_(attempt), connection_(std::move(connection)), cookieKey_(0, memory), input_(0, memory),
-      output_(0, memory), frame_(0, memory), serial_(gNextSerial.fetch_add(1, std::memory_order_relaxed)) {
+      output_(0, memory), frame_(0, memory), wrapped_(0, memory),
+      serial_(gNextSerial.fetch_add(1, std::memory_order_relaxed)) {
     allocationReady_ =
         input_.tryReserve(kReadCapacity) && output_.tryReserve(kCapacity) && frame_.tryReserve(kCapacity);
 }
@@ -122,6 +123,7 @@ void BackendLogin::retire() {
     input_ = wire::io::ByteBuffer{0, memory_};
     output_ = wire::io::ByteBuffer{0, memory_};
     frame_ = wire::io::ByteBuffer{0, memory_};
+    wrapped_ = wire::io::ByteBuffer{0, memory_};
     phase_ = Phase::kRetired;
     preparationDeadline_ = Clock::time_point::max();
     readDeadline_ = Clock::time_point::max();
@@ -156,7 +158,7 @@ bool BackendLogin::finishConfiguration() {
 }
 
 std::size_t BackendLogin::allocated() const {
-    return cookieKey_.capacity() + input_.capacity() + output_.capacity() + frame_.capacity();
+    return cookieKey_.capacity() + input_.capacity() + output_.capacity() + frame_.capacity() + wrapped_.capacity();
 }
 
 bool BackendLogin::bufferedPacket() const {
@@ -181,10 +183,13 @@ std::expected<void, BackendLoginError> BackendLogin::queue(std::span<const std::
                                                            std::size_t loginLimit) {
     if (phase_ == Phase::kUnstarted || phase_ == Phase::kRetired || packet.empty())
         return std::unexpected(BackendLoginError::kMalformed);
-    std::vector<std::uint8_t> wrapped;
     if (envelopeActive_) {
-        wrapped = wire::protocol::sessionEnvelope::encodeData(packet);
-        packet = wrapped;
+        wrapped_.clear();
+        if (!wrapped_.tryReserve(packet.size() + 1))
+            return std::unexpected(BackendLoginError::kLimit);
+        wrapped_.writeByte(wire::protocol::sessionEnvelope::kDataFrameKind);
+        wrapped_.writeBytes(packet);
+        packet = wrapped_.readable();
     }
     output_.discardReadBytes();
     const auto maximum = compression_ ? wire::protocol::packetFraming::kMaxUncompressedSize
@@ -283,14 +288,13 @@ std::expected<std::span<const std::uint8_t>, BackendLoginError> BackendLogin::re
                 return std::unexpected(outcome.message.empty() ? BackendLoginError::kMalformed
                                                                : BackendLoginError::kIo);
             }
-            const std::vector<std::uint8_t> inner{outcome.packet.begin(), outcome.packet.end()};
-            frame_.clear();
-            if (inner.empty()) {
+            if (outcome.packet.empty()) {
+                frame_.clear();
                 wire::common::Logger{"Proxy"}.debug(
                     [] { return std::string{"The server accepted the session envelope."}; });
                 continue;
             }
-            frame_.writeBytes(inner);
+            frame_.skip(static_cast<std::size_t>(outcome.packet.data() - frame_.readable().data()));
         }
         const auto body = frame_.readable();
         const auto id = wire::protocol::varInt::read(frame_);

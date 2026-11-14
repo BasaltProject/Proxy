@@ -353,6 +353,9 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         auto finished = backend()->acceptLogin(frame_);
         if (!finished)
             return false;
+        if (!translateUncarried())
+            return false;
+        countTranslator(*backend());
         if (limboHandover_)
             return completeLimboHandover();
         frame_.clear();

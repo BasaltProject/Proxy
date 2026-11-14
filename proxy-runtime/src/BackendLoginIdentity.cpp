@@ -78,6 +78,8 @@ BackendLogin::acceptLogin(wire::io::ByteBuffer& packet) {
         namespace envelope = wire::protocol::sessionEnvelope;
         envelope_.emplace();
         const bool bedrock = origin_ == 1 && bedrockIdentity_.has_value();
+        if (carried_ != 0)
+            protocol_ = carried_;
         const auto open = envelope_->open(bedrock ? envelope::Edition::Bedrock : envelope::Edition::Java,
                                           bedrock ? bedrockProtocol_ : protocol_);
         if (!queue(open, kLoginPacketLimit))

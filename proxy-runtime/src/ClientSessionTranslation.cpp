@@ -181,41 +181,73 @@ bool ClientSession::toBackend(BackendLogin& target, std::span<const std::uint8_t
     return static_cast<bool>(target.queue(frame));
 }
 
+bool ClientSession::carriesClient(const config::BackendConfig& backend, std::int32_t client) const {
+    return backend.protocol == config::BackendConfig::kClientProtocol &&
+           backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt && nativeForwarding_ &&
+           nativeForwarding_->delegate && translationMode_ != config::TranslationMode::Proxy && client != 0 &&
+           client < kFirstWithLoginQueries;
+}
+
 std::int32_t ClientSession::speaksTo(const config::BackendConfig& backend, std::int32_t client) const {
-    constexpr std::int32_t kFirstWithLoginQueries = 393;
     const bool needsQueries = backend.forwarding == wire::auth::forwarding::ForwardingMode::Velocity ||
                               backend.forwarding == wire::auth::forwarding::ForwardingMode::Basalt;
-    if (backend.protocol == 0 &&
-        (translationMode_ == config::TranslationMode::Proxy ||
-         (backend.automatic && needsQueries && client != 0 && client < kFirstWithLoginQueries)))
+    if (backend.protocol == 0 && translationMode_ == config::TranslationMode::Proxy)
+        return buildInfo::kProtocolVersion;
+    if (carriesClient(backend, client))
+        return client;
+    if (backend.protocol == 0 && backend.automatic && needsQueries && client != 0 && client < kFirstWithLoginQueries)
         return buildInfo::kProtocolVersion;
     return effectiveProtocol(backend.protocol, client);
 }
 
+std::int32_t ClientSession::logsInWith(const config::BackendConfig& backend, std::int32_t client) const {
+    return carriesClient(backend, client) ? buildInfo::kProtocolVersion : speaksTo(backend, client);
+}
+
+bool ClientSession::translatesHere() const {
+    return translationMode_ == config::TranslationMode::Auto || translationMode_ == config::TranslationMode::Proxy;
+}
+
 bool ClientSession::routeAllowed(std::int32_t client, const config::BackendConfig& backend) const {
     const std::int32_t speaks = speaksTo(backend, client);
-    if (translationMode_ == config::TranslationMode::Off && client != buildInfo::kProtocolVersion &&
-        speaks == buildInfo::kProtocolVersion)
+    if (!translatesHere() && client != buildInfo::kProtocolVersion && speaks == buildInfo::kProtocolVersion)
         return false;
     return resolveRoute(client, speaks).has_value();
 }
 
 bool ClientSession::acceptsBackend(const config::BackendConfig& backend) const {
     constexpr std::int32_t kNative = buildInfo::kProtocolVersion;
-    constexpr std::int32_t kFirstWithLoginQueries = 393;
     const std::int32_t protocol = speaksTo(backend, clientProtocol_);
     using Mode = wire::auth::forwarding::ForwardingMode;
-    // The signed schemes ride on a login query, which a client before 1.13 cannot carry.
+    // The signed schemes ride on a login query, which a client before 1.13 cannot carry unless the envelope does.
     if ((backend.forwarding == Mode::Velocity || backend.forwarding == Mode::Basalt) && protocol != kNative &&
-        protocol < kFirstWithLoginQueries)
+        protocol < kFirstWithLoginQueries && !carriesClient(backend, clientProtocol_))
         return false;
-    if (translationMode_ == config::TranslationMode::Off && clientProtocol_ != 0 && protocol == kNative)
+    if (!translatesHere() && clientProtocol_ != 0 && protocol == kNative)
         return false;
     if (legacyRaw_ || (ids_ && !translation_))
         return protocol == clientProtocol_;
     if (ids_)
         return protocol == clientProtocol_ || protocol == kNative;
     return protocol == kNative || upgrades(protocol);
+}
+
+bool ClientSession::translateUncarried() {
+    if (!legacyRaw_ || rawNow())
+        return true;
+    if (activeBackend_ || !translatesHere())
+        return false;
+    backend()->useIds(nullptr);
+    ids_.reset();
+    legacyRaw_ = false;
+    return true;
+}
+
+void ClientSession::countTranslator(const BackendLogin& target) const {
+    if (target.delegated())
+        relayCounters().delegatedLogins.fetch_add(1, std::memory_order_relaxed);
+    else if ((translation_ && !rawProtocol(target.protocol())) || upgrades(target.protocol()))
+        relayCounters().translatedLogins.fetch_add(1, std::memory_order_relaxed);
 }
 
 bool ClientSession::legacyClient() const {

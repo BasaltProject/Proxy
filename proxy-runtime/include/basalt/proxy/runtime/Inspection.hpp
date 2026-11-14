@@ -11,6 +11,8 @@ namespace basalt::proxy::runtime {
 struct RelayStats {
     std::uint64_t logins = 0;
     std::uint64_t backendChanges = 0;
+    std::uint64_t delegatedLogins = 0;
+    std::uint64_t translatedLogins = 0;
     std::array<std::uint64_t, 4> endedIn{};
 };
 
