@@ -6,6 +6,7 @@
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/multiversion/java/JavaTranslators.hpp>
+#include <basalt/wire/nbt/NbtTag.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/ProtocolState.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -80,25 +81,62 @@ play::Heightmap heightmap(play::HeightmapType type) {
     return result;
 }
 
-std::vector<Native> configIntroPackets() {
+std::vector<Native> configIntroPackets(bool knownPacks) {
     std::vector<Native> result;
     result.push_back(native(ProtocolState::Configuration, configuration::BrandPacket::kId,
                             configuration::BrandPacket{"Basalt Proxy"}));
     result.push_back(native(ProtocolState::Configuration, configuration::UpdateEnabledFeaturesPacket::kId,
                             configuration::UpdateEnabledFeaturesPacket{{"minecraft:vanilla"}}));
-    result.push_back(native(ProtocolState::Configuration, configuration::SelectKnownPacksPacket::kClientboundId,
-                            configuration::SelectKnownPacksPacket{{configuration::KnownPack{
-                                "minecraft", "core", std::string{buildInfo::kMinecraftVersion}}}}));
+    if (knownPacks)
+        result.push_back(native(ProtocolState::Configuration, configuration::SelectKnownPacksPacket::kClientboundId,
+                                configuration::SelectKnownPacksPacket{{configuration::KnownPack{
+                                    "minecraft", "core", std::string{buildInfo::kMinecraftVersion}}}}));
     return result;
 }
 
-std::vector<Native> configRestPackets() {
+wire::nbt::NbtCompound chatDecoration() {
+    wire::nbt::NbtCompound decoration;
+    decoration.putString("translation_key", "chat.type.text");
+    wire::nbt::NbtList parameters;
+    parameters.push(wire::nbt::NbtTag::ofString("sender"));
+    parameters.push(wire::nbt::NbtTag::ofString("content"));
+    decoration.set("parameters", wire::nbt::NbtTag::ofList(std::move(parameters)));
+    return decoration;
+}
+
+/// Placeholder values in this version's shape for a client that cannot name the core pack; the chain reshapes them.
+std::optional<wire::nbt::NbtTag> legacyValue(std::string_view registry) {
+    wire::nbt::NbtCompound value;
+    if (registry == "minecraft:worldgen/biome") {
+        value.putBoolean("has_precipitation", false);
+        value.putFloat("temperature", 0.8F);
+        value.putFloat("downfall", 0.4F);
+        wire::nbt::NbtCompound effects;
+        effects.putString("water_color", "#3f76e4");
+        value.set("effects", wire::nbt::NbtTag::ofCompound(std::move(effects)));
+    } else if (registry == "minecraft:damage_type") {
+        value.putString("message_id", "generic");
+        value.putString("scaling", "never");
+        value.putFloat("exhaustion", 0.0F);
+    } else if (registry == "minecraft:chat_type") {
+        value.set("chat", wire::nbt::NbtTag::ofCompound(chatDecoration()));
+        value.set("narration", wire::nbt::NbtTag::ofCompound(chatDecoration()));
+    } else if (registry != "minecraft:dimension_type") {
+        return std::nullopt;
+    }
+    return wire::nbt::NbtTag::ofCompound(std::move(value));
+}
+
+std::vector<Native> configRestPackets(bool knownPacks) {
     std::vector<Native> result;
     for (const auto& registry : limboRegistries()) {
+        const auto value = knownPacks ? std::nullopt : legacyValue(registry.registry);
+        if (!knownPacks && !value)
+            continue;
         configuration::RegistryDataPacket packet{std::string{registry.registry}, {}};
         packet.entries.reserve(registry.entries.size());
         for (const auto entry : registry.entries)
-            packet.entries.push_back(configuration::RegistryEntry{"minecraft:" + std::string{entry}, std::nullopt});
+            packet.entries.push_back(configuration::RegistryEntry{"minecraft:" + std::string{entry}, value});
         result.push_back(native(ProtocolState::Configuration, configuration::RegistryDataPacket::kId, packet));
     }
     for (const std::string_view empty :
@@ -106,12 +144,15 @@ std::vector<Native> configRestPackets() {
           "minecraft:test_environment", "minecraft:test_instance", "minecraft:dialog", "minecraft:timeline"})
         result.push_back(native(ProtocolState::Configuration, configuration::RegistryDataPacket::kId,
                                 configuration::RegistryDataPacket{std::string{empty}, {}}));
+    if (!knownPacks)
+        result.push_back(native(ProtocolState::Configuration, configuration::RegistryDataPacket::kId,
+                                configuration::RegistryDataPacket{"minecraft:trim_material", {}}));
     result.push_back(native(ProtocolState::Configuration, configuration::TagsPacket::kId, configuration::TagsPacket{}));
     result.push_back(empty(ProtocolState::Configuration, configuration::kFinishConfigurationId));
     return result;
 }
 
-std::vector<Native> playIntroPackets(std::int32_t dropHeight) {
+std::vector<Native> playIntroPackets() {
     std::vector<Native> result;
     play::LoginPlayPacket login;
     login.entityId = 1;
@@ -150,12 +191,6 @@ std::vector<Native> playIntroPackets(std::int32_t dropHeight) {
         }
     result.push_back(
         native(ProtocolState::Play, play::ChunkBatchFinishedPacket::kId, play::ChunkBatchFinishedPacket{chunks}));
-    play::PlayerPositionPacket position;
-    position.teleportId = kLimboTeleportId;
-    position.x = kLimboSpawnX;
-    position.y = kLimboFloorY + dropHeight;
-    position.z = kLimboSpawnZ;
-    result.push_back(native(ProtocolState::Play, play::PlayerPositionPacket::kId, position));
     return result;
 }
 
@@ -194,8 +229,7 @@ std::vector<std::uint8_t> lay(std::span<const Native> packets, const wire::multi
 
 bool LimboAssets::serves(std::int32_t protocol) {
     return protocol == buildInfo::kProtocolVersion ||
-           (protocol >= wire::multiversion::protocolVersions::kV1_20_5 &&
-            wire::multiversion::java::javaTranslators::supported().contains(protocol));
+           wire::multiversion::java::javaTranslators::supported().contains(protocol);
 }
 
 std::shared_ptr<const LimboPackets> LimboAssets::forProtocol(std::int32_t protocol, std::int32_t dropHeight) {
@@ -212,14 +246,24 @@ std::shared_ptr<const LimboPackets> LimboAssets::forProtocol(std::int32_t protoc
             return nullptr;
     }
     auto built = std::make_shared<LimboPackets>();
-    const auto intro = configIntroPackets();
-    const auto rest = configRestPackets();
-    const auto play = playIntroPackets(dropHeight);
+    const bool knownPacks = protocol >= wire::multiversion::protocolVersions::kV1_20_5;
+    const auto intro = configIntroPackets(knownPacks);
+    const auto rest = configRestPackets(knownPacks);
+    const auto play = playIntroPackets();
     const std::array<Native, 1> start{empty(ProtocolState::Play, kStartConfigurationId)};
     built->configIntro = lay(intro, chain.get(), threshold_);
     built->configRest = lay(rest, chain.get(), threshold_);
     built->playIntro = lay(play, chain.get(), threshold_);
     built->startConfiguration = lay(start, chain.get(), threshold_);
+    play::PlayerPositionPacket position;
+    position.teleportId = kLimboTeleportId;
+    position.x = kLimboSpawnX;
+    position.y = kLimboFloorY + dropHeight;
+    position.z = kLimboSpawnZ;
+    ByteBuffer teleport;
+    protocol::varInt::write(teleport, play::PlayerPositionPacket::kId);
+    position.write(teleport);
+    built->teleport.assign(teleport.readable().begin(), teleport.readable().end());
     cache_.emplace(key, built);
     return built;
 }

@@ -18,6 +18,7 @@ constexpr std::int32_t kMaxConfigurationPackets = 64;
 constexpr std::size_t kTicks = 96;
 constexpr std::int32_t kLowestPhase = -2;
 constexpr std::int32_t kHighestPhase = 3;
+constexpr std::int32_t kHotbarSlots = 9;
 
 const std::array<double, kTicks>& fallTable() {
     static const auto kTable = [] {
@@ -63,8 +64,36 @@ LimboRun::Step LimboRun::fail(Reason reason) { return {Outcome::kFailed, reason,
 LimboRun::Step LimboRun::loginAcknowledged() {
     if (phase_ != Phase::kLoginAck)
         return fail(Reason::kLimboFailed);
+    if (!knownPacks_) {
+        knownPacksSeen_ = true;
+        phase_ = Phase::kFinish;
+        return {Outcome::kContinue, Reason::kNone, Signal::kSendConfigRest};
+    }
     phase_ = Phase::kKnownPacks;
     return {};
+}
+
+LimboRun::Step LimboRun::brand(wire::io::ByteBuffer& body) {
+    if (!config_.checkBrand)
+        return {};
+    const auto channel = wire::protocol::readString(body, 256);
+    if (body.failed())
+        return fail(Reason::kLimboFailed);
+    if (channel != "minecraft:brand")
+        return {};
+    auto brand = wire::protocol::readString(body, 64);
+    if (body.failed() || brandSeen_ || brand.empty() ||
+        std::ranges::any_of(brand, [](unsigned char c) { return c < 0x20 || c > 0x7e; }))
+        return fail(Reason::kLimboFailed);
+    std::ranges::transform(brand, brand.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (auto blocked : config_.blockedBrands) {
+        std::ranges::transform(blocked, blocked.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (blocked == brand)
+            return fail(Reason::kLimboFailed);
+    }
+    brandSeen_ = true;
+    return finished();
 }
 
 LimboRun::Step LimboRun::configuration(std::int32_t id, wire::io::ByteBuffer& body) {
@@ -74,29 +103,8 @@ LimboRun::Step LimboRun::configuration(std::int32_t id, wire::io::ByteBuffer& bo
     case 0:
         information_ = true;
         return {};
-    case 2: {
-        if (!config_.checkBrand)
-            return {};
-        const auto channel = wire::protocol::readString(body, 256);
-        if (body.failed())
-            return fail(Reason::kLimboFailed);
-        if (channel != "minecraft:brand")
-            return {};
-        auto brand = wire::protocol::readString(body, 64);
-        if (body.failed() || brandSeen_ || brand.empty() ||
-            std::ranges::any_of(brand, [](unsigned char c) { return c < 0x20 || c > 0x7e; }))
-            return fail(Reason::kLimboFailed);
-        std::ranges::transform(brand, brand.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        for (auto blocked : config_.blockedBrands) {
-            std::ranges::transform(blocked, blocked.begin(),
-                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (blocked == brand)
-                return fail(Reason::kLimboFailed);
-        }
-        brandSeen_ = true;
-        return {};
-    }
+    case 2:
+        return brand(body);
     case 1:
     case 4:
     case 5:
@@ -119,8 +127,8 @@ LimboRun::Step LimboRun::configuration(std::int32_t id, wire::io::ByteBuffer& bo
         return {Outcome::kContinue, Reason::kNone, Signal::kSendConfigRest};
     }
     case 3:
-        if (phase_ != Phase::kFinish || (config_.requireClientInformation && !information_) ||
-            (config_.checkBrand && !brandSeen_))
+        if (phase_ != Phase::kFinish || (configures_ && ((config_.requireClientInformation && !information_) ||
+                                                         (config_.checkBrand && !brandSeen_))))
             return fail(Reason::kLimboFailed);
         phase_ = Phase::kPlay;
         return {Outcome::kContinue, Reason::kNone, Signal::kSendPlayIntro};
@@ -234,9 +242,13 @@ void LimboRun::armCaptcha(std::string answer) {
 
 LimboRun::Step LimboRun::finished() {
     const bool gravity = !config_.checkGravity || gravityDone_;
-    if (phase_ != Phase::kPlay || !gravity || (echo_ && !ponged_) || answered_ == 0 || !solved_)
+    const bool introduced = (!config_.requireClientInformation || information_) && (!config_.checkBrand || brandSeen_);
+    if (phase_ != Phase::kPlay || !gravity || (echo_ && !ponged_) || (slotEcho_ && !slotDone_) || answered_ == 0 ||
+        !solved_ || !introduced)
         return {};
     phase_ = Phase::kReconfigure;
+    if (!configures_)
+        return {Outcome::kPassed, Reason::kNone, Signal::kNone};
     return {Outcome::kContinue, Reason::kNone, Signal::kSendReconfigure};
 }
 
@@ -299,6 +311,18 @@ LimboRun::Step LimboRun::play(std::int32_t id, wire::io::ByteBuffer& body, Clock
                    ? fail(Reason::kLimboFailed)
                    : Step{};
     }
+    case 0x0e:
+        information_ = true;
+        return finished();
+    case 0x36: {
+        const auto slot = body.readShort();
+        if (body.failed() || slot < 0 || slot >= kHotbarSlots)
+            return fail(Reason::kLimboFailed);
+        slotDone_ = slotDone_ || (slotSent_ && slot == slotExpected_);
+        return finished();
+    }
+    case 0x16:
+        return configures_ ? Step{} : brand(body);
     case 0x07: {
         if (!chat_ || solved_)
             return {};
@@ -344,6 +368,14 @@ std::optional<std::int32_t> LimboRun::pingDue(Clock::time_point now) {
     pingWaiting_ = true;
     pingSentAt_ = now;
     return pingId_;
+}
+
+std::optional<LimboRun::SlotProbe> LimboRun::slotProbeDue() {
+    if (!slotEcho_ || slotSent_ || phase_ != Phase::kPlay || !teleported_)
+        return std::nullopt;
+    slotSent_ = true;
+    slotExpected_ = 1 + static_cast<std::int32_t>(entropy() % (kHotbarSlots - 1));
+    return SlotProbe{slotExpected_ + kHotbarSlots, slotExpected_};
 }
 
 void LimboRun::captchaShown(Clock::time_point now) {

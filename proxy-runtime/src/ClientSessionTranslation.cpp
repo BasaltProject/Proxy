@@ -294,7 +294,7 @@ bool ClientSession::translateInbound() {
     bool ok = true;
     translation_->chain().serverbound(protocolState(), id, body,
                                       [&](std::int32_t translatedId, std::span<const std::uint8_t> bytes) {
-                                          if (!ok)
+                                          if (!ok || closing_ || state_ == State::kBackendLogin)
                                               return;
                                           frame_.clear();
                                           if (!frame_.tryReserve(bytes.size() + 8)) {

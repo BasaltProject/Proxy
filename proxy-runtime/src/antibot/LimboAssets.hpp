@@ -20,6 +20,8 @@ struct LimboPackets {
     std::vector<std::uint8_t> configRest;
     std::vector<std::uint8_t> playIntro;
     std::vector<std::uint8_t> startConfiguration;
+    /// Unframed and in this version's ids: it goes through the client's own chain, whose links remember it.
+    std::vector<std::uint8_t> teleport;
 };
 
 /// Builds each protocol's packets once and shares them with every client that speaks it.

@@ -1,10 +1,12 @@
 #include "BackendLogin.hpp"
 #include "ClientSession.hpp"
+#include "LoginShapes.hpp"
 #include "RelayCounters.hpp"
 #include "antibot/Antibot.hpp"
 
 #include <basalt/proxy/config/ProxyConfig.hpp>
 #include <basalt/proxy/runtime/BuildInfo.hpp>
+#include <basalt/wire/multiversion/ProtocolVersions.hpp>
 #include <basalt/wire/multiversion/java/JavaTranslators.hpp>
 #include <basalt/wire/protocol/PacketFraming.hpp>
 #include <basalt/wire/protocol/VarInt.hpp>
@@ -29,13 +31,16 @@ constexpr std::int32_t kCaptchaMapId = 0x5eed;
 constexpr std::int16_t kFirstHotbarSlot = 36;
 constexpr std::size_t kBrandFrameLimit = 256;
 constexpr std::int32_t kConfigurationTransferId = 0x0c;
+constexpr std::int32_t kPlayClientInformationId = 0x0e;
 } // namespace
 
 antibot::OriginKey ClientSession::origin() const { return antibot::originOf(clientAddress()); }
 
 bool ClientSession::queueFramed(std::span<const std::uint8_t> framed) {
+    if (framed.empty())
+        return true;
     output_.discardReadBytes();
-    if (framed.empty() || !output_.tryReserve(framed.size()))
+    if (!output_.tryReserve(framed.size()))
         return false;
     if (output_.readableBytes() == 0)
         writeDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.writeTimeoutMs};
@@ -76,6 +81,10 @@ bool ClientSession::startLimbo() {
     if (action == antibot::Action::kChatCheck)
         limboRun_->armChatCheck();
     limboRun_->expectEcho(config.checkEcho && protocol >= kFirstPingProtocol);
+    limboRun_->expectSlotEcho(config.checkEcho && !captcha_);
+    namespace versions = wire::multiversion::protocolVersions;
+    const bool native = clientProtocol_ == 0;
+    limboRun_->speaks(native || protocol >= versions::kV1_20_5, native || protocol >= versions::kV1_20_2);
     if (!translation_ && clientProtocol_ != 0) {
         translation_ = wire::multiversion::java::javaTranslators::chainFor(clientProtocol_);
         limboOwnsChain_ = true;
@@ -99,6 +108,12 @@ bool ClientSession::startLimbo() {
     finished.sessionId = wire::common::Uuid::random();
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::login::LoginFinishedPacket::kId);
+    if (!limboRun_->configures()) {
+        writeLoginSuccess(frame_, clientProtocol_, finished);
+        if (!queueNative(frame_.readable()))
+            return false;
+        return limboWithoutConfiguration(now);
+    }
     finished.write(frame_);
     if (!queuePacket(frame_.readable()))
         return false;
@@ -106,7 +121,32 @@ bool ClientSession::startLimbo() {
     return true;
 }
 
+bool ClientSession::limboWithoutConfiguration(Clock::time_point now) {
+    auto step = limboRun_->loginAcknowledged();
+    state_ = State::kLimboConfiguration;
+    if (step.outcome != antibot::LimboRun::Outcome::kContinue || !queueFramed(limboPackets_->configIntro) ||
+        !queueFramed(limboPackets_->configRest))
+        return false;
+    wire::io::ByteBuffer none;
+    step = limboRun_->configuration(wire::protocol::configuration::kFinishConfigurationId, none);
+    if (step.signal != antibot::LimboRun::Signal::kSendPlayIntro || !limboEnterPlay(now))
+        return false;
+    readDeadline_ = limboRun_->nextWake();
+    return true;
+}
+
+bool ClientSession::limboEnterPlay(Clock::time_point now) {
+    state_ = State::kLimboPlay;
+    if (!queueFramed(limboPackets_->playIntro) || !queuePacket(limboPackets_->teleport))
+        return false;
+    if ((captcha_ || blockCaptcha_ || limboRun_->chatCheck()) && !limboSendCaptcha())
+        return false;
+    return limboKeepAlive(now);
+}
+
 bool ClientSession::limboPacket(std::int32_t id, std::span<const std::uint8_t> raw) {
+    if (!limboRun_)
+        return true;
     const auto now = Clock::now();
     antibot::LimboRun::Step step;
     switch (state_) {
@@ -117,6 +157,8 @@ bool ClientSession::limboPacket(std::int32_t id, std::span<const std::uint8_t> r
         state_ = State::kLimboConfiguration;
         if (!queueFramed(limboPackets_->configIntro))
             return false;
+        if (step.signal == antibot::LimboRun::Signal::kSendConfigRest && !queueFramed(limboPackets_->configRest))
+            return false;
         break;
     case State::kLimboConfiguration:
         if (id == 0 && !rememberSettings(raw))
@@ -126,17 +168,12 @@ bool ClientSession::limboPacket(std::int32_t id, std::span<const std::uint8_t> r
         step = limboRun_->configuration(id, frame_);
         if (step.signal == antibot::LimboRun::Signal::kSendConfigRest && !queueFramed(limboPackets_->configRest))
             return false;
-        if (step.signal == antibot::LimboRun::Signal::kSendPlayIntro) {
-            state_ = State::kLimboPlay;
-            if (!queueFramed(limboPackets_->playIntro))
-                return false;
-            if ((captcha_ || blockCaptcha_ || limboRun_->chatCheck()) && !limboSendCaptcha())
-                return false;
-            if (!limboKeepAlive(now))
-                return false;
-        }
+        if (step.signal == antibot::LimboRun::Signal::kSendPlayIntro && !limboEnterPlay(now))
+            return false;
         break;
     default:
+        if (!limboRun_->configures() && id == kPlayClientInformationId && !rememberSettings(raw))
+            return false;
         step = limboRun_->play(id, frame_, now);
         if (step.outcome == antibot::LimboRun::Outcome::kContinue && !limboKeepAlive(now))
             return false;
@@ -155,6 +192,14 @@ bool ClientSession::limboKeepAlive(Clock::time_point now) {
         if (!queuePacket(out.readable()))
             return false;
     }
+    if (const auto probe = limboRun_->slotProbeDue())
+        for (const auto slot : {probe->ignored, probe->selected}) {
+            wire::io::ByteBuffer out;
+            wire::protocol::varInt::write(out, wire::protocol::play::SetHeldSlotPacket::kId);
+            wire::protocol::play::SetHeldSlotPacket{slot}.write(out);
+            if (!queuePacket(out.readable()))
+                return false;
+        }
     const auto due = limboRun_->keepAliveDue(now);
     if (!due)
         return true;
@@ -314,7 +359,9 @@ bool ClientSession::limboTransfer() {
     const auto config = access_.policy->antibot.config();
     const std::string host = config->passthroughTransferHost.empty() ? virtualHost_ : config->passthroughTransferHost;
     const std::int32_t port = config->passthroughTransferPort != 0 ? config->passthroughTransferPort : virtualPort_;
-    if (!config->passthroughTransfer || translation_ || host.empty() || host.size() > 255 || port < 1 || port > 65535)
+    if (!config->passthroughTransfer ||
+        (translation_ && clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_5) || host.empty() ||
+        host.size() > 255 || port < 1 || port > 65535)
         return false;
     access_.policy->antibot.transferIssued(origin(), Clock::now());
     limboRun_.reset();
@@ -335,7 +382,8 @@ bool ClientSession::limboFailed(antibot::Reason reason) {
 bool ClientSession::limboPassed() {
     const auto exit = access_.policy->antibot.limboPassed(origin(), name_, Clock::now());
     if (exit != antibot::Antibot::LimboExit::kEnter) {
-        state_ = State::kLimboConfiguration;
+        if (limboRun_->configures())
+            state_ = State::kLimboConfiguration;
         if (exit == antibot::Antibot::LimboExit::kBusy)
             return limboLeave("antibot-retry");
         return limboTransfer() || limboLeave("antibot-rejoin");
@@ -345,9 +393,8 @@ bool ClientSession::limboPassed() {
     limboPackets_.reset();
     captcha_.reset();
     blockCaptcha_.reset();
-    if (limboOwnsChain_)
-        translation_.reset();
-    else if (translation_)
+    limboChain_ = std::move(translation_);
+    if (!limboOwnsChain_ && limboChain_)
         translation_ = wire::multiversion::java::javaTranslators::chainFor(clientProtocol_);
     limboOwnsChain_ = false;
     limboHandover_ = true;
@@ -358,9 +405,13 @@ bool ClientSession::limboPassed() {
 
 bool ClientSession::completeLimboHandover() {
     limboHandover_ = false;
+    limboChain_.reset();
     state_ = State::kLoginAck;
     if (!synthesizeClientPacket(wire::protocol::login::kLoginAcknowledgedId))
         return false;
+    // A client without a configuration phase sends both again when the backend's join reaches it.
+    if (clientProtocol_ != 0 && clientProtocol_ < wire::multiversion::protocolVersions::kV1_20_2)
+        return true;
     if (clientSettings_.readableBytes() != 0 && !toBackend(*backend(), clientSettings_.readable()))
         return false;
     if (!limboBrand_.empty() && !toBackend(*backend(), limboBrand_))

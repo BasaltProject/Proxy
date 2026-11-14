@@ -47,6 +47,25 @@ public:
 
     void expectEcho(bool on) noexcept { echo_ = on; }
 
+    /// A hotbar slot to select once and the out-of-range one sent before it, which a vanilla client ignores.
+    struct SlotProbe {
+        std::int32_t ignored;
+        std::int32_t selected;
+    };
+
+    /// The held-slot probe to send now, once; the client has to report the selected slot back.
+    [[nodiscard]] std::optional<SlotProbe> slotProbeDue();
+
+    void expectSlotEcho(bool on) noexcept { slotEcho_ = on; }
+
+    /// What the client's version has: the known packs answer, and a configuration phase it can return to.
+    void speaks(bool knownPacks, bool configuration) noexcept {
+        knownPacks_ = knownPacks;
+        configures_ = configuration;
+    }
+
+    [[nodiscard]] bool configures() const noexcept { return configures_; }
+
     [[nodiscard]] Step tick(Clock::time_point now);
     [[nodiscard]] Clock::time_point nextWake() const;
 
@@ -69,6 +88,7 @@ private:
     [[nodiscard]] Step movement(double x, double y, double z, std::uint8_t flags, Clock::time_point now);
     [[nodiscard]] Step finished();
     [[nodiscard]] Step typedCommand(std::string_view text);
+    [[nodiscard]] Step brand(wire::io::ByteBuffer& body);
 
     config::AntibotConfig config_;
     Phase phase_ = Phase::kLoginAck;
@@ -88,6 +108,12 @@ private:
     bool gravityDone_ = false;
     bool brandSeen_ = false;
     bool echo_ = false;
+    bool slotEcho_ = false;
+    bool slotSent_ = false;
+    bool slotDone_ = false;
+    std::int32_t slotExpected_ = -1;
+    bool knownPacks_ = true;
+    bool configures_ = true;
     bool pingWaiting_ = false;
     bool ponged_ = false;
     std::int32_t pingId_ = 0;

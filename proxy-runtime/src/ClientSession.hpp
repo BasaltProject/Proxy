@@ -239,6 +239,8 @@ private:
     [[nodiscard]] bool queueNative(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queueTranslated(std::span<const std::uint8_t> packet);
     std::unique_ptr<wire::multiversion::java::JavaChain> translation_;
+    /// The limbo's chain, kept alive until the handover: the limbo can pass from inside one of its callbacks.
+    std::unique_ptr<wire::multiversion::java::JavaChain> limboChain_;
     std::unique_ptr<IdRenumbering> ids_;
 
     struct UpwardChain {
@@ -275,6 +277,8 @@ private:
     [[nodiscard]] std::optional<bool> screenChat(std::int32_t id);
     [[nodiscard]] bool continueJoin();
     [[nodiscard]] bool startLimbo();
+    [[nodiscard]] bool limboWithoutConfiguration(Clock::time_point now);
+    [[nodiscard]] bool limboEnterPlay(Clock::time_point now);
     [[nodiscard]] bool limboPacket(std::int32_t id, std::span<const std::uint8_t> raw);
     [[nodiscard]] bool limboTimer(Clock::time_point now);
     [[nodiscard]] bool limboStep(const antibot::LimboRun::Step& step);

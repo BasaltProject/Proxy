@@ -108,15 +108,17 @@ passthrough-after-seconds = 5
 #   "always"     every login that is not trusted or verified
 mode = "attack"
 suspicious-score = 40
-# What to do with a client older than 1.20.5, which the limbo cannot hold (no matching configuration phase). "skip" lets it
-# straight to the backend (it is still scored); "kick" refuses it while the limbo would have been used.
+# Every version the proxy translates goes through the limbo, 1.8 included. This is for a client the limbo still cannot
+# hold: "skip" lets it straight to the backend (it is still scored); "kick" refuses it while the limbo would have been used.
 legacy-clients = "skip"
 # Seconds a client has to finish the limbo.
 timeout-seconds = 20
 # Milliseconds between keep-alives, and how long a client has to answer one.
 # Largest packet, in bytes, a client may send while in the limbo. Real clients send far less.
 max-frame-bytes = 2048
-# Send a ping the client must answer with the same id (clients 1.17 and newer).
+# Send a ping the client must answer with the same id (clients 1.17 and newer), and move the held hotbar slot after an
+# out-of-range one that a real client ignores: it must report the new slot and never the bad one. The slot is skipped
+# while a map captcha is in the hand.
 check-echo = true
 # Require the client brand and refuse malformed ones or any in blocked-brands (compared ignoring case).
 check-brand = true
@@ -179,8 +181,8 @@ enabled = false
 mode = "attack"
 # Seconds an origin has to come back after being sent away.
 window-seconds = 120
-# Send a client that speaks the proxy's own protocol (1.20.5 and newer, translated clients excluded) a transfer packet back
-# to this proxy instead of a disconnect, so it rejoins by itself. A client that cannot take it gets the rejoin message.
+# Send a 1.20.5 or newer client a transfer packet back to this proxy instead of a disconnect, so it rejoins by itself. An
+# older client, which has no such packet, gets the rejoin message.
 # The host and port are taken from what the client connected to; set them when a load balancer sits in front.
 transfer = true
 transfer-host = ""
