@@ -178,3 +178,8 @@ packet-timeout-ms = 25
 [plugins.allow]
 # my_plugin = ["packets"]
 # lobby = ["network", "commands"]
+
+# A Java jar that carries both velocity-plugin.json and bungee.yml loads as a Velocity plugin. List it here to load it
+# as a BungeeCord plugin instead. The key is the plugin's id or name from its descriptor, or the jar's file name.
+[plugins.java-platform]
+# huskchat = "bungee"

@@ -13,6 +13,8 @@ struct JavaRuntimeOptions {
     std::string pluginsDirectory = "plugins";
     /// Holds shim/, bungee/ and velocity/ (a facade jar and a lib/ folder each); BASALT_SHIM_DIR overrides it.
     std::string runtimeDirectory = ".basalt";
+    /// Which facade loads a jar that carries both descriptors.
+    PlatformChoices platforms;
 };
 
 /// Which facade to run; the machine itself is shared by every adapter in the process.

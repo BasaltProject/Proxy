@@ -23,7 +23,7 @@ public:
         }
     }
 
-    [[nodiscard]] std::expected<void, std::string> boot(const std::string& folder) {
+    [[nodiscard]] std::expected<void, std::string> boot(const std::string& folder, const std::string& jars) {
         JNIEnv* env = shim_->env();
         if (env == nullptr)
             return std::unexpected("the Java machine has no environment for this thread");
@@ -40,10 +40,12 @@ public:
             return std::unexpected("could not register the native methods of the Java facade");
         gAdapters[spec_.slot] = this;
         std::string failure;
-        call(env, "boot", "(Ljava/lang/String;)V", [&](jclass facade, jmethodID method) {
-            jstring argument = env->NewStringUTF(folder.c_str());
-            env->CallStaticVoidMethod(facade, method, argument);
-            env->DeleteLocalRef(argument);
+        call(env, "boot", "(Ljava/lang/String;Ljava/lang/String;)V", [&](jclass facade, jmethodID method) {
+            jstring plugins = env->NewStringUTF(folder.c_str());
+            jstring staged = env->NewStringUTF(jars.c_str());
+            env->CallStaticVoidMethod(facade, method, plugins, staged);
+            env->DeleteLocalRef(staged);
+            env->DeleteLocalRef(plugins);
         });
         return {};
     }
@@ -689,20 +691,51 @@ private:
     std::atomic<jlong> nextCookie_{1};
 };
 
+namespace {
+
+constexpr std::string_view kStagedFolder = "staged-plugins";
+
+/// A fresh folder holding only the jars of one facade, linked where the file system allows and copied otherwise.
+std::expected<std::filesystem::path, std::string> stageJars(const std::vector<DetectedJar>& jars, ForeignKind kind,
+                                                            const std::filesystem::path& facadeRoot) {
+    namespace fs = std::filesystem;
+    const fs::path folder = facadeRoot / kStagedFolder;
+    std::error_code error;
+    fs::remove_all(folder, error);
+    if (!fs::create_directories(folder, error) && error)
+        return std::unexpected("could not create " + folder.string() + ": " + error.message());
+    for (const DetectedJar& jar : jars) {
+        if (jar.kind != kind)
+            continue;
+        const fs::path source{jar.path};
+        const fs::path target = folder / source.filename();
+        fs::create_hard_link(source, target, error);
+        if (error && !fs::copy_file(source, target, fs::copy_options::overwrite_existing, error))
+            return std::unexpected("could not stage " + source.string() + ": " + error.message());
+    }
+    return fs::absolute(folder);
+}
+
+} // namespace
+
 std::unique_ptr<ForeignAdapter> createJavaAdapter(const JavaRuntimeOptions& options, const PluginHooks& hooks,
                                                   JavaSpec spec) {
     const auto log = [&hooks, &spec](std::string_view line) {
         if (hooks.log)
             hooks.log(spec.logName, line);
     };
-    const auto jars = detectJars(options.pluginsDirectory);
+    const auto jars = detectJars(options.pluginsDirectory, options.platforms);
     const auto has = [&jars](ForeignKind kind) {
         return std::ranges::any_of(jars, [kind](const DetectedJar& jar) { return jar.kind == kind; });
     };
-    if (!has(spec.kind))
-        return nullptr;
     namespace fs = std::filesystem;
     const fs::path root = fs::absolute(options.runtimeDirectory);
+    const fs::path facadeRoot = root / (spec.kind == ForeignKind::kBungee ? "bungee" : "velocity");
+    if (!has(spec.kind)) {
+        std::error_code ignored;
+        fs::remove_all(facadeRoot / kStagedFolder, ignored);
+        return nullptr;
+    }
     static std::weak_ptr<ShimHost> weak;
     auto shared = weak.lock();
     if (!shared) {
@@ -749,8 +782,13 @@ std::unique_ptr<ForeignAdapter> createJavaAdapter(const JavaRuntimeOptions& opti
         shared = std::move(*shim);
         weak = shared;
     }
+    const auto staged = stageJars(jars, spec.kind, facadeRoot);
+    if (!staged) {
+        log(staged.error());
+        return nullptr;
+    }
     auto adapter = std::make_unique<JavaAdapter>(shared, hooks, std::move(spec));
-    if (const auto booted = adapter->boot(fs::absolute(options.pluginsDirectory).string()); !booted) {
+    if (const auto booted = adapter->boot(fs::absolute(options.pluginsDirectory).string(), staged->string()); !booted) {
         log(booted.error());
         return nullptr;
     }

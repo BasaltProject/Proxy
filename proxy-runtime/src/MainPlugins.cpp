@@ -3,6 +3,7 @@
 #include "BedrockStatus.hpp"
 
 #include <basalt/wire/common/logging/Logger.hpp>
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/io/ByteBuffer.hpp>
 #include <basalt/wire/protocol/PacketNames.hpp>
 #include <basalt/wire/protocol/play/ChatPackets.hpp>
@@ -69,6 +70,11 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
 #if defined(BASALT_HAS_SHIM)
     proxy::plugins::JavaRuntimeOptions javaOptions;
     javaOptions.pluginsDirectory = settings.directory;
+    for (const auto& [id, platform] : configuration->plugins.javaPlatform)
+        javaOptions.platforms.emplace(wire::common::placeholder::lowercaseAscii(id),
+                                      platform == config::JavaPlatform::kBungee
+                                          ? proxy::plugins::ForeignKind::kBungee
+                                          : proxy::plugins::ForeignKind::kVelocity);
     if (const char* shimDirectory = std::getenv("BASALT_SHIM_DIR"))
         javaOptions.runtimeDirectory = shimDirectory;
     settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {

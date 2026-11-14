@@ -199,10 +199,10 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("translation.mode", "must be auto, proxy or off");
 
     const auto* plugins = reader.child(proxy, "plugins");
-    reader.keys(
-        plugins,
-        {"enabled", "instructions-per-turn", "memory-mb", "queue-size", "packet-max-kib", "packet-timeout-ms", "allow"},
-        "plugins.");
+    reader.keys(plugins,
+                {"enabled", "instructions-per-turn", "memory-mb", "queue-size", "packet-max-kib", "packet-timeout-ms",
+                 "allow", "java-platform"},
+                "plugins.");
     reader.scalar(plugins, "enabled", result.plugins.enabled, "plugins.");
     reader.integer(plugins, "instructions-per-turn", result.plugins.instructionsPerTurn, 1000, 1000000000, "plugins.");
     reader.integer(plugins, "memory-mb", result.plugins.memoryMb, 1, 1024, "plugins.");
@@ -216,6 +216,17 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                 if (name != "commands" && name != "network" && name != "packets")
                     reader.fail("plugins.allow." + id, "grants unknown permission '" + name + "'");
             result.plugins.allow.emplace(id, std::move(names));
+        }
+    }
+    if (const auto* platforms = plugins ? reader.child(*plugins, "java-platform") : nullptr) {
+        for (const auto& id : platforms->keys()) {
+            const auto* name = platforms->find(id)->get<std::string>();
+            if (name && *name == "velocity")
+                result.plugins.javaPlatform.emplace(id, JavaPlatform::kVelocity);
+            else if (name && *name == "bungee")
+                result.plugins.javaPlatform.emplace(id, JavaPlatform::kBungee);
+            else
+                reader.fail("plugins.java-platform." + id, "must be velocity or bungee");
         }
     }
 

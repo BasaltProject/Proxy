@@ -131,6 +131,8 @@ struct LoggingConfig {
     friend bool operator==(const LoggingConfig&, const LoggingConfig&) = default;
 };
 
+enum class JavaPlatform : std::uint8_t { kVelocity, kBungee };
+
 struct PluginsConfig {
     static constexpr std::string_view kDirectory = "plugins";
     /// Plugin data shares the players database, as on Basalt Server.
@@ -146,6 +148,8 @@ struct PluginsConfig {
     std::int64_t packetTimeoutMs = 25;
     /// Plugin id to the permissions the operator grants it; a plugin asking for more loads without the rest.
     std::map<std::string, std::vector<std::string>> allow;
+    /// Plugin id (or jar file name) to the facade that loads a jar carrying both Java descriptors; Velocity otherwise.
+    std::map<std::string, JavaPlatform, std::less<>> javaPlatform;
 
     friend bool operator==(const PluginsConfig&, const PluginsConfig&) = default;
 };
