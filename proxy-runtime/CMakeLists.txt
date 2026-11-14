@@ -26,6 +26,7 @@ basalt_module(proxy-runtime-core
         src/BackendChangeRequest.cpp
         src/BackendRoutes.cpp
         src/ServerHealth.cpp
+        src/StatusFrameCache.cpp
         src/StatusProbe.cpp
         src/StatusRelay.cpp
         src/BackendAttempts.cpp

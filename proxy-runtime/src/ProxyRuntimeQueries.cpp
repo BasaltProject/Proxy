@@ -230,6 +230,8 @@ bool ProxyRuntime::pingServer(std::string_view name, std::function<void(std::opt
 
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }
 
+std::size_t ProxyRuntime::ioLoops() const noexcept { return impl_->owners.size(); }
+
 std::uint64_t ProxyRuntime::acceptedConnections() const noexcept {
     return impl_->accepted.load(std::memory_order_relaxed);
 }

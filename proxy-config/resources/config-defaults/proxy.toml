@@ -63,7 +63,8 @@ port = 25565
 
 [runtime]
 # Session owners and a separate bounded pool for DNS, authentication and other slow work.
-io-loops = 2
+# io-loops = 0 uses one per logical core the proxy may run on, at least 2 and at most 16; a positive number fixes it.
+io-loops = 0
 workers = 4
 max-sessions = 4096
 max-pending-work = 256

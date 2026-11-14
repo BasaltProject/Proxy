@@ -1,6 +1,7 @@
 #include "ProxyRuntimeImpl.hpp"
 
 #include <basalt/wire/common/json/Json.hpp>
+#include <basalt/wire/io/Platform.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
 
 namespace basalt::proxy::runtime {
@@ -43,6 +44,14 @@ void applyPingChanges(wire::protocol::status::ServerStatusPayload& payload, cons
     }
 }
 
+[[nodiscard]] std::size_t ioLoopCount(std::size_t configured) {
+    constexpr std::size_t kMinIoLoops = 2;
+    constexpr std::size_t kMaxIoLoops = 16;
+    if (configured != 0)
+        return configured;
+    return std::clamp<std::size_t>(wire::io::cpuCoreCount().value_or(kMinIoLoops), kMinIoLoops, kMaxIoLoops);
+}
+
 } // namespace
 
 ProxyRuntime::ProxyRuntime(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -54,11 +63,11 @@ ProxyRuntime::~ProxyRuntime() = default;
 
 std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfig config, RuntimeServices services) {
     const auto& limits = config.runtime;
-    if (limits.ioLoops == 0 || limits.ioLoops > 64 || limits.maxSessions == 0 || limits.maxSessions > 65536 ||
-        limits.maxPendingWork == 0 || limits.maxPendingWork > 65536 ||
-        limits.sessionBufferBytes < Session::kBufferBytes || limits.maxBufferedBytes < Session::kBufferBytes ||
-        limits.handshakeTimeoutMs == 0 || limits.loginTimeoutMs == 0 || limits.connectTimeoutMs == 0 ||
-        limits.readTimeoutMs == 0 || limits.writeTimeoutMs == 0 || limits.lowWaterBytes >= limits.highWaterBytes ||
+    if (limits.ioLoops > 64 || limits.maxSessions == 0 || limits.maxSessions > 65536 || limits.maxPendingWork == 0 ||
+        limits.maxPendingWork > 65536 || limits.sessionBufferBytes < Session::kBufferBytes ||
+        limits.maxBufferedBytes < Session::kBufferBytes || limits.handshakeTimeoutMs == 0 ||
+        limits.loginTimeoutMs == 0 || limits.connectTimeoutMs == 0 || limits.readTimeoutMs == 0 ||
+        limits.writeTimeoutMs == 0 || limits.lowWaterBytes >= limits.highWaterBytes ||
         limits.highWaterBytes >= limits.sessionBufferBytes)
         return std::unexpected("invalid runtime resource limits");
     auto address = wire::io::TcpAddress::literal(config.network.bind, config.network.port);
@@ -145,12 +154,7 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
             if (changes != nullptr)
                 applyPingChanges(payload, *changes);
             payload.enforcesSecureChat = state->config.general.enforceSecureProfile && state->config.network.onlineMode;
-            wire::io::ByteBuffer body{1024}, framed{1024};
-            protocol::varInt::write(body, protocol::status::StatusResponsePacket::kId);
-            protocol::status::StatusResponsePacket{std::move(payload)}.write(body);
-            if (!protocol::packetFraming::writeUncompressed(framed, body.readable()))
-                return {};
-            return framed.toVector();
+            return state->statusFrames.frame(std::move(payload));
         };
         packet.clear();
         frame.clear();
@@ -175,9 +179,10 @@ std::expected<ProxyRuntime, std::string> ProxyRuntime::create(config::ProxyConfi
             impl->buffers.acquire(impl->unavailable.capacity() + impl->authenticationFailure.capacity());
         if (!impl->bootstrapBuffers || impl->buffers.limit() - impl->buffers.used() < Session::kBufferBytes)
             return std::unexpected("global buffer budget cannot admit a bootstrap session");
-        impl->owners.reserve(impl->config.runtime.ioLoops);
-        impl->threads.reserve(impl->config.runtime.ioLoops);
-        for (std::size_t i = 0; i < impl->config.runtime.ioLoops; ++i)
+        const std::size_t loops = ioLoopCount(impl->config.runtime.ioLoops);
+        impl->owners.reserve(loops);
+        impl->threads.reserve(loops);
+        for (std::size_t i = 0; i < loops; ++i)
             impl->owners.push_back(std::make_unique<Impl::Owner>(*impl));
         auto bound = wire::io::TcpListener::bind(*address, 128, impl->config.network.dualStack);
         if (!bound || !bound->setNonBlocking())

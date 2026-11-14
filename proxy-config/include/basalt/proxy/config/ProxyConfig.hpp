@@ -84,7 +84,7 @@ struct LimitsConfig {
 };
 
 struct RuntimeConfig {
-    std::size_t ioLoops = 2;
+    std::size_t ioLoops = 0;
     std::size_t workers = 4;
     std::size_t maxSessions = 4096;
     std::size_t maxPendingWork = 256;

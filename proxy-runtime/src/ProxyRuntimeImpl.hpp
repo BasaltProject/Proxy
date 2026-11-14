@@ -8,6 +8,7 @@
 #include "NativeForwarding.hpp"
 #include "RelayCounters.hpp"
 #include "ServerHealth.hpp"
+#include "StatusFrameCache.hpp"
 #include "StatusRelay.hpp"
 #include "antibot/AttackReport.hpp"
 
@@ -519,6 +520,7 @@ struct ProxyRuntime::Impl {
     wire::io::TcpListener listener;
     std::uint16_t port = 0;
     detail::ClientSession::StatusSource statusSource;
+    detail::StatusFrameCache statusFrames;
     std::vector<std::uint8_t> unavailable;
     std::vector<std::uint8_t> authenticationFailure;
     RuntimeServices services;

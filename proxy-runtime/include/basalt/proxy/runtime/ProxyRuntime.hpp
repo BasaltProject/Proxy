@@ -443,6 +443,7 @@ public:
     /// Milliseconds a server-list answer may be reused right now, 0 when it may not.
     [[nodiscard]] int statusCacheMs() const;
     [[nodiscard]] std::uint16_t port() const noexcept;
+    [[nodiscard]] std::size_t ioLoops() const noexcept;
     /// Counts admitted sessions, including bounded handoffs waiting for their owner.
     [[nodiscard]] std::size_t sessionCount() const noexcept;
     [[nodiscard]] std::size_t bufferedBytes() const noexcept;

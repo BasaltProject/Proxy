@@ -614,7 +614,10 @@ int run(const cliCommand::Run& command) {
         if (signalStop.load(std::memory_order_relaxed))
             stopping.request_stop();
     }};
-    logger.info([&runtime] { return "Listening on port " + std::to_string(runtime->port()) + "."; });
+    logger.info([&runtime] {
+        return "Listening on port " + std::to_string(runtime->port()) + " with " + std::to_string(runtime->ioLoops()) +
+               " I/O loops.";
+    });
     logger.warn([] {
         return std::string{"Proxy is under development; only verified protocol and server combinations are supported."};
     });

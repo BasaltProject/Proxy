@@ -29,7 +29,7 @@ TEST_CASE("commented defaults produce online authentication, bounded owners "
     REQUIRE(defaults);
     CHECK(defaults->network.onlineMode);
     CHECK_FALSE(defaults->network.acceptTransfers);
-    CHECK(defaults->runtime.ioLoops > 1);
+    CHECK(defaults->runtime.ioLoops == 0);
     CHECK(defaults->runtime.maxBufferedBytes >= defaults->runtime.sessionBufferBytes);
     CHECK(defaults->runtime.updateChecker);
     CHECK(defaults->translation == TranslationMode::Auto);
@@ -51,7 +51,7 @@ TEST_CASE("invalid network and resource policy fails before opening sockets") {
                           "[network]\nbind = 'hostname.test'",
                           "[network]\ndual-stack = true",
                           "[network]\nonline_mod = false",
-                          "[runtime]\nio-loops = 0",
+                          "[runtime]\nio-loops = 65",
                           "[runtime]\nworkers = 65",
                           "[runtime]\nmax-buffered-bytes = 4096",
                           "[runtime]\nlow-water-bytes = 4194304",

@@ -81,7 +81,7 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
                  "session-buffer-bytes", "high-water-bytes", "low-water-bytes", "handshake-timeout-ms",
                  "login-timeout-ms", "connect-timeout-ms", "read-timeout-ms", "write-timeout-ms", "update-checker"},
                 "runtime.");
-    reader.integer(runtime, "io-loops", result.runtime.ioLoops, 1, 64, "runtime.");
+    reader.integer(runtime, "io-loops", result.runtime.ioLoops, 0, 64, "runtime.");
     reader.integer(runtime, "workers", result.runtime.workers, 1, 64, "runtime.");
     reader.integer(runtime, "max-sessions", result.runtime.maxSessions, 1, 65536, "runtime.");
     reader.integer(runtime, "max-pending-work", result.runtime.maxPendingWork, 1, 65536, "runtime.");
