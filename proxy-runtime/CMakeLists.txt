@@ -123,7 +123,7 @@ endif()
 target_link_libraries(basalt-proxy PRIVATE basalt::proxy-runtime-core basalt::proxy-plugins basalt::proxy-remote
                       basalt::warnings basalt::sanitizers basalt::parity basalt::platform)
 if(TARGET basalt::wire-shim)
-    target_link_libraries(basalt-proxy PRIVATE basalt::proxy-bungee basalt::proxy-velocity)
+    target_link_libraries(basalt-proxy PRIVATE basalt::stratum-bungee basalt::stratum-velocity)
     target_compile_definitions(basalt-proxy PRIVATE BASALT_HAS_SHIM=1)
 endif()
 set_target_properties(basalt-proxy PROPERTIES

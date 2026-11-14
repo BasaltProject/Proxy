@@ -14,8 +14,8 @@
 #include <filesystem>
 
 #if defined(BASALT_HAS_SHIM)
-#include <basalt/proxy/bungee/BungeeAdapter.hpp>
-#include <basalt/proxy/velocity/VelocityAdapter.hpp>
+#include <basalt/stratum/bungee/BungeeAdapter.hpp>
+#include <basalt/stratum/velocity/VelocityAdapter.hpp>
 #endif
 
 using namespace basalt;
@@ -72,10 +72,10 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
     if (const char* shimDirectory = std::getenv("BASALT_SHIM_DIR"))
         javaOptions.runtimeDirectory = shimDirectory;
     settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {
-        return proxy::bungee::createBungeeAdapter(javaOptions, hooks);
+        return stratum::bungee::createBungeeAdapter(javaOptions, hooks);
     });
     settings.adapters.push_back([javaOptions](const proxy::plugins::PluginHooks& hooks) {
-        return proxy::velocity::createVelocityAdapter(javaOptions, hooks);
+        return stratum::velocity::createVelocityAdapter(javaOptions, hooks);
     });
 #endif
     proxy::plugins::PluginHooks hooks;
