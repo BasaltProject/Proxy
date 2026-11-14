@@ -55,4 +55,19 @@ final class Natives {
 
     /** Each row: name, uuid, server, address, port, ping. */
     static native String[][] players();
+
+    /** locale, view distance, chat mode, colours, skin parts, hand, filtering, listing, particles; null before any. */
+    static native String[] settings(String player);
+
+    /** A token for a ping of a configured server, or 0 when it cannot be sent. */
+    static native long pingRequest(String server);
+
+    /** Null while waiting; empty when the server did not answer, else description JSON, online, max, version, protocol, latency. */
+    static native String[] pingPoll(long token);
+
+    /** Adds a server until the proxy stops, copying the settings of another (or the default one); the reason when it cannot. */
+    static native String registerServer(String name, String host, int port, String like);
+
+    /** Removes a server added at run time; false for the ones of servers.toml. */
+    static native boolean unregisterServer(String name);
 }

@@ -1,6 +1,10 @@
 #include "ProxyRuntimeImpl.hpp"
 
 namespace basalt::proxy::runtime {
+namespace {
+constexpr std::size_t kMaxPingsInFlight = 16;
+} // namespace
+
 bool ProxyRuntime::kickPlayer(std::string_view player, std::string_view reason) {
     if (!impl_->started.load() || impl_->stopped.load() || !wire::auth::validLoginName(player))
         return false;
@@ -186,6 +190,42 @@ std::optional<std::pair<std::string, std::uint16_t>> ProxyRuntime::backendEndpoi
         if (backend.name == name)
             return std::pair{backend.host, backend.port};
     return std::nullopt;
+}
+
+bool ProxyRuntime::pingServer(std::string_view name, std::function<void(std::optional<ServerPing>)> reply) {
+    if (!impl_->workers || impl_->stopped.load())
+        return false;
+    const auto topology = impl_->topology.load();
+    const auto found = std::ranges::find(topology->backends, name, &config::BackendConfig::name);
+    if (found == topology->backends.end())
+        return false;
+    auto& inFlight = impl_->pingsInFlight;
+    if (inFlight.fetch_add(1) >= kMaxPingsInFlight) {
+        inFlight.fetch_sub(1);
+        return false;
+    }
+    const detail::ProbeTarget target{found->host, found->port, nativeProtocol(*found)};
+    const std::chrono::milliseconds timeout{impl_->config.runtime.connectTimeoutMs};
+    const auto finish = std::make_shared<std::function<void(std::optional<ServerPing>)>>(
+        [&inFlight, reply = std::move(reply)](std::optional<ServerPing> answer) {
+            inFlight.fetch_sub(1);
+            reply(std::move(answer));
+        });
+    auto submitted = impl_->workers->submit(
+        [target, timeout, finish](std::stop_token stop) {
+            const auto started = std::chrono::steady_clock::now();
+            auto status = detail::statusPing(target, timeout, stop);
+            if (!status) {
+                (*finish)(std::nullopt);
+                return;
+            }
+            (*finish)(ServerPing{std::move(*status), std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                         std::chrono::steady_clock::now() - started)});
+        },
+        [finish](std::exception_ptr) { (*finish)(std::nullopt); }, [finish] { (*finish)(std::nullopt); });
+    if (!submitted)
+        inFlight.fetch_sub(1);
+    return submitted.has_value();
 }
 
 std::uint16_t ProxyRuntime::port() const noexcept { return impl_->port; }

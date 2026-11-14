@@ -24,6 +24,12 @@ final class Hud {
     static final int STORE_COOKIE = 10;
     static final int TAB_ENTRY = 13;
     static final int TAB_ENTRY_REMOVE = 14;
+    static final int SERVER_LINKS = 16;
+    static final int CHAT_COMPLETIONS = 17;
+    static final int PACK_PUSH = 18;
+    static final int PACK_POP = 19;
+    static final int PACK_CLEAR = 20;
+    private static final long PING_WAIT_MILLIS = 20000;
 
     private static final long COOKIE_WAIT_MILLIS = 5000;
     private static final ScheduledExecutorService POLL = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -62,6 +68,32 @@ final class Hud {
             case NOTCHED_20: return 4;
             default: return 0;
         }
+    }
+
+    /** The fields of {@code Natives.pingPoll}, polled off the caller's thread. */
+    static CompletableFuture<String[]> ping(String server) {
+        CompletableFuture<String[]> future = new CompletableFuture<>();
+        long token = Natives.pingRequest(server);
+        if (token == 0) {
+            future.completeExceptionally(new java.io.IOException("server " + server + " cannot be pinged"));
+            return future;
+        }
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(PING_WAIT_MILLIS);
+        POLL.schedule(new Runnable() {
+            @Override
+            public void run() {
+                String[] answer = Natives.pingPoll(token);
+                if (answer != null && answer.length > 0) {
+                    future.complete(answer);
+                } else if (answer != null || System.nanoTime() > deadline) {
+                    Natives.pingPoll(-token);
+                    future.completeExceptionally(new java.io.IOException("server " + server + " did not answer the ping"));
+                } else {
+                    POLL.schedule(this, 25, TimeUnit.MILLISECONDS);
+                }
+            }
+        }, 25, TimeUnit.MILLISECONDS);
+        return future;
     }
 
     static CompletableFuture<byte[]> cookie(String player, String key) {

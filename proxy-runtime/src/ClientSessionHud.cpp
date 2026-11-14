@@ -1,3 +1,4 @@
+#include "BackendLogin.hpp"
 #include "ClientSession.hpp"
 
 #include <basalt/wire/nbt/NbtTag.hpp>
@@ -25,6 +26,12 @@ constexpr std::int32_t kConfigClearDialogId = 0x12;
 constexpr std::int32_t kConfigShowDialogId = 0x13;
 constexpr std::int32_t kPlayClearDialogId = 0x8e;
 constexpr std::int32_t kPlayShowDialogId = 0x8f;
+constexpr std::int32_t kPlayServerLinksId = 0x8c;
+constexpr std::int32_t kConfigServerLinksId = 0x11;
+constexpr std::size_t kMaxBackendLinkBytes = 64 * 1024;
+constexpr std::int32_t kPlayChatCompletionsId = 0x17;
+constexpr std::size_t kMaxServerLinks = 64;
+constexpr std::size_t kMaxChatCompletions = 256;
 
 template <typename Packet>
 void frame(wire::io::ByteBuffer& out, std::int32_t id, const Packet& packet) {
@@ -251,6 +258,37 @@ bool ClientSession::applyHud(const PlayerHud& action) {
         frame(out, play::TransferPacket::kId, play::TransferPacket{transfer->host, transfer->port});
         return send();
     }
+    if (const auto* pack = std::get_if<HudResourcePack>(&action))
+        return applyResourcePack(*pack);
+    if (const auto* links = std::get_if<HudServerLinks>(&action)) {
+        if (links->links.size() > kMaxServerLinks)
+            return false;
+        out.clear();
+        for (const auto& link : links->links) {
+            const bool known = link.knownType >= 0;
+            wire::protocol::writeBoolean(out, known);
+            if (known)
+                wire::protocol::varInt::write(out, link.knownType);
+            else
+                wire::protocol::writeAnonymousNbt(out, wire::text::componentNbt::serialize(link.label));
+            wire::protocol::writeString(out, link.url);
+        }
+        const auto entries = out.readable();
+        pluginLinks_.assign(entries.begin(), entries.end());
+        pluginLinkCount_ = static_cast<std::int32_t>(links->links.size());
+        return sendServerLinks(false);
+    }
+    if (const auto* completions = std::get_if<HudChatCompletions>(&action)) {
+        if (completions->entries.size() > kMaxChatCompletions)
+            return false;
+        out.clear();
+        wire::protocol::varInt::write(out, kPlayChatCompletionsId);
+        wire::protocol::varInt::write(out, static_cast<std::int32_t>(completions->action));
+        wire::protocol::varInt::write(out, static_cast<std::int32_t>(completions->entries.size()));
+        for (const auto& entry : completions->entries)
+            wire::protocol::writeString(out, entry);
+        return send();
+    }
     const auto& store = std::get<HudStoreCookie>(action);
     if (store.key.empty() || store.key.size() > 256 || store.data.size() > wire::protocol::cookie::kMaxPayloadBytes)
         return false;
@@ -271,6 +309,31 @@ bool ClientSession::requestPluginCookie(std::string_view key,
     if (!queuePacket(out.readable()))
         return false;
     pluginCookies_.emplace_back(std::string{key}, std::move(reply));
+    return true;
+}
+
+bool ClientSession::sendServerLinks(bool configuring) {
+    wire::io::ByteBuffer out;
+    wire::protocol::varInt::write(out, configuring ? kConfigServerLinksId : kPlayServerLinksId);
+    wire::protocol::varInt::write(out, backendLinkCount_ + pluginLinkCount_);
+    out.writeBytes(backendLinks_);
+    out.writeBytes(pluginLinks_);
+    return queuePacket(out.readable());
+}
+
+bool ClientSession::backendServerLinks(bool configuring) {
+    const auto count = wire::protocol::varInt::read(frame_);
+    if (frame_.failed() || count < 0)
+        return false;
+    const auto entries = frame_.readable();
+    const bool kept = entries.size() <= kMaxBackendLinkBytes;
+    backendLinks_.assign(kept ? entries.begin() : entries.end(), entries.end());
+    backendLinkCount_ = kept ? count : 0;
+    const bool merge = kept && pluginLinkCount_ > 0;
+    if (!(merge ? sendServerLinks(configuring) : queuePacket(frame_.mutableSpan(0))))
+        return false;
+    backend()->expectReadUntil(Clock::now() + std::chrono::milliseconds{settings_.readTimeoutMs});
+    backpressure();
     return true;
 }
 

@@ -182,7 +182,11 @@ struct ProxyRuntime::Impl {
                 [this, id](wire::auth::OnlineLoginRequest request) { return authenticate(id, std::move(request)); },
                 snapshot->routes,
                 [this, id, snapshot](detail::BackendAttempt attempt, Clock::time_point deadline) {
-                    return resolve(id, attempt, deadline, snapshot);
+                    const auto found = sessions.find(id);
+                    return resolve(id, attempt, deadline,
+                                   found == sessions.end()
+                                       ? snapshot
+                                       : std::static_pointer_cast<const Topology>(found->second->topology()));
                 },
                 snapshot->backends, runtime.buffers, runtime.config.network.compressionThreshold,
                 runtime.config.network.acceptTransfers, runtime.identities, snapshot->forwarding.get(), snapshot,
@@ -193,6 +197,15 @@ struct ProxyRuntime::Impl {
                 runtime.services.decide, runtime.services.latency);
             if (runtime.services.pluginChannels)
                 session->usePluginChannels(runtime.services.pluginChannels);
+            if (runtime.services.clientSettings)
+                session->useClientSettings(runtime.services.clientSettings);
+            session->useTopologyRefresh([this](Session& subject) {
+                const auto latest = runtime.topology.load();
+                static_cast<void>(
+                    subject.adoptTopology(latest, latest->routes, latest->backends, latest->forwarding.get()));
+            });
+            if (runtime.services.resourcePackStatus)
+                session->useResourcePackStatus(runtime.services.resourcePackStatus);
             if (runtime.services.uiConfigs && runtime.services.placeholders != nullptr)
                 session->useUi({runtime.services.uiConfigs, runtime.services.placeholders});
             if (!session->accounted())
@@ -488,6 +501,11 @@ struct ProxyRuntime::Impl {
 
     config::ProxyConfig config;
     SnapshotCell topology;
+    /// The servers plugins registered at run time, never written to servers.toml; guards the topology rebuilds too.
+    std::mutex dynamicMutex;
+    std::vector<config::BackendConfig> dynamicBackends;
+    /// The routing settings of the last servers.toml that applied, which a rebuild adds the dynamic servers to.
+    config::ProxyConfig routing;
     Admission admission;
     std::atomic<std::int64_t> bedrockSecond{-1};
     std::atomic<std::uint32_t> bedrockOpened{0};
@@ -506,6 +524,7 @@ struct ProxyRuntime::Impl {
     RuntimeServices services;
     std::optional<wire::auth::SessionKeyPair> key;
     std::optional<wire::io::WorkerPool> workers;
+    std::atomic<std::size_t> pingsInFlight{0};
     detail::IdentityRegistry identities;
     std::vector<std::unique_ptr<Owner>> owners;
     std::vector<std::jthread> threads;
@@ -535,8 +554,12 @@ struct ProxyRuntime::Impl {
             names.erase(found);
     }
 
+    /// Publishes servers.toml's servers plus the dynamic ones; a dynamic server named like one in the file is dropped.
+    [[nodiscard]] std::expected<void, std::string>
+    publishTopology(std::shared_ptr<const detail::NativeForwarding> forwarding);
+
     explicit Impl(config::ProxyConfig settings)
-        : config(std::move(settings)), admission(config.admission), access(config, admission),
+        : config(std::move(settings)), routing(config), admission(config.admission), access(config, admission),
           slots(config.runtime.maxSessions), buffers(config.runtime.maxBufferedBytes),
           handoffs(config.runtime.maxPendingWork), controls(config.runtime.maxPendingWork),
           identities(config.runtime.maxSessions) {}

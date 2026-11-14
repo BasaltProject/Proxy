@@ -275,8 +275,7 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
     compare(current.translation == fresh.translation, "[translation]");
     if (!fixed.empty())
         return std::unexpected("changing " + fixed + " requires a restart");
-    auto routes = detail::BackendRoutes::create(fresh);
-    if (!routes)
+    if (auto routes = detail::BackendRoutes::create(fresh); !routes)
         return std::unexpected(routes.error());
     auto forwarding = loadForwarding(fresh);
     if (!forwarding)
@@ -285,8 +284,13 @@ std::expected<std::size_t, std::string> ProxyRuntime::reload(config::ProxyConfig
         return std::unexpected(antibot.error());
     const auto count = fresh.backends.size();
     impl_->access.apply(fresh);
-    impl_->topology.store(std::make_shared<const Topology>(Topology{
-        std::move(fresh.backends), std::move(fresh.serverGroups), std::move(*routes), std::move(*forwarding)}));
+    std::lock_guard lock{impl_->dynamicMutex};
+    const auto previous = std::move(impl_->routing);
+    impl_->routing = std::move(fresh);
+    if (auto published = impl_->publishTopology(std::move(*forwarding)); !published) {
+        impl_->routing = previous;
+        return std::unexpected(published.error());
+    }
     return count;
 }
 

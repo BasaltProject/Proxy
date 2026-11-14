@@ -318,6 +318,8 @@ bool ClientSession::backendFrame(std::span<const std::uint8_t> bytes) {
         const auto packPopId = state_ == State::kConfiguration ? 0x08 : 0x51;
         if (shaped && (id == packPushId || id == packPopId))
             return backendResourcePack(id == packPushId);
+        if (shaped && clientProtocol_ == 0 && id == (state_ == State::kConfiguration ? 0x11 : 0x8c))
+            return backendServerLinks(state_ == State::kConfiguration);
         const auto cookieRequestId = state_ == State::kConfiguration ? 0x00 : 0x15;
         const auto cookieStoreId = state_ == State::kConfiguration ? 0x0b : 0x7a;
         if (!shaped) {

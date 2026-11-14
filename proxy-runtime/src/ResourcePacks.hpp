@@ -6,6 +6,7 @@
 #include <basalt/wire/io/ByteBuffer.hpp>
 
 #include <optional>
+#include <vector>
 
 namespace basalt::proxy::runtime::detail {
 
@@ -24,6 +25,11 @@ public:
     [[nodiscard]] std::optional<wire::common::Uuid> remove(wire::common::Uuid id, BackendAttempt backend);
 
     void clear() { entries_.clear(); }
+
+    /// The public IDs of every pack the backends have on the client.
+    [[nodiscard]] std::vector<wire::common::Uuid> publicIds() const;
+    /// Whether an ID is in the namespace the proxy publishes backend packs under.
+    [[nodiscard]] static bool published(wire::common::Uuid id);
 
     [[nodiscard]] std::size_t allocated() const { return entries_.capacity(); }
 

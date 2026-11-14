@@ -33,7 +33,7 @@ final class BasaltProxy extends ProxyServer {
     private final BasaltScheduler scheduler = new BasaltScheduler();
     private final File pluginsFolder;
     private final Map<String, BasaltPlayer> players = new ConcurrentHashMap<>();
-    private final Map<String, ServerInfo> servers = new LinkedHashMap<>();
+    private final ServerMap servers = new ServerMap();
     private final Collection<String> channels = ConcurrentHashMap.newKeySet();
     private final PluginManager pluginManager;
     private ConfigurationAdapter adapter = config;
@@ -74,10 +74,7 @@ final class BasaltProxy extends ProxyServer {
                 known.update(row[2], Integer.parseInt(row[5]));
             }
         }
-        servers.clear();
-        for (final String name : Natives.servers()) {
-            servers.put(name, new BasaltServerInfo(name));
-        }
+        servers.refresh(Natives.servers());
     }
 
     BasaltPlayer remember(BasaltPlayer player) {
@@ -199,12 +196,43 @@ final class BasaltProxy extends ProxyServer {
 
     @Override
     public ServerInfo constructServerInfo(String name, InetSocketAddress address, String motd, boolean restricted) {
-        return new BasaltServerInfo(name);
+        return new BasaltServerInfo(name, address);
     }
 
     @Override
     public ServerInfo constructServerInfo(String name, SocketAddress address, String motd, boolean restricted) {
-        return new BasaltServerInfo(name);
+        return new BasaltServerInfo(name, address instanceof InetSocketAddress inet ? inet : null);
+    }
+
+    /** What plugins put in or remove from getServers() registers or removes a server until the proxy stops. */
+    private static final class ServerMap extends LinkedHashMap<String, ServerInfo> {
+        void refresh(String[] names) {
+            super.clear();
+            for (final String name : names) {
+                super.put(name, new BasaltServerInfo(name));
+            }
+        }
+
+        @Override
+        public ServerInfo put(String name, ServerInfo info) {
+            final InetSocketAddress address = info.getSocketAddress() instanceof InetSocketAddress inet ? inet : null;
+            if (address == null) {
+                throw new IllegalArgumentException("server " + name + " needs a host and port");
+            }
+            final String error = Natives.registerServer(name, address.getHostString(), address.getPort(), "");
+            if (error != null) {
+                throw new IllegalArgumentException(error);
+            }
+            return super.put(name, new BasaltServerInfo(name));
+        }
+
+        @Override
+        public ServerInfo remove(Object name) {
+            if (!(name instanceof String text) || !Natives.unregisterServer(text)) {
+                return null;
+            }
+            return super.remove(name);
+        }
     }
 
     @Override

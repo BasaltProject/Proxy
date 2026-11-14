@@ -64,7 +64,7 @@ bool ClientSession::afterLogin() {
 bool ClientSession::routeInitial() {
     if (!preConnectAsked_ && !targets_.empty() && nextTarget_ < targets_.size()) {
         preConnectAsked_ = true;
-        if (ask(DecisionKind::kPreConnect, backends_[targets_[nextTarget_]].name, {})) {
+        if (ask(DecisionKind::kPreConnect, (*backends_)[targets_[nextTarget_]].name, {})) {
             deciding_ = true;
             return true;
         }
@@ -99,7 +99,7 @@ bool ClientSession::decided(std::uint64_t token, const DecisionResult& result, b
     kickDeciding_ = false;
     decisionDeadline_ = Clock::time_point::max();
     const auto redirect = [&]() -> std::optional<std::size_t> {
-        return result.redirect.empty() ? std::nullopt : routes_.named(result.redirect);
+        return result.redirect.empty() ? std::nullopt : routes_->named(result.redirect);
     };
     if (kind == DecisionKind::kPing) {
         if (!queueStatus(expired ? nullptr : &result))

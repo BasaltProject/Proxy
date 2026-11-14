@@ -138,4 +138,33 @@ bool PluginHost::allowed(const Player& player, const std::optional<std::string>&
     return hooks_.hasPermission && hooks_.hasPermission(player.name, *permission);
 }
 
+void PluginHost::callResourcePack(Plugin& plugin, const Player& subject, const std::string& pack,
+                                  std::string_view status) {
+    const auto found = plugin.handlers.find(std::string{kResourcePackEvent});
+    if (found == plugin.handlers.end())
+        return;
+    for (const Plugin::Handler& handler : found->second) {
+        if (plugin.broken)
+            return;
+        const auto wanted = handler.filters.find("player_name");
+        if (wanted != handler.filters.end() && !sameName(wanted->second, subject.name))
+            continue;
+        call(
+            plugin, handler.function,
+            [&](wire::lua::LuaArgs& lua) {
+                lua.pushTable();
+                PluginApi::pushPlayer(lua, plugin, subject);
+                lua.setField("player");
+                lua.pushString(subject.name);
+                lua.setField("player_name");
+                lua.pushString(pack);
+                lua.setField("id");
+                lua.pushString(status);
+                lua.setField("status");
+                return 1;
+            },
+            std::string{kResourcePackEvent});
+    }
+}
+
 } // namespace basalt::proxy::plugins

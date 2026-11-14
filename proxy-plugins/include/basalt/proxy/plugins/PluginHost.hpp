@@ -114,6 +114,14 @@ struct PluginHooks {
                        std::function<void(std::optional<std::vector<std::uint8_t>>)>)>
         requestCookie;
     std::function<void(std::string_view player, wire::text::Component)> kickComponent;
+    /// Asks a configured server for its status; the reply may run on any thread and is empty when it did not answer.
+    std::function<bool(std::string_view server, std::function<void(std::optional<runtime::ServerPing>)>)> pingServer;
+    /// Adds a server until the proxy stops, copying the settings of `like`; the reason when it cannot.
+    std::function<std::optional<std::string>(std::string_view name, std::string_view host, std::uint16_t port,
+                                             std::string_view like)>
+        registerServer;
+    /// Removes a server added at run time; false for the ones of servers.toml.
+    std::function<bool(std::string_view name)> unregisterServer;
     /// Answers a decision once the handlers ran; may be called after the deadline, when the runtime ignores it.
     std::function<void(std::string_view player, std::uint64_t token, runtime::DecisionResult)> resolveDecision;
     std::function<void(std::string_view player)> antibotVerify;
@@ -223,6 +231,7 @@ private:
         std::string address{};
         std::uint16_t port = 0;
         std::int64_t ping = -1;
+        std::optional<runtime::ClientSettings> settings{};
     };
 
     void deliverMessage(const MessageCall& call);
@@ -232,6 +241,7 @@ private:
     void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
     void callLogin(Plugin& plugin, const std::string& player, const std::string& uuid);
     void callAntibot(Plugin& plugin, const runtime::PlayerEvent& event);
+    void callResourcePack(Plugin& plugin, const Player& subject, const std::string& pack, std::string_view status);
     void callPing(Plugin& plugin, const std::string& host, const std::string& protocol);
     void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
     void call(Plugin& plugin, const wire::lua::LuaRef& function,
@@ -240,6 +250,8 @@ private:
     void report(Plugin& plugin, const wire::lua::LuaFailure& failure, std::string_view why);
     void runTimers(std::chrono::steady_clock::time_point now);
     [[nodiscard]] bool enqueue(Task task);
+    /// Adds a timer from any thread and wakes the plugin thread to look at it.
+    void addTimer(std::unique_ptr<Timer> timer);
     [[nodiscard]] bool allowed(const Player& player, const std::optional<std::string>& permission) const;
     [[nodiscard]] const Player* findPlayer(std::string_view name) const;
 
@@ -266,7 +278,9 @@ private:
     std::set<std::string, std::less<>> channels_;
     std::map<std::string, std::vector<std::unique_ptr<Entry>>, std::less<>> commands_;
     std::vector<std::unique_ptr<Timer>> timers_;
+    bool timerAdded_ = false;
     std::map<std::string, Player, std::less<>> roster_;
+    std::map<std::string, runtime::ClientSettings, std::less<>> clientSettings_;
     bool loading_ = true;
     std::atomic<unsigned> deciders_{0};
     std::atomic<std::size_t> dropped_{0};

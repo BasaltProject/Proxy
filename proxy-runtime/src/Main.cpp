@@ -354,6 +354,14 @@ int run(const cliCommand::Run& command) {
         if (auto* host = pluginHost.load(std::memory_order_acquire))
             host->post({PlayerEventKind::kLatency, std::string{player}, {}, {}, {}, {}, 0, milliseconds});
     };
+    services.clientSettings = [&pluginHost](std::string_view player, const ClientSettings& settings) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kSettings, std::string{player}, {}, {}, {}, {}, 0, 0, settings});
+    };
+    services.resourcePackStatus = [&pluginHost](std::string_view player, wire::common::Uuid pack, std::int32_t status) {
+        if (auto* host = pluginHost.load(std::memory_order_acquire))
+            host->post({PlayerEventKind::kResourcePack, std::string{player}, {}, {}, pack.toString(), {}, 0, status});
+    };
     services.decide = [&pluginHost](DecisionRequest request) {
         auto* host = pluginHost.load(std::memory_order_acquire);
         return host != nullptr && host->decide(std::move(request));

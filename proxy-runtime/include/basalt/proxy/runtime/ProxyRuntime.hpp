@@ -3,6 +3,7 @@
 #include <basalt/proxy/runtime/BackendChangeRequest.hpp>
 #include <basalt/wire/auth/LoginAuthentication.hpp>
 #include <basalt/wire/auth/SignatureValidator.hpp>
+#include <basalt/wire/common/Uuid.hpp>
 #include <basalt/wire/common/placeholder/Placeholders.hpp>
 #include <basalt/wire/config/UiConfigs.hpp>
 #include <basalt/wire/io/DnsResolver.hpp>
@@ -36,7 +37,37 @@ namespace basalt::proxy::runtime {
 
 using MessageArgs = std::vector<std::pair<std::string_view, std::string>>;
 
-enum class PlayerEventKind { kJoin, kLeave, kSwitch, kChat, kKick, kPing, kLogin, kLatency, kAntibot };
+enum class PlayerEventKind {
+    kJoin,
+    kLeave,
+    kSwitch,
+    kChat,
+    kKick,
+    kPing,
+    kLogin,
+    kLatency,
+    kAntibot,
+    kSettings,
+    kResourcePack
+};
+
+/// What the client last said about itself in its client information packet.
+struct ClientSettings {
+    std::string locale;
+    std::int32_t viewDistance = 0;
+    /// 0 shown, 1 commands only, 2 hidden.
+    std::int32_t chatMode = 0;
+    bool chatColors = true;
+    std::uint8_t skinParts = 0;
+    /// 0 left, 1 right.
+    std::int32_t mainHand = 1;
+    bool textFiltering = false;
+    bool serverListing = true;
+    /// 0 all, 1 decreased, 2 minimal.
+    std::int32_t particles = 0;
+
+    friend bool operator==(const ClientSettings&, const ClientSettings&) = default;
+};
 
 struct PlayerEvent {
     PlayerEventKind kind;
@@ -50,6 +81,7 @@ struct PlayerEvent {
     std::string address{};
     std::uint16_t port = 0;
     std::int64_t value = 0;
+    std::optional<ClientSettings> settings{};
 };
 
 /// Title, subtitle and action bar in one go; unset parts are left alone.
@@ -126,8 +158,45 @@ struct HudDialog {
     bool canCloseWithEscape = true;
 };
 
-using PlayerHud =
-    std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar, HudTabEntry, HudDialog>;
+/// The links in the client's pause menu, each with a known type or its own label; empty clears them.
+struct HudServerLinks {
+    struct Link {
+        /// parity: ServerLinks.KnownLinkType id, or -1 for a custom label.
+        std::int32_t knownType = -1;
+        wire::text::Component label;
+        std::string url;
+    };
+
+    std::vector<Link> links;
+};
+
+/// Words the client offers when completing chat, added, removed or set as a whole.
+struct HudChatCompletions {
+    enum class Action : std::uint8_t { kAdd, kRemove, kSet };
+    Action action = Action::kSet;
+    std::vector<std::string> entries;
+};
+
+/// A resource pack a plugin offers or takes back; clear takes back every pack plugins offered, not the backend's.
+struct HudResourcePack {
+    enum class Op : std::uint8_t { kPush, kPop, kClear };
+    Op op = Op::kPush;
+    wire::common::Uuid id;
+    std::string url;
+    /// SHA-1 as 40 hex digits, or empty.
+    std::string hash;
+    bool required = false;
+    std::optional<wire::text::Component> prompt;
+};
+
+using PlayerHud = std::variant<HudTitle, HudTabList, HudBossBar, HudTransfer, HudStoreCookie, HudSidebar, HudTabEntry,
+                               HudDialog, HudServerLinks, HudChatCompletions, HudResourcePack>;
+
+/// A server's multiplayer-list answer and how long it took.
+struct ServerPing {
+    wire::protocol::status::ServerStatusPayload status;
+    std::chrono::milliseconds latency{0};
+};
 
 /// A command a plugin registered for players: the words that name it, then typed arguments.
 struct PlayerCommandSpec {
@@ -245,6 +314,10 @@ struct RuntimeServices {
     std::function<bool(DecisionRequest)> decide = {};
     /// Told a player's round trip to their client in milliseconds, measured on each keepalive. Owner threads.
     std::function<void(std::string_view player, std::int32_t milliseconds)> latency = {};
+    /// Told each client information packet a player sends, once it is known who they are. Owner threads.
+    std::function<void(std::string_view player, const ClientSettings& settings)> clientSettings = {};
+    /// Told each status the client gives for a resource pack a plugin offered. Owner threads.
+    std::function<void(std::string_view player, wire::common::Uuid pack, std::int32_t status)> resourcePackStatus = {};
 };
 
 /// One session as its owner sees it; name and uuid stay empty until the player is authenticated.
@@ -295,6 +368,12 @@ public:
                                                                                      std::string_view backend);
     /// Thread-safe. Validates first, then swaps backends and routes atomically; fixed settings need a restart.
     [[nodiscard]] std::expected<std::size_t, std::string> reload(config::ProxyConfig fresh);
+    /// Thread-safe. Adds a server until the proxy stops, with the settings of `like` (or the first default server).
+    [[nodiscard]] std::expected<void, std::string> registerServer(std::string name, std::string host,
+                                                                  std::uint16_t port, std::string_view like = {});
+    /// Thread-safe. Removes a server registered at run time; false for servers.toml's own.
+    [[nodiscard]] bool unregisterServer(std::string_view name);
+    [[nodiscard]] bool dynamicServer(std::string_view name) const;
     [[nodiscard]] std::vector<std::string> backendNames() const;
     /// Thread-safe. The current server of that name, as the last reload left it.
     [[nodiscard]] std::optional<config::BackendConfig> backendConfig(std::string_view name) const;
@@ -327,6 +406,8 @@ public:
     /// Thread-safe. Asks the client for a cookie; the reply runs on a session owner thread, empty when it has none.
     [[nodiscard]] bool requestCookie(std::string_view player, std::string_view key,
                                      std::function<void(std::optional<std::vector<std::uint8_t>>)> reply);
+    /// Thread-safe. Asks a configured server for its status on a worker; the reply runs there, empty on no answer.
+    [[nodiscard]] bool pingServer(std::string_view name, std::function<void(std::optional<ServerPing>)> reply);
     /// Thread-safe. Queues a plugin message toward the player's client or backend; true once handed to the owners.
     [[nodiscard]] bool sendPluginMessage(std::string_view player, std::string_view channel,
                                          std::span<const std::uint8_t> data, bool towardBackend);

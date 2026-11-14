@@ -36,8 +36,9 @@ final class VelocityPlayer implements Player {
     private volatile String server;
     private volatile long ping;
     private final UUID session = UUID.randomUUID();
-    private Locale locale = Locale.ENGLISH;
+    private Locale locale;
     private final VelocityTabList tabList;
+    private final PlayerPacks packs = new PlayerPacks(this);
 
     VelocityPlayer(String name, String uuidText, String server, String address, int port, long ping) {
         this.name = name;
@@ -73,7 +74,7 @@ final class VelocityPlayer implements Player {
 
     @Override
     public Locale getEffectiveLocale() {
-        return locale;
+        return locale != null ? locale : getPlayerSettings().getLocale();
     }
 
     @Override
@@ -96,12 +97,13 @@ final class VelocityPlayer implements Player {
 
     @Override
     public PlayerSettings getPlayerSettings() {
-        throw missing("player settings");
+        final VelocitySettings settings = VelocitySettings.of(name);
+        return settings == null ? VelocitySettings.DEFAULT : settings;
     }
 
     @Override
     public boolean hasSentPlayerSettings() {
-        return false;
+        return Natives.settings(name) != null;
     }
 
     @Override
@@ -264,12 +266,12 @@ final class VelocityPlayer implements Player {
 
     @Override
     public Component getPlayerListHeader() {
-        return Component.empty();
+        return tabList.header();
     }
 
     @Override
     public Component getPlayerListFooter() {
-        return Component.empty();
+        return tabList.footer();
     }
 
     @Override
@@ -289,37 +291,66 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void sendResourcePack(String url) {
-        throw missing("resource packs");
+        packs.offer(new VelocityPack(null, url, null, false, null, ResourcePackInfo.Origin.PLUGIN_ON_PROXY));
     }
 
     @Override
     public void sendResourcePack(String url, byte[] hash) {
-        throw missing("resource packs");
+        packs.offer(new VelocityPack(null, url, hash, false, null, ResourcePackInfo.Origin.PLUGIN_ON_PROXY));
     }
 
     @Override
     public void sendResourcePackOffer(ResourcePackInfo info) {
-        throw missing("resource packs");
+        packs.offer(info);
+    }
+
+    @Override
+    public void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request) {
+        packs.offer(request);
+    }
+
+    @Override
+    public void removeResourcePacks(UUID id, UUID... others) {
+        packs.remove(id);
+        for (final UUID other : others) {
+            packs.remove(other);
+        }
+    }
+
+    @Override
+    public void removeResourcePacks(Iterable<UUID> ids) {
+        for (final UUID id : ids) {
+            packs.remove(id);
+        }
+    }
+
+    @Override
+    public void clearResourcePacks() {
+        packs.clear();
+    }
+
+    PlayerPacks packs() {
+        return packs;
     }
 
     @Override
     public ResourcePackInfo getAppliedResourcePack() {
-        return null;
+        return packs.applied().stream().findFirst().orElse(null);
     }
 
     @Override
     public ResourcePackInfo getPendingResourcePack() {
-        return null;
+        return packs.pending().stream().findFirst().orElse(null);
     }
 
     @Override
     public Collection<ResourcePackInfo> getAppliedResourcePacks() {
-        return List.of();
+        return packs.applied();
     }
 
     @Override
     public Collection<ResourcePackInfo> getPendingResourcePacks() {
-        return List.of();
+        return packs.pending();
     }
 
     @Override
@@ -341,17 +372,22 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void addCustomChatCompletions(Collection<String> completions) {
-        throw missing("chat completions");
+        completions(0, completions);
     }
 
     @Override
     public void removeCustomChatCompletions(Collection<String> completions) {
-        throw missing("chat completions");
+        completions(1, completions);
     }
 
     @Override
     public void setCustomChatCompletions(Collection<String> completions) {
-        throw missing("chat completions");
+        completions(2, completions);
+    }
+
+    private void completions(int action, Collection<String> completions) {
+        Hud.send(name, Hud.CHAT_COMPLETIONS, null, null, action, 0, 0, 0,
+                String.join("\n", completions).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Override
@@ -372,7 +408,12 @@ final class VelocityPlayer implements Player {
 
     @Override
     public void setServerLinks(List<ServerLink> links) {
-        throw missing("server links");
+        final StringBuilder rows = new StringBuilder();
+        for (final ServerLink link : links) {
+            rows.append(link.getBuiltInType().map(type -> String.valueOf(type.ordinal())).orElse("-")).append('\t')
+                    .append(link.getCustomLabel().map(Text::json).orElse("-")).append('\t').append(link.getUrl()).append('\n');
+        }
+        Hud.send(name, Hud.SERVER_LINKS, null, null, 0, 0, 0, 0, rows.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Override

@@ -34,7 +34,7 @@ std::string disconnectReason(wire::io::ByteBuffer& frame) {
 bool ClientSession::prepareBackend(std::size_t target) {
     if (closing_ || recovering_ || state_ != State::kPlay || Clock::now() >= deadline() || !activeBackend_ ||
         candidateBackend_ || startingConfiguration_ || connectionStage_ != ConnectionStage::kIdle ||
-        target >= backends_.size() || target == activeBackend_->attempt().target)
+        target >= backends_->size() || target == activeBackend_->attempt().target)
         return false;
     requestedTarget_[0] = target;
     targets_ = requestedTarget_;
@@ -46,8 +46,8 @@ bool ClientSession::prepareBackend(std::size_t target) {
 }
 
 bool ClientSession::requestBackendChange(std::size_t target) {
-    if (state_ == State::kPlay && !switchDecision_ && !deciding_ && target < backends_.size() &&
-        ask(DecisionKind::kPreConnect, backends_[target].name, activeBackendName())) {
+    if (state_ == State::kPlay && !switchDecision_ && !deciding_ && target < backends_->size() &&
+        ask(DecisionKind::kPreConnect, (*backends_)[target].name, activeBackendName())) {
         decisionTarget_ = target;
         switchDecision_ = true;
         return true;
@@ -59,8 +59,31 @@ bool ClientSession::requestBackendChange(std::size_t target) {
 }
 
 bool ClientSession::requestBackendChange(std::string_view backend) {
-    const auto target = routes_.named(backend);
+    auto target = routes_->named(backend);
+    if (!target && topologyRefresh_) {
+        topologyRefresh_(*this);
+        target = routes_->named(backend);
+    }
     return target && requestBackendChange(*target);
+}
+
+bool ClientSession::adoptTopology(std::shared_ptr<const void> topology, const BackendRoutes& routes,
+                                  const std::vector<config::BackendConfig>& backends,
+                                  const NativeForwarding* forwarding) {
+    if (topology == topology_ || state_ != State::kPlay || !activeBackend_ || candidateBackend_ || switchingBackend_ ||
+        startingConfiguration_ || recovering_ || backends.size() < backends_->size())
+        return false;
+    for (std::size_t i = 0; i < backends_->size(); ++i)
+        if (backends[i].name != (*backends_)[i].name)
+            return false;
+    retiredTopology_ = std::move(topology_);
+    topology_ = std::move(topology);
+    routes_ = &routes;
+    backends_ = &backends;
+    nativeForwarding_ = forwarding;
+    targets_ = {};
+    nextTarget_ = 0;
+    return true;
 }
 
 bool ClientSession::advancePreparedChange() {
@@ -135,8 +158,11 @@ bool ClientSession::acknowledgePreparedChange() {
     constexpr std::array<std::uint8_t, 2> clearReportDetails{0x10, 0};
     constexpr std::array<std::uint8_t, 2> clearServerLinks{0x11, 0};
     constexpr std::array<std::uint8_t, 1> clearDialog{0x12};
-    if (!queuePacket(removePacks) || !queuePacket(clearReportDetails) || !queuePacket(clearServerLinks) ||
-        !queuePacket(clearDialog))
+    backendLinks_.clear();
+    backendLinkCount_ = 0;
+    if (!(pluginPacks_.empty() ? queuePacket(removePacks) : popBackendPacks(true)) ||
+        !queuePacket(clearReportDetails) ||
+        !(pluginLinkCount_ == 0 ? queuePacket(clearServerLinks) : sendServerLinks(true)) || !queuePacket(clearDialog))
         return false;
     frame_.clear();
     wire::protocol::varInt::write(frame_, wire::protocol::configuration::BrandPacket::kId);
@@ -182,7 +208,7 @@ bool ClientSession::acknowledgePreparedChange() {
 void ClientSession::reportSwitchFailure(std::string_view reason) {
     if (!candidateBackend_ || !profile_)
         return;
-    const std::string& server = backends_[candidateBackend_->attempt().target].name;
+    const std::string& server = (*backends_)[candidateBackend_->attempt().target].name;
     const std::string shown = reason.empty() ? std::string{"the server did not accept the login"} : std::string{reason};
     wire::common::Logger{"Proxy"}.info(
         [&] { return profile_->name + " could not connect to " + server + ": " + shown; });

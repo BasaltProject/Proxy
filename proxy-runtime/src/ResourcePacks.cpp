@@ -52,6 +52,16 @@ std::optional<ResourcePackOrigin> ResourcePacks::origin(wire::common::Uuid id) c
     return std::nullopt;
 }
 
+std::vector<wire::common::Uuid> ResourcePacks::publicIds() const {
+    std::vector<wire::common::Uuid> ids;
+    const auto bytes = entries_.readable();
+    for (std::size_t offset = 0; offset < bytes.size(); offset += kEntryBytes)
+        ids.push_back(publicId(read64(bytes, offset + 16)));
+    return ids;
+}
+
+bool ResourcePacks::published(wire::common::Uuid id) { return id.high() == kPublicNamespace; }
+
 std::optional<wire::common::Uuid> ResourcePacks::remove(wire::common::Uuid id, BackendAttempt backend) {
     const auto bytes = entries_.readable();
     for (std::size_t offset = 0; offset < bytes.size(); offset += kEntryBytes) {

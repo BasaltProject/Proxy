@@ -12,6 +12,7 @@ import com.velocitypowered.api.event.connection.PreLoginEvent;
 import com.velocitypowered.api.event.player.KickedFromServerEvent;
 import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
+import com.velocitypowered.api.event.player.PlayerSettingsChangedEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
@@ -187,10 +188,29 @@ public final class BasaltVelocity {
 
     /** kind is join, switch or quit. */
     public static void notifyPlayer(String kind, String[] f) {
+        if (kind.equals("pack")) {
+            proxy.sync();
+            final VelocityPlayer known = proxy.playerNamed(f[0]);
+            if (known != null) {
+                fire(known.packs().status(java.util.UUID.fromString(f[1]), Integer.parseInt(f[2])));
+            }
+            return;
+        }
+        if (kind.equals("settings")) {
+            proxy.sync();
+            final VelocityPlayer known = proxy.playerNamed(f[0]);
+            if (known != null) {
+                fire(new PlayerSettingsChangedEvent(known, new VelocitySettings(f, 1)));
+            }
+            return;
+        }
         final VelocityPlayer player = playerOf(f);
         switch (kind) {
             case "join":
                 fire(new PostLoginEvent(player));
+                if (player.hasSentPlayerSettings()) {
+                    fire(new PlayerSettingsChangedEvent(player, player.getPlayerSettings()));
+                }
                 proxy.getServer(f[6]).ifPresent(server -> {
                     fire(new ServerConnectedEvent(player, server, null));
                     fire(new ServerPostConnectEvent(player, null));

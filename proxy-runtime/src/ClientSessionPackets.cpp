@@ -157,8 +157,8 @@ ClientSession::Tapped ClientSession::tap(wire::io::ByteBuffer& source, bool serv
         packet.playerName = profile_->name;
         packet.playerUuid = profile_->id.toString();
     }
-    if (target && target->attempt().target < backends_.size())
-        packet.backend.assign(backends_[target->attempt().target].name);
+    if (target && target->attempt().target < backends_->size())
+        packet.backend.assign((*backends_)[target->attempt().target].name);
     else
         packet.backend.clear();
     packet.editable = tapEditable(serverbound, id);

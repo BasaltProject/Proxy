@@ -166,12 +166,21 @@ final class BasaltProxy implements ProxyServer {
 
     @Override
     public RegisteredServer registerServer(ServerInfo info) {
-        throw new UnsupportedOperationException("servers are registered in servers.toml");
+        final String error = Natives.registerServer(info.getName(), info.getAddress().getHostString(), info.getAddress().getPort(), "");
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
+        final VelocityServer server = new VelocityServer(info.getName());
+        servers.put(info.getName(), server);
+        return server;
     }
 
     @Override
     public void unregisterServer(ServerInfo info) {
-        throw new UnsupportedOperationException("servers are registered in servers.toml");
+        if (!Natives.unregisterServer(info.getName())) {
+            throw new IllegalArgumentException("server " + info.getName() + " was not registered by a plugin");
+        }
+        servers.remove(info.getName());
     }
 
     @Override
@@ -222,7 +231,7 @@ final class BasaltProxy implements ProxyServer {
 
     @Override
     public ResourcePackInfo.Builder createResourcePackBuilder(String url) {
-        throw new UnsupportedOperationException("resource packs are not available yet");
+        return new VelocityPack.Builder(url);
     }
 
     @Override

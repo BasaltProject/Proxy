@@ -14,6 +14,11 @@ constexpr std::size_t kMaxText = 4096;
 constexpr std::size_t kMaxBarId = 64;
 constexpr std::array<std::string_view, 7> kColors{"pink", "blue", "red", "green", "yellow", "purple", "white"};
 constexpr std::array<std::string_view, 5> kOverlays{"progress", "notched_6", "notched_10", "notched_12", "notched_20"};
+// parity: ServerLinks.KnownLinkType, by id.
+constexpr std::array<std::string_view, 10> kLinkTypes{
+    "report_bug", "community_guidelines", "support", "status", "feedback", "community", "website", "forums",
+    "news",       "announcements"};
+constexpr std::array<std::string_view, 3> kCompletionActions{"add", "remove", "set"};
 
 std::int32_t indexOf(const auto& names, std::string_view name, std::int32_t fallback) {
     const auto found = std::ranges::find(names, name);
@@ -314,16 +319,90 @@ void PluginApi::installHud(PluginHost& host, PluginHost::Plugin& plugin) {
                     in.pushNil();
                 return 1;
             };
-            {
-                std::lock_guard lock{server->mutex_};
-                server->timers_.push_back(std::make_unique<PluginHost::Timer>(std::move(timer)));
-            }
-            server->wake_.notify_one();
+            server->addTimer(std::make_unique<PluginHost::Timer>(std::move(timer)));
         };
         args.pushBoolean(server->hooks_.requestCookie && server->hooks_.requestCookie(*name, key, reply));
         return 1;
     });
     lua.setField("cookie");
+    wire::lua::pushHostFunction(lua, "server_links", [server, text, player](LuaArgs& args) {
+        const auto name = player(args, "server_links");
+        if (!name)
+            return args.fail("this is a player method: call it as player:server_links(label, url, label, url, ...)");
+        runtime::HudServerLinks links;
+        for (std::int32_t at = 2; at + 1 <= args.count(); at += 2) {
+            runtime::HudServerLinks::Link link;
+            const std::string label = args.checkString(at);
+            link.knownType = indexOf(kLinkTypes, label, -1);
+            if (link.knownType < 0)
+                link.label = text(args, at);
+            link.url = args.checkString(at + 1);
+            links.links.push_back(std::move(link));
+        }
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(links)));
+        return 1;
+    });
+    lua.setField("server_links");
+    wire::lua::pushHostFunction(lua, "chat_completions", [server, player](LuaArgs& args) {
+        const auto name = player(args, "chat_completions");
+        if (!name)
+            return args.fail("this is a player method: call it as player:chat_completions(action, word, ...)");
+        const auto action = indexOf(kCompletionActions, args.checkString(2), -1);
+        if (action < 0)
+            return args.fail("chat_completions takes 'add', 'remove' or 'set' first");
+        runtime::HudChatCompletions completions;
+        completions.action = static_cast<runtime::HudChatCompletions::Action>(action);
+        for (std::int32_t at = 3; at <= args.count(); ++at)
+            completions.entries.push_back(args.checkString(at));
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(completions)));
+        return 1;
+    });
+    lua.setField("chat_completions");
+    const auto packId = [](LuaArgs& args, std::int32_t at, std::string_view fallback) {
+        const std::string given = args.isString(at) ? args.checkString(at) : std::string{};
+        if (const auto parsed = wire::common::Uuid::parse(given))
+            return *parsed;
+        return wire::common::Uuid::nameBased("basalt:resource_pack:" + (given.empty() ? std::string{fallback} : given));
+    };
+    wire::lua::pushHostFunction(lua, "resource_pack", [server, packId, optionalText, player](LuaArgs& args) {
+        const auto name = player(args, "resource_pack");
+        if (!name)
+            return args.fail(
+                "this is a player method: call it as player:resource_pack(url, hash, required, prompt, id)");
+        runtime::HudResourcePack pack;
+        pack.url = args.checkString(2);
+        pack.hash = args.isString(3) ? args.checkString(3) : std::string{};
+        pack.required = args.isBoolean(4) && args.toBoolean(4);
+        pack.prompt = optionalText(args, 5);
+        pack.id = packId(args, 6, pack.url);
+        const auto id = pack.id.toString();
+        if (!server->hooks_.hud || !server->hooks_.hud(*name, std::move(pack)))
+            return 0;
+        args.pushString(id);
+        return 1;
+    });
+    lua.setField("resource_pack");
+    wire::lua::pushHostFunction(lua, "remove_resource_pack", [server, packId, player](LuaArgs& args) {
+        const auto name = player(args, "remove_resource_pack");
+        if (!name)
+            return args.fail("this is a player method: call it as player:remove_resource_pack(id)");
+        runtime::HudResourcePack pack;
+        pack.op = runtime::HudResourcePack::Op::kPop;
+        pack.id = packId(args, 2, args.checkString(2));
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(pack)));
+        return 1;
+    });
+    lua.setField("remove_resource_pack");
+    wire::lua::pushHostFunction(lua, "clear_resource_packs", [server, player](LuaArgs& args) {
+        const auto name = player(args, "clear_resource_packs");
+        if (!name)
+            return args.fail("this is a player method: call it as player:clear_resource_packs()");
+        runtime::HudResourcePack pack;
+        pack.op = runtime::HudResourcePack::Op::kClear;
+        args.pushBoolean(server->hooks_.hud && server->hooks_.hud(*name, std::move(pack)));
+        return 1;
+    });
+    lua.setField("clear_resource_packs");
 
     lua.pop(2);
 }

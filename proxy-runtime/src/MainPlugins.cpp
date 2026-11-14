@@ -84,6 +84,12 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
         return runtime->sendPacket(player, serverbound, phase, id, body);
     };
     hooks.servers = [&runtime] { return runtime->backendNames(); };
+    hooks.registerServer = [&runtime](std::string_view name, std::string_view host, std::uint16_t port,
+                                      std::string_view like) -> std::optional<std::string> {
+        auto registered = runtime->registerServer(std::string{name}, std::string{host}, port, like);
+        return registered ? std::nullopt : std::optional{registered.error()};
+    };
+    hooks.unregisterServer = [&runtime](std::string_view name) { return runtime->unregisterServer(name); };
     hooks.info = [&configuration] {
         proxy::plugins::ProxyInfo info;
         info.bind = configuration->network.bind;
@@ -160,6 +166,9 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
     hooks.requestCookie = [&runtime](std::string_view player, std::string_view key,
                                      std::function<void(std::optional<std::vector<std::uint8_t>>)> reply) {
         return runtime->requestCookie(player, key, std::move(reply));
+    };
+    hooks.pingServer = [&runtime](std::string_view server, std::function<void(std::optional<ServerPing>)> reply) {
+        return runtime->pingServer(server, std::move(reply));
     };
     hooks.kickComponent = [&runtime](std::string_view player, wire::text::Component component) {
         static_cast<void>(runtime->kickComponent(player, std::move(component)));

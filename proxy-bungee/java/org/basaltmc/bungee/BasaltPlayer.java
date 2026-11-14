@@ -204,32 +204,75 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public Locale getLocale() {
-        return Locale.ENGLISH;
+        final String[] f = Natives.settings(name);
+        return f == null ? null : Locale.forLanguageTag(f[0].replace('_', '-'));
     }
 
     @Override
     public byte getViewDistance() {
-        return 10;
+        return (byte) setting(1, 10);
     }
 
     @Override
     public ProxiedPlayer.ChatMode getChatMode() {
-        return ProxiedPlayer.ChatMode.SHOWN;
+        final ProxiedPlayer.ChatMode[] modes = ProxiedPlayer.ChatMode.values();
+        return modes[Math.max(0, Math.min(modes.length - 1, setting(2, 0)))];
     }
 
     @Override
     public boolean hasChatColors() {
-        return true;
+        return setting(3, 1) != 0;
     }
 
     @Override
     public SkinConfiguration getSkinParts() {
-        throw new UnsupportedOperationException("skin parts are not tracked");
+        final int mask = setting(4, 127);
+        return new SkinConfiguration() {
+            @Override
+            public boolean hasCape() {
+                return (mask & 1) != 0;
+            }
+
+            @Override
+            public boolean hasJacket() {
+                return (mask & 2) != 0;
+            }
+
+            @Override
+            public boolean hasLeftSleeve() {
+                return (mask & 4) != 0;
+            }
+
+            @Override
+            public boolean hasRightSleeve() {
+                return (mask & 8) != 0;
+            }
+
+            @Override
+            public boolean hasLeftPants() {
+                return (mask & 16) != 0;
+            }
+
+            @Override
+            public boolean hasRightPants() {
+                return (mask & 32) != 0;
+            }
+
+            @Override
+            public boolean hasHat() {
+                return (mask & 64) != 0;
+            }
+        };
     }
 
     @Override
     public ProxiedPlayer.MainHand getMainHand() {
-        return ProxiedPlayer.MainHand.RIGHT;
+        return setting(5, 1) == 0 ? ProxiedPlayer.MainHand.LEFT : ProxiedPlayer.MainHand.RIGHT;
+    }
+
+    private int setting(int index, int fallback) {
+        final String[] f = Natives.settings(name);
+        return f == null ? fallback : Integer.parseInt(f[index]);
     }
 
     @Override
@@ -291,7 +334,12 @@ final class BasaltPlayer implements ProxiedPlayer {
 
     @Override
     public void sendServerLinks(List<net.md_5.bungee.api.ServerLink> links) {
-        throw new UnsupportedOperationException("server links are not available yet");
+        final StringBuilder rows = new StringBuilder();
+        for (final net.md_5.bungee.api.ServerLink link : links) {
+            rows.append(link.getType() == null ? "-" : String.valueOf(link.getType().ordinal())).append('\t')
+                    .append(link.getLabel() == null ? "-" : Hud.json(link.getLabel())).append('\t').append(link.getUrl()).append('\n');
+        }
+        Hud.send(name, Hud.SERVER_LINKS, null, null, 0, 0, 0, 0, rows.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Override

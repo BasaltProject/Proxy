@@ -68,12 +68,12 @@ bool ClientSession::routeNext() {
         identityClaimed_ = true;
     }
     const auto eligible = [this](std::size_t i) {
-        return !(recovering_ && recoveryVisited_.test(targets_[i])) && acceptsBackend(backends_[targets_[i]]);
+        return !(recovering_ && recoveryVisited_.test(targets_[i])) && acceptsBackend((*backends_)[targets_[i]]);
     };
     while (nextTarget_ < targets_.size() && !eligible(nextTarget_))
         ++nextTarget_;
     auto live = nextTarget_;
-    while (live < targets_.size() && !(eligible(live) && routes_.reachable(targets_[live])))
+    while (live < targets_.size() && !(eligible(live) && routes_->reachable(targets_[live])))
         ++live;
     if (live < targets_.size())
         nextTarget_ = live;
@@ -146,15 +146,15 @@ bool ClientSession::dial() {
     connectionStage_ = ConnectionStage::kIdle;
     resolutionStorage_.reset();
     resolutionLocal_.reset();
-    if (!dialAttempt_ || dialAttempt_->target >= backends_.size())
+    if (!dialAttempt_ || dialAttempt_->target >= backends_->size())
         return false;
     candidateBackend_ = std::make_unique<BackendLogin>(std::move(*connected), memory_, *dialAttempt_);
-    const std::int32_t speaks = speaksTo(backends_[candidateBackend_->attempt().target], clientProtocol_);
+    const std::int32_t speaks = speaksTo((*backends_)[candidateBackend_->attempt().target], clientProtocol_);
     candidateBackend_->useIds(rawProtocol(speaks) ? ids_.get() : nullptr);
     dialAttempt_.reset();
     if (!profile_ ||
-        !candidateBackend_->start(backends_[candidateBackend_->attempt().target], *profile_, virtualHost_, virtualPort_,
-                                  clientAddress(), clientPort(), nativeForwarding_, speaks)) {
+        !candidateBackend_->start((*backends_)[candidateBackend_->attempt().target], *profile_, virtualHost_,
+                                  virtualPort_, clientAddress(), clientPort(), nativeForwarding_, speaks)) {
         if (recovering_)
             return recoveryFailed();
         if (activeBackend_ && state_ == State::kPlay) {

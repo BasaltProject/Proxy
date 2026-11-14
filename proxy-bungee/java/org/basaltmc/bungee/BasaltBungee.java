@@ -22,6 +22,7 @@ import net.md_5.bungee.api.event.ServerConnectEvent;
 import net.md_5.bungee.api.event.ServerConnectedEvent;
 import net.md_5.bungee.api.event.ServerKickEvent;
 import net.md_5.bungee.api.event.ServerSwitchEvent;
+import net.md_5.bungee.api.event.SettingsChangedEvent;
 import net.md_5.bungee.api.plugin.Plugin;
 
 /** The entry points the native host calls; every result is a flat string array. */
@@ -258,10 +259,21 @@ public final class BasaltBungee {
 
     /** kind is join, switch or quit. */
     public static void notifyPlayer(String kind, String[] f) {
+        if (kind.equals("settings")) {
+            proxy.sync();
+            final BasaltPlayer known = proxy.playerNamed(f[0]);
+            if (known != null) {
+                call(new SettingsChangedEvent(known));
+            }
+            return;
+        }
         final BasaltPlayer player = playerOf(f);
         switch (kind) {
             case "join":
                 call(new PostLoginEvent(player, null, (result, error) -> {}));
+                if (Natives.settings(player.getName()) != null) {
+                    call(new SettingsChangedEvent(player));
+                }
                 break;
             case "switch":
                 call(new ServerSwitchEvent(player, proxy.getServerInfo(f[6])));

@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <mutex>
@@ -70,6 +71,16 @@ inline std::optional<wire::text::Component> componentOf(std::string_view json) {
         return std::nullopt;
     return wire::text::componentJson::deserialize(*parsed);
 }
+
+/// What a facade's `hud` call asks for, read from its packed arguments; empty for an unknown kind.
+[[nodiscard]] std::optional<runtime::PlayerHud> hudAction(JNIEnv* env, jint kind, jstring first, jstring second, jint x,
+                                                          jint y, jint z, jfloat number, jbyteArray data);
+
+/// Client settings in the order the facades read them, starting with the locale.
+[[nodiscard]] std::vector<std::string> settingsFields(const runtime::ClientSettings& settings);
+
+inline constexpr std::size_t kMaxSettingsKept = 1024;
+inline constexpr std::size_t kMaxPendingPings = 64;
 
 } // namespace impl
 

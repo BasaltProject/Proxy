@@ -83,6 +83,7 @@ basalt_module(proxy-runtime-core
         src/ProxyRuntime.cpp
         src/ProxyRuntimeAntibot.cpp
         src/ProxyRuntimeQueries.cpp
+        src/ProxyRuntimeServers.cpp
     DEPENDS basalt::proxy-config basalt::wire-common basalt::wire-io basalt::wire-protocol basalt::wire-text
             basalt::wire-multiversion basalt::wire-auth basalt::wire-chat basalt::wire-bedrock basalt::wire-config basalt::wire-storage
             basalt::wire-plugins basalt::wire-remote

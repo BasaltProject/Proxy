@@ -12,10 +12,17 @@ import net.md_5.bungee.api.config.ServerInfo;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 
 final class BasaltServerInfo implements ServerInfo {
+
     private final String name;
+    private final InetSocketAddress declared;
 
     BasaltServerInfo(String name) {
+        this(name, null);
+    }
+
+    BasaltServerInfo(String name, InetSocketAddress declared) {
         this.name = name;
+        this.declared = declared;
     }
 
     @Override
@@ -27,7 +34,7 @@ final class BasaltServerInfo implements ServerInfo {
     public InetSocketAddress getAddress() {
         final String text = Natives.serverAddress(name);
         if (text == null) {
-            return InetSocketAddress.createUnresolved("localhost", 0);
+            return declared != null ? declared : InetSocketAddress.createUnresolved("localhost", 0);
         }
         final int colon = text.lastIndexOf(':');
         return InetSocketAddress.createUnresolved(text.substring(0, colon), Integer.parseInt(text.substring(colon + 1)));
@@ -84,6 +91,15 @@ final class BasaltServerInfo implements ServerInfo {
 
     @Override
     public void ping(Callback<ServerPing> callback) {
-        callback.done(null, new UnsupportedOperationException("server pings are not available"));
+        Hud.ping(name).whenComplete((f, error) -> {
+            if (error != null) {
+                callback.done(null, error instanceof java.util.concurrent.CompletionException ? error.getCause() : error);
+                return;
+            }
+            final int online = Integer.parseInt(f[1]);
+            callback.done(new ServerPing(new ServerPing.Protocol(f[3], Integer.parseInt(f[4])),
+                    online < 0 ? null : new ServerPing.Players(Integer.parseInt(f[2]), online, null),
+                    net.md_5.bungee.chat.ComponentSerializer.deserialize(f[0]), (net.md_5.bungee.api.Favicon) null), null);
+        });
     }
 }

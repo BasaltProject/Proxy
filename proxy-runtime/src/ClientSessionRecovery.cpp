@@ -21,7 +21,7 @@ bool ClientSession::beginRecovery() {
     pendingPings_.clear();
     recovering_ = true;
     frontendPaused_ = false;
-    targets_ = routes_.select(virtualHost_);
+    targets_ = routes_->select(virtualHost_);
     nextTarget_ = 0;
     loginDeadline_ = Clock::now() + std::chrono::milliseconds{settings_.loginTimeoutMs};
     readDeadline_ = loginDeadline_;

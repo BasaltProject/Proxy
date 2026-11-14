@@ -14,8 +14,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 
 final class VelocityServer implements RegisteredServer {
+
     private final ServerInfo info;
 
     VelocityServer(String name) {
@@ -46,7 +48,12 @@ final class VelocityServer implements RegisteredServer {
 
     @Override
     public CompletableFuture<ServerPing> ping() {
-        return CompletableFuture.failedFuture(new UnsupportedOperationException("server pings are not available"));
+        return Hud.ping(info.getName()).thenApply(f -> {
+            final int online = Integer.parseInt(f[1]);
+            return new ServerPing(new ServerPing.Version(Integer.parseInt(f[4]), f[3]),
+                    online < 0 ? null : new ServerPing.Players(online, Integer.parseInt(f[2]), java.util.List.of()),
+                    GsonComponentSerializer.gson().deserialize(f[0]), null);
+        });
     }
 
     @Override

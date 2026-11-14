@@ -1,6 +1,19 @@
 #include "PluginHostSupport.hpp"
 
 namespace basalt::proxy::plugins {
+namespace {
+constexpr std::size_t kMaxSettingsKept = 1024;
+} // namespace
+
+void PluginHost::addTimer(std::unique_ptr<Timer> timer) {
+    {
+        std::lock_guard lock{mutex_};
+        timers_.push_back(std::move(timer));
+        timerAdded_ = true;
+    }
+    wake_.notify_one();
+}
+
 void PluginHost::run(std::stop_token stop) {
     {
         std::vector<std::string> foreign;
@@ -28,13 +41,14 @@ void PluginHost::run(std::stop_token stop) {
             for (const auto& timer : timers_)
                 if (!next || timer->due < *next)
                     next = timer->due;
-            const auto ready = [this] { return !queue_.empty(); };
+            const auto ready = [this] { return !queue_.empty() || timerAdded_; };
             if (next)
                 wake_.wait_until(lock, stop, *next, ready);
             else
                 wake_.wait(lock, stop, ready);
             if (stop.stop_requested())
                 return;
+            timerAdded_ = false;
             if (!queue_.empty()) {
                 task = std::move(queue_.front());
                 queue_.pop_front();
@@ -301,7 +315,39 @@ void PluginHost::deliver(const runtime::PlayerEvent& event) {
             known->second.ping = event.value;
         return;
     }
+    if (event.kind == Kind::kSettings) {
+        if (!event.settings)
+            return;
+        if (clientSettings_.size() >= kMaxSettingsKept && !clientSettings_.contains(event.player))
+            std::erase_if(clientSettings_, [this](const auto& entry) { return !roster_.contains(entry.first); });
+        clientSettings_[event.player] = *event.settings;
+        const auto known = roster_.find(event.player);
+        if (known == roster_.end())
+            return;
+        known->second.settings = *event.settings;
+        const Player subject = known->second;
+        for (auto& plugin : plugins_)
+            if (!plugin->broken)
+                callEvent(*plugin, std::string{kSettingsEvent}, &subject, {});
+        return;
+    }
+    if (event.kind == Kind::kResourcePack) {
+        constexpr std::array<std::string_view, 8> kStatuses{
+            "successfully_loaded", "declined",    "failed_download", "accepted",
+            "downloaded",          "invalid_url", "failed_reload",   "discarded"};
+        const auto known = roster_.find(event.player);
+        if (known == roster_.end() || event.value < 0 || event.value >= std::ssize(kStatuses))
+            return;
+        const Player subject = known->second;
+        const auto status = kStatuses[static_cast<std::size_t>(event.value)];
+        for (auto& plugin : plugins_)
+            if (!plugin->broken)
+                callResourcePack(*plugin, subject, event.from, status);
+        return;
+    }
     Player subject{event.player, event.uuid, event.backend, event.address, event.port};
+    if (const auto settings = clientSettings_.find(event.player); settings != clientSettings_.end())
+        subject.settings = settings->second;
     if (const auto known = roster_.find(event.player); known != roster_.end() && event.address.empty()) {
         subject.address = known->second.address;
         subject.port = known->second.port;
@@ -339,8 +385,10 @@ void PluginHost::deliver(const runtime::PlayerEvent& event) {
     for (auto& plugin : plugins_)
         if (!plugin->broken)
             callEvent(*plugin, name, &subject, event.from);
-    if (event.kind == Kind::kLeave)
+    if (event.kind == Kind::kLeave) {
         roster_.erase(event.player);
+        clientSettings_.erase(event.player);
+    }
 }
 
 void PluginHost::listPlugins() {

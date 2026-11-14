@@ -106,6 +106,23 @@ public:
         pluginChannels_ = std::move(channels);
     }
 
+    void useClientSettings(std::function<void(std::string_view, const ClientSettings&)> settings) {
+        clientSettingsSink_ = std::move(settings);
+    }
+
+    /// Called when a server change names a backend this session's snapshot does not know.
+    void useTopologyRefresh(std::function<void(ClientSession&)> refresh) { topologyRefresh_ = std::move(refresh); }
+
+    /// Owner only. Moves to a newer snapshot when idle in play and the old servers keep their places in it.
+    bool adoptTopology(std::shared_ptr<const void> topology, const BackendRoutes& routes,
+                       const std::vector<config::BackendConfig>& backends, const NativeForwarding* forwarding);
+
+    [[nodiscard]] const std::shared_ptr<const void>& topology() const { return topology_; }
+
+    void useResourcePackStatus(std::function<void(std::string_view, wire::common::Uuid, std::int32_t)> status) {
+        packStatusSink_ = std::move(status);
+    }
+
     ~ClientSession();
     [[nodiscard]] bool
     authenticated(std::expected<wire::auth::AuthenticatedLogin, wire::auth::LoginAuthenticationFailure> result,
@@ -320,6 +337,13 @@ private:
     [[nodiscard]] bool challengeResponse(bool pong = false);
     [[nodiscard]] bool backendResourcePack(bool push);
     [[nodiscard]] bool resourcePackResponse();
+    [[nodiscard]] bool applyResourcePack(const HudResourcePack& pack);
+    [[nodiscard]] bool popPack(bool configuring, wire::common::Uuid id);
+    /// Takes back the backend's packs one by one, leaving the ones plugins offered.
+    [[nodiscard]] bool popBackendPacks(bool configuring);
+    [[nodiscard]] bool backendServerLinks(bool configuring);
+    /// The backend's links followed by the plugins' ones.
+    [[nodiscard]] bool sendServerLinks(bool configuring);
     [[nodiscard]] bool rememberSettings(std::span<const std::uint8_t> packet);
     [[nodiscard]] bool queue(std::span<const std::uint8_t> bytes);
     /// Like queue, but a server list answer larger than one buffer is fed out in pieces, in order.
@@ -358,6 +382,8 @@ private:
     void backpressure();
     [[nodiscard]] bool bufferedPacket() const;
     std::shared_ptr<const void> topology_;
+    std::shared_ptr<const void> retiredTopology_;
+    std::function<void(ClientSession&)> topologyRefresh_;
     std::function<bool(std::string_view, std::string_view)> playerCommand_;
     std::function<bool(std::string_view, std::string_view, std::span<const std::uint8_t>, bool)> pluginMessage_;
     std::function<bool(DecisionRequest)> decide_;
@@ -417,7 +443,7 @@ private:
     std::span<const std::uint8_t> publicKey_;
     std::span<const std::uint8_t> authFailure_;
     AuthenticationStart authenticate_;
-    const BackendRoutes& routes_;
+    const BackendRoutes* routes_;
     std::string virtualHost_;
     std::int32_t statusProtocol_ = 0;
     std::uint16_t virtualPort_ = 0;
@@ -433,7 +459,7 @@ private:
     std::optional<wire::io::ResourceBudget::Reservation> resolutionStorage_;
     std::unique_ptr<BackendDial> dial_;
     std::optional<BackendAttempt> dialAttempt_;
-    const std::vector<config::BackendConfig>& backends_;
+    const std::vector<config::BackendConfig>* backends_;
     std::unique_ptr<BackendLogin> activeBackend_;
     std::unique_ptr<BackendLogin> candidateBackend_;
     bool finishingConfiguration_ = false;
@@ -446,6 +472,14 @@ private:
     void uiLeavePlay();
     UiSource uiSource_;
     std::function<std::vector<std::string>()> pluginChannels_;
+    std::function<void(std::string_view, const ClientSettings&)> clientSettingsSink_;
+    std::optional<ClientSettings> clientSettingsSeen_;
+    std::function<void(std::string_view, wire::common::Uuid, std::int32_t)> packStatusSink_;
+    std::vector<wire::common::Uuid> pluginPacks_;
+    std::vector<std::uint8_t> backendLinks_;
+    std::vector<std::uint8_t> pluginLinks_;
+    std::int32_t backendLinkCount_ = 0;
+    std::int32_t pluginLinkCount_ = 0;
     std::unique_ptr<wire::config::PlayerUi> ui_;
     std::optional<wire::config::PingRequest> uiRequest_;
     wire::common::placeholder::PlaceholderContext uiContext_;

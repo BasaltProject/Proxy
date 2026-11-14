@@ -10,6 +10,7 @@
 #include <basalt/wire/plugins/PluginValue.hpp>
 #include <basalt/wire/storage/PluginDataRepository.hpp>
 #include <basalt/wire/text/ComponentJson.hpp>
+#include <basalt/wire/text/Serializers.hpp>
 
 #include <algorithm>
 #include <span>
@@ -111,6 +112,34 @@ void PluginApi::pushPlayer(LuaArgs& lua, PluginHost::Plugin& plugin, const Plugi
     lua.setField("port");
     lua.pushInteger(player.ping);
     lua.setField("ping");
+    if (player.settings) {
+        constexpr std::array<std::string_view, 3> kChatModes{"full", "system", "hidden"};
+        constexpr std::array<std::string_view, 3> kParticles{"all", "decreased", "minimal"};
+        const auto& settings = *player.settings;
+        const auto pick = [](const auto& names, std::int32_t value) {
+            return names[static_cast<std::size_t>(std::clamp<std::int32_t>(value, 0, 2))];
+        };
+        lua.pushTable();
+        lua.pushString(settings.locale);
+        lua.setField("locale");
+        lua.pushInteger(settings.viewDistance);
+        lua.setField("view_distance");
+        lua.pushString(pick(kChatModes, settings.chatMode));
+        lua.setField("chat_mode");
+        lua.pushBoolean(settings.chatColors);
+        lua.setField("chat_colors");
+        lua.pushInteger(settings.skinParts);
+        lua.setField("skin_parts");
+        lua.pushString(settings.mainHand == 0 ? "left" : "right");
+        lua.setField("main_hand");
+        lua.pushBoolean(settings.textFiltering);
+        lua.setField("text_filtering");
+        lua.pushBoolean(settings.serverListing);
+        lua.setField("server_listing");
+        lua.pushString(pick(kParticles, settings.particles));
+        lua.setField("particles");
+        lua.setField("settings");
+    }
     lua.pushBoolean(false);
     lua.setField("is_console");
     wire::lua::pushHostFunction(lua, "player.has_permission", [host = plugin.host, name = player.name](LuaArgs& args) {
@@ -362,6 +391,70 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
         return 1;
     });
     lua.setField("players");
+    wire::lua::pushHostFunction(lua, "servers.ping", [server, self](LuaArgs& args) {
+        const std::string name = args.checkString(1);
+        if (!args.isFunction(2))
+            return args.fail("servers.ping(name, fn) needs a function that receives the answer, or nil");
+        const auto function = std::make_shared<LuaRef>(LuaRef::of(args.state(), 2));
+        const auto reply = [server, self, function](std::optional<runtime::ServerPing> answer) {
+            PluginHost::Timer timer;
+            timer.due = std::chrono::steady_clock::now();
+            timer.function = function;
+            timer.plugin = self;
+            timer.arguments = [answer = std::move(answer)](LuaArgs& in) {
+                if (!answer) {
+                    in.pushNil();
+                    return 1;
+                }
+                in.pushTable();
+                in.pushString(wire::text::toPlainText(answer->status.description));
+                in.setField("motd");
+                in.pushString(
+                    wire::common::writeJson(wire::text::componentJson::serialize(answer->status.description)));
+                in.setField("motd_json");
+                in.pushInteger(answer->status.players ? answer->status.players->online : 0);
+                in.setField("online");
+                in.pushInteger(answer->status.players ? answer->status.players->max : 0);
+                in.setField("max_players");
+                in.pushString(answer->status.version ? answer->status.version->name : std::string{});
+                in.setField("version");
+                in.pushInteger(answer->status.version ? answer->status.version->protocol : 0);
+                in.setField("protocol");
+                in.pushInteger(answer->latency.count());
+                in.setField("latency");
+                return 1;
+            };
+            server->addTimer(std::make_unique<PluginHost::Timer>(std::move(timer)));
+        };
+        args.pushBoolean(server->hooks_.pingServer && server->hooks_.pingServer(name, reply));
+        return 1;
+    });
+    lua.setField("ping");
+    wire::lua::pushHostFunction(lua, "servers.register", [server](LuaArgs& args) {
+        const std::string name = args.checkString(1);
+        const std::string host = args.checkString(2);
+        const auto port = args.integerOr(3, 25565);
+        const std::string like = args.isString(4) ? args.checkString(4) : std::string{};
+        if (port < 1 || port > 65535)
+            return args.fail("servers.register(name, host, port, like) needs a port from 1 to 65535");
+        const auto error = server->hooks_.registerServer
+                               ? server->hooks_.registerServer(name, host, static_cast<std::uint16_t>(port), like)
+                               : std::optional<std::string>{"servers cannot be registered here"};
+        if (!error) {
+            args.pushBoolean(true);
+            return 1;
+        }
+        args.pushBoolean(false);
+        args.pushString(*error);
+        return 2;
+    });
+    lua.setField("register");
+    wire::lua::pushHostFunction(lua, "servers.unregister", [server](LuaArgs& args) {
+        const std::string name = args.checkString(1);
+        args.pushBoolean(server->hooks_.unregisterServer && server->hooks_.unregisterServer(name));
+        return 1;
+    });
+    lua.setField("unregister");
     lua.setGlobal("servers");
 
     wire::lua::pushHostFunction(lua, "t", [self](LuaArgs& args) {
@@ -409,11 +502,7 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
 
     const auto schedule = [server, self](PluginHost::Timer timer) {
         timer.plugin = self;
-        {
-            std::lock_guard lock{server->mutex_};
-            server->timers_.push_back(std::make_unique<PluginHost::Timer>(std::move(timer)));
-        }
-        server->wake_.notify_one();
+        server->addTimer(std::make_unique<PluginHost::Timer>(std::move(timer)));
     };
     const auto timerHandle = [schedule](PluginHost::Timer timer) {
         timer.cancelled = std::make_shared<std::atomic<bool>>(false);
@@ -447,13 +536,15 @@ void PluginApi::install(PluginHost& host, PluginHost::Plugin& plugin, const wire
     listeners.filterFields = [](std::string_view name) -> std::expected<std::vector<std::string>, std::string> {
         if (name != kJoinEvent && name != kQuitEvent && name != kServerChangeEvent && name != kChatEvent &&
             name != kKickEvent && name != kPingEvent && name != kLoginEvent && name != kMessageEvent &&
-            name != kPreConnectEvent && name != kCommandEvent && name != kAntibotEvent)
+            name != kPreConnectEvent && name != kCommandEvent && name != kAntibotEvent && name != kSettingsEvent &&
+            name != kResourcePackEvent)
             return std::unexpected(
                 "there is no event called '" + std::string{name} + "'; this proxy has plugin.enable, plugin.disable, " +
                 std::string{kJoinEvent} + ", " + std::string{kQuitEvent} + ", " + std::string{kServerChangeEvent} +
                 ", " + std::string{kChatEvent} + ", " + std::string{kKickEvent} + ", " + std::string{kPingEvent} +
                 ", " + std::string{kLoginEvent} + ", " + std::string{kMessageEvent} + ", " +
-                std::string{kPreConnectEvent} + ", " + std::string{kCommandEvent} + ", " + std::string{kAntibotEvent});
+                std::string{kPreConnectEvent} + ", " + std::string{kCommandEvent} + ", " + std::string{kAntibotEvent} +
+                ", " + std::string{kSettingsEvent} + ", " + std::string{kResourcePackEvent});
         return std::vector<std::string>{"player_name", "player_uuid", "server", "from_server", "channel"};
     };
     listeners.lifecycle = [self](bool enable, LuaRef function) {

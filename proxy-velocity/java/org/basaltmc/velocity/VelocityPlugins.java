@@ -100,6 +100,16 @@ final class VelocityPlugins implements PluginManager {
         }
     }
 
+    private static final class PluginLoader extends URLClassLoader {
+        PluginLoader(URL jar) {
+            super(new URL[] {jar}, BasaltVelocity.class.getClassLoader());
+        }
+
+        void add(URL url) {
+            addURL(url);
+        }
+    }
+
     private static final class Container implements PluginContainer {
         final Description description;
         final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
@@ -108,6 +118,7 @@ final class VelocityPlugins implements PluginManager {
             return thread;
         });
         volatile Object instance;
+        volatile PluginLoader loader;
 
         Container(Description description) {
             this.description = description;
@@ -164,7 +175,8 @@ final class VelocityPlugins implements PluginManager {
         }
         final Description description = new Description(json, jar.toPath());
         final Container container = new Container(description);
-        final URLClassLoader loader = new URLClassLoader(new URL[] {jar.toURI().toURL()}, BasaltVelocity.class.getClassLoader());
+        final PluginLoader loader = new PluginLoader(jar.toURI().toURL());
+        container.loader = loader;
         final Class<?> main = loader.loadClass(json.get("main").getAsString());
         final Path data = jar.getParentFile().toPath().resolve(description.id);
         container.instance = construct(main, container, data);
@@ -272,6 +284,16 @@ final class VelocityPlugins implements PluginManager {
 
     @Override
     public void addToClasspath(Object plugin, Path path) {
-        throw new UnsupportedOperationException("adding to a plugin classpath is not available yet");
+        for (final Container container : containers.values()) {
+            if (container.instance == plugin || plugin.getClass().getClassLoader() == container.loader) {
+                try {
+                    container.loader.add(path.toUri().toURL());
+                } catch (java.net.MalformedURLException error) {
+                    throw new IllegalArgumentException(error);
+                }
+                return;
+            }
+        }
+        throw new IllegalArgumentException("plugin " + plugin + " is not loaded");
     }
 }

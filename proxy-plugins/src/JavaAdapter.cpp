@@ -139,6 +139,10 @@ public:
             if (event.kind == Kind::kLatency) {
                 if (const auto known = players_.find(event.player); known != players_.end())
                     known->second.ping = event.value;
+            } else if (event.kind == Kind::kSettings && event.settings) {
+                if (settings_.size() >= kMaxSettingsKept && !settings_.contains(event.player))
+                    std::erase_if(settings_, [this](const auto& entry) { return !players_.contains(entry.first); });
+                settings_[event.player] = *event.settings;
             } else if (event.kind == Kind::kJoin || event.kind == Kind::kSwitch) {
                 auto& row = players_[event.player];
                 row.name = event.player;
@@ -158,10 +162,20 @@ public:
             kind = "switch";
         else if (event.kind == Kind::kLeave)
             kind = "quit";
+        else if (event.kind == Kind::kSettings && event.settings)
+            kind = "settings";
+        else if (event.kind == Kind::kResourcePack)
+            kind = "pack";
         JNIEnv* env = shim_->env();
         if (kind != nullptr && env != nullptr) {
-            const std::vector<std::string> fields{
+            std::vector<std::string> fields{
                 event.player, event.uuid, event.backend, event.address, std::to_string(event.port), {}, event.backend};
+            if (event.kind == Kind::kSettings) {
+                fields = settingsFields(*event.settings);
+                fields.insert(fields.begin(), event.player);
+            } else if (event.kind == Kind::kResourcePack) {
+                fields = {event.player, event.from, std::to_string(event.value)};
+            }
             call(env, "notifyPlayer", "(Ljava/lang/String;[Ljava/lang/String;)V", [&](jclass facade, jmethodID method) {
                 jstring name = env->NewStringUTF(kind);
                 jobjectArray array = stringArray(env, fields);
@@ -173,6 +187,7 @@ public:
         if (event.kind == Kind::kLeave) {
             std::lock_guard lock{mutex_};
             players_.erase(event.player);
+            settings_.erase(event.player);
         }
     }
 
@@ -221,7 +236,7 @@ public:
     }
 
     template <int Slot>
-    static std::array<JNINativeMethod, 20> methodTable() {
+    static std::array<JNINativeMethod, 25> methodTable() {
         return {{
             {const_cast<char*>("log"), const_cast<char*>("(Ljava/lang/String;)V"),
              std::bit_cast<void*>(&nativeLog<Slot>)},
@@ -264,6 +279,17 @@ public:
              std::bit_cast<void*>(&nativeCookieRequest<Slot>)},
             {const_cast<char*>("cookiePoll"), const_cast<char*>("(J)[[B"),
              std::bit_cast<void*>(&nativeCookiePoll<Slot>)},
+            {const_cast<char*>("settings"), const_cast<char*>("(Ljava/lang/String;)[Ljava/lang/String;"),
+             std::bit_cast<void*>(&nativeSettings<Slot>)},
+            {const_cast<char*>("pingRequest"), const_cast<char*>("(Ljava/lang/String;)J"),
+             std::bit_cast<void*>(&nativePingRequest<Slot>)},
+            {const_cast<char*>("pingPoll"), const_cast<char*>("(J)[Ljava/lang/String;"),
+             std::bit_cast<void*>(&nativePingPoll<Slot>)},
+            {const_cast<char*>("registerServer"),
+             const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)Ljava/lang/String;"),
+             std::bit_cast<void*>(&nativeRegisterServer<Slot>)},
+            {const_cast<char*>("unregisterServer"), const_cast<char*>("(Ljava/lang/String;)Z"),
+             std::bit_cast<void*>(&nativeUnregisterServer<Slot>)},
         }};
     }
 
@@ -364,111 +390,99 @@ private:
                               jint y, jint z, jfloat number, jbyteArray data) {
         if (gAdapters[Slot] == nullptr || !gAdapters[Slot]->hooks_.hud)
             return JNI_FALSE;
-        const std::string who = text(env, player);
-        const auto component = [&](jstring json) -> std::optional<wire::text::Component> {
-            return json == nullptr ? std::nullopt : componentOf(text(env, json));
-        };
-        runtime::PlayerHud action;
-        switch (kind) {
-        case 0: {
-            runtime::HudTitle title{component(first), component(second), std::nullopt, std::nullopt, false, false};
-            if (x >= 0 && y >= 0 && z >= 0)
-                title.times = {x, y, z};
-            action = std::move(title);
-            break;
+        auto action = hudAction(env, kind, first, second, x, y, z, number, data);
+        return action && gAdapters[Slot]->hooks_.hud(text(env, player), std::move(*action)) ? JNI_TRUE : JNI_FALSE;
+    }
+
+    template <int Slot>
+    static jobjectArray nativeSettings(JNIEnv* env, jclass, jstring player) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr)
+            return nullptr;
+        std::optional<runtime::ClientSettings> settings;
+        {
+            std::lock_guard lock{self->mutex_};
+            if (const auto found = self->settings_.find(text(env, player)); found != self->settings_.end())
+                settings = found->second;
         }
-        case 1:
-            action = runtime::HudTitle{std::nullopt, std::nullopt, std::nullopt, std::nullopt, true, x != 0};
-            break;
-        case 2:
-            action = runtime::HudTitle{std::nullopt, std::nullopt, component(first), std::nullopt, false, false};
-            break;
-        case 3:
-            action = runtime::HudTabList{component(first), component(second)};
-            break;
-        case 4:
-        case 5:
-        case 6:
-        case 7:
-        case 8: {
-            runtime::HudBossBar bar;
-            bar.op = static_cast<runtime::HudBossBar::Op>(kind - 4);
-            bar.id = text(env, first);
-            if (auto name = component(second))
-                bar.name = std::move(*name);
-            bar.progress = number;
-            bar.color = x;
-            bar.overlay = y;
-            action = std::move(bar);
-            break;
+        return settings ? stringArray(env, settingsFields(*settings)) : nullptr;
+    }
+
+    /// A token for a ping of a configured server, or 0 when it cannot be sent.
+    template <int Slot>
+    static jlong nativePingRequest(JNIEnv* env, jclass, jstring server) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr || !self->hooks_.pingServer)
+            return 0;
+        const jlong token = self->nextCookie_.fetch_add(1);
+        {
+            std::lock_guard lock{self->mutex_};
+            if (self->pings_.size() >= kMaxPendingPings)
+                return 0;
+            self->pings_[token] = {};
         }
-        case 9:
-            action = runtime::HudTransfer{text(env, first), x};
-            break;
-        case 10: {
-            runtime::HudStoreCookie cookie;
-            cookie.key = text(env, first);
-            const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
-            cookie.data.resize(static_cast<std::size_t>(size));
-            if (size > 0)
-                env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(cookie.data.data()));
-            action = std::move(cookie);
-            break;
-        }
-        case 15: {
-            runtime::HudDialog dialog;
-            dialog.kind = static_cast<runtime::HudDialog::Kind>(std::clamp(x, 0, 3));
-            dialog.canCloseWithEscape = y != 0;
-            if (auto title = component(first))
-                dialog.title = std::move(*title);
-            const auto lines = [](std::string_view joined, char separator) {
-                std::vector<std::string_view> parts;
-                for (std::size_t start = 0; start <= joined.size();) {
-                    const std::size_t end = std::min(joined.find(separator, start), joined.size());
-                    if (end > start)
-                        parts.push_back(joined.substr(start, end - start));
-                    start = end + 1;
+        const bool sent =
+            self->hooks_.pingServer(text(env, server), [self, token](std::optional<runtime::ServerPing> ping) {
+                std::vector<std::string> fields;
+                if (ping) {
+                    const auto& status = ping->status;
+                    fields = {wire::common::writeJson(wire::text::componentJson::serialize(status.description)),
+                              std::to_string(status.players ? status.players->online : -1),
+                              std::to_string(status.players ? status.players->max : -1),
+                              status.version ? status.version->name : std::string{},
+                              std::to_string(status.version ? status.version->protocol : -1),
+                              std::to_string(ping->latency.count())};
                 }
-                return parts;
-            };
-            const std::string body = second == nullptr ? std::string{} : text(env, second);
-            for (const auto line : lines(body, '\n'))
-                if (auto parsed = componentOf(line); parsed && dialog.body.size() < 32)
-                    dialog.body.push_back(std::move(*parsed));
-            const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
-            std::string buttons(static_cast<std::size_t>(size), '\0');
-            if (size > 0)
-                env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(buttons.data()));
-            for (const auto row : lines(buttons, '\n')) {
-                const std::size_t split = row.find('\t');
-                if (split == std::string_view::npos || dialog.buttons.size() >= 16)
-                    continue;
-                if (auto label = componentOf(row.substr(0, split)))
-                    dialog.buttons.push_back({std::move(*label), std::string{row.substr(split + 1)}});
-            }
-            action = std::move(dialog);
-            break;
+                std::lock_guard lock{self->mutex_};
+                if (const auto found = self->pings_.find(token); found != self->pings_.end())
+                    found->second = {true, std::move(fields)};
+            });
+        if (!sent) {
+            std::lock_guard lock{self->mutex_};
+            self->pings_.erase(token);
+            return 0;
         }
-        case 13:
-        case 14: {
-            runtime::HudTabEntry entry;
-            entry.id = text(env, first);
-            entry.remove = kind == 14;
-            if (!entry.remove) {
-                entry.text = component(second);
-                entry.latencyMillis = x;
-                const jsize size = data == nullptr ? 0 : env->GetArrayLength(data);
-                entry.name.resize(static_cast<std::size_t>(size));
-                if (size > 0)
-                    env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte*>(entry.name.data()));
-            }
-            action = std::move(entry);
-            break;
+        return token;
+    }
+
+    /// Null while waiting, an empty array when the server did not answer; a negative token forgets it.
+    template <int Slot>
+    static jobjectArray nativePingPoll(JNIEnv* env, jclass, jlong token) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr)
+            return nullptr;
+        std::vector<std::string> fields;
+        {
+            std::lock_guard lock{self->mutex_};
+            const auto found = self->pings_.find(token < 0 ? -token : token);
+            if (found == self->pings_.end() || (token > 0 && !found->second.answered))
+                return nullptr;
+            fields = std::move(found->second.fields);
+            self->pings_.erase(found);
+            if (token < 0)
+                return nullptr;
         }
-        default:
-            return JNI_FALSE;
-        }
-        return gAdapters[Slot]->hooks_.hud(who, std::move(action)) ? JNI_TRUE : JNI_FALSE;
+        return stringArray(env, fields);
+    }
+
+    template <int Slot>
+    static jstring nativeRegisterServer(JNIEnv* env, jclass, jstring name, jstring host, jint port, jstring like) {
+        auto* self = gAdapters[Slot];
+        if (self == nullptr || !self->hooks_.registerServer)
+            return env->NewStringUTF("servers cannot be registered here");
+        if (port < 1 || port > 65535)
+            return env->NewStringUTF("the port must be from 1 to 65535");
+        const auto error = self->hooks_.registerServer(text(env, name), text(env, host),
+                                                       static_cast<std::uint16_t>(port), text(env, like));
+        return error ? env->NewStringUTF(error->c_str()) : nullptr;
+    }
+
+    template <int Slot>
+    static jboolean nativeUnregisterServer(JNIEnv* env, jclass, jstring name) {
+        auto* self = gAdapters[Slot];
+        return self != nullptr && self->hooks_.unregisterServer && self->hooks_.unregisterServer(text(env, name))
+                   ? JNI_TRUE
+                   : JNI_FALSE;
     }
 
     template <int Slot>
@@ -668,6 +682,7 @@ private:
     JavaSpec spec_;
     mutable std::mutex mutex_;
     std::map<std::string, PlayerRow, std::less<>> players_;
+    std::map<std::string, runtime::ClientSettings, std::less<>> settings_;
     std::set<std::string, std::less<>> channels_;
 
     struct CookieSlot {
@@ -676,6 +691,13 @@ private:
     };
 
     std::map<jlong, CookieSlot> cookies_;
+
+    struct PingSlot {
+        bool answered = false;
+        std::vector<std::string> fields;
+    };
+
+    std::map<jlong, PingSlot> pings_;
     std::atomic<jlong> nextCookie_{1};
 };
 

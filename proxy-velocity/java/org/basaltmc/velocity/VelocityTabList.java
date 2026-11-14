@@ -16,6 +16,8 @@ import net.kyori.adventure.text.Component;
 final class VelocityTabList implements TabList {
     private final String player;
     private final java.util.Map<UUID, VelocityTabListEntry> entries = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile Component header = Component.empty();
+    private volatile Component footer = Component.empty();
 
     VelocityTabList(String player) {
         this.player = player;
@@ -23,7 +25,17 @@ final class VelocityTabList implements TabList {
 
     @Override
     public void setHeaderAndFooter(Component header, Component footer) {
+        this.header = header;
+        this.footer = footer;
         Hud.send(player, Hud.TAB, Hud.json(header), Hud.json(footer), 0, 0, 0, 0, null);
+    }
+
+    Component header() {
+        return header;
+    }
+
+    Component footer() {
+        return footer;
     }
 
     @Override

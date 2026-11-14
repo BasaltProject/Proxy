@@ -41,7 +41,8 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
             return PluginMessageResult::kConsumed;
         return PluginMessageResult::kRelay;
     }
-    if (!fromBackend || state_ != State::kPlay || !backend() || !backends_[backend()->attempt().target].bungeeMessages)
+    if (!fromBackend || state_ != State::kPlay || !backend() ||
+        !(*backends_)[backend()->attempt().target].bungeeMessages)
         return PluginMessageResult::kConsumed;
     if (frame_.readableBytes() > kControlPayloadLimit)
         return PluginMessageResult::kInvalid;
@@ -60,8 +61,8 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
         if (frame_.failed() || frame_.readableBytes() != 0 ||
             !std::ranges::all_of(target, [](std::uint8_t c) { return c >= 32 && c < 127; }))
             return PluginMessageResult::kInvalid;
-        for (std::size_t i = 0; i < backends_.size(); ++i)
-            if (std::ranges::equal(target, backends_[i].name)) {
+        for (std::size_t i = 0; i < backends_->size(); ++i)
+            if (std::ranges::equal(target, (*backends_)[i].name)) {
                 (void)requestBackendChange(i);
                 break;
             }
@@ -82,12 +83,12 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
     if (name == "UUID") {
         valueBytes = 32;
     } else if (name == "GetServer") {
-        const auto& server = backends_[backend()->attempt().target].name;
+        const auto& server = (*backends_)[backend()->attempt().target].name;
         if (!validName(server))
             return PluginMessageResult::kInvalid;
         valueBytes = server.size();
     } else {
-        for (const auto& server : backends_) {
+        for (const auto& server : *backends_) {
             if (!validName(server.name) || valueBytes + server.name.size() + 2 > kControlPayloadLimit)
                 return PluginMessageResult::kInvalid;
             valueBytes += server.name.size() + (valueBytes == 0 ? 0 : 2);
@@ -107,10 +108,10 @@ ClientSession::PluginMessageResult ClientSession::pluginMessage(bool fromBackend
             for (int nibble = 15; nibble >= 0; --nibble)
                 frame_.writeByte(static_cast<std::uint8_t>(kHex[(half >> (nibble * 4)) & 15]));
     } else if (name == "GetServer") {
-        ascii(frame_, backends_[backend()->attempt().target].name);
+        ascii(frame_, (*backends_)[backend()->attempt().target].name);
     } else {
         bool first = true;
-        for (const auto& server : backends_) {
+        for (const auto& server : *backends_) {
             if (!first)
                 ascii(frame_, ", ");
             ascii(frame_, server.name);
@@ -129,7 +130,7 @@ void ClientSession::registerBungeeChannels() {
     if (backend() == nullptr)
         return;
     std::string names;
-    if (backends_[backend()->attempt().target].bungeeMessages)
+    if ((*backends_)[backend()->attempt().target].bungeeMessages)
         names = std::string{"BungeeCord\0bungeecord:main", 26};
     if (pluginChannels_)
         for (const auto& channel : pluginChannels_()) {

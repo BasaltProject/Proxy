@@ -74,8 +74,8 @@ ClientSession::ClientSession(
       nativeForwarding_(nativeForwarding), connection_(std::move(connection)), settings_(settings),
       status_(std::move(status)), tail_(0, memory_), unavailable_(unavailable), online_(online),
       checkAddress_(checkAddress), acceptTransfers_(acceptTransfers), compressionThreshold_(compressionThreshold),
-      publicKey_(publicKey), authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(routes),
-      resolve_(std::move(resolve)), backends_(backends), uiFrame_(0, memory_), clientSettings_(0, memory_),
+      publicKey_(publicKey), authFailure_(authFailure), authenticate_(std::move(authenticate)), routes_(&routes),
+      resolve_(std::move(resolve)), backends_(&backends), uiFrame_(0, memory_), clientSettings_(0, memory_),
       idIn_(0, memory_), idOut_(0, memory_), input_(0, memory_), frame_(0, memory_), output_(0, memory_),
       readDeadline_(acceptedAt + std::chrono::milliseconds{settings.handshakeTimeoutMs}), access_(std::move(access)) {
     buffers.reset();
@@ -95,8 +95,8 @@ bool ClientSession::inPlay() const {
 }
 
 std::string_view ClientSession::activeBackendName() const {
-    return activeBackend_ && activeBackend_->attempt().target < backends_.size()
-               ? std::string_view{backends_[activeBackend_->attempt().target].name}
+    return activeBackend_ && activeBackend_->attempt().target < backends_->size()
+               ? std::string_view{(*backends_)[activeBackend_->attempt().target].name}
                : std::string_view{};
 }
 
@@ -191,21 +191,26 @@ bool ClientSession::rememberSettings(std::span<const std::uint8_t> packet) {
     const auto languageBytes = wire::protocol::varInt::read(frame_);
     if (frame_.failed() || languageBytes < 0 || languageBytes > kLanguageEncodedLimit)
         return false;
-    (void)frame_.readSpan(static_cast<std::size_t>(languageBytes));
-    (void)frame_.readByte();
-    (void)wire::protocol::varInt::read(frame_);
-    (void)wire::protocol::readBoolean(frame_);
-    (void)frame_.readByte();
-    (void)wire::protocol::varInt::read(frame_);
-    (void)wire::protocol::readBoolean(frame_);
-    (void)wire::protocol::readBoolean(frame_);
+    ClientSettings seen;
+    const auto language = frame_.readSpan(static_cast<std::size_t>(languageBytes));
+    seen.locale.assign(language.begin(), language.end());
+    seen.viewDistance = static_cast<std::int8_t>(frame_.readByte());
+    seen.chatMode = wire::protocol::varInt::read(frame_);
+    seen.chatColors = wire::protocol::readBoolean(frame_);
+    seen.skinParts = frame_.readByte();
+    seen.mainHand = wire::protocol::varInt::read(frame_);
+    seen.textFiltering = wire::protocol::readBoolean(frame_);
+    seen.serverListing = wire::protocol::readBoolean(frame_);
     if (!rawNow() || clientProtocol_ >= wire::multiversion::protocolVersions::kV1_21_2)
-        (void)wire::protocol::varInt::read(frame_);
+        seen.particles = wire::protocol::varInt::read(frame_);
     if (frame_.failed() || frame_.readableBytes() != 0 || !clientSettings_.tryReserve(packet.size()))
         return false;
     clientSettings_.clear();
     wire::protocol::varInt::write(clientSettings_, wire::protocol::configuration::ClientInformationPacket::kId);
     clientSettings_.writeBytes(payload);
+    if (clientSettingsSink_ && profile_ && clientSettingsSeen_ != seen)
+        clientSettingsSink_(profile_->name, seen);
+    clientSettingsSeen_ = std::move(seen);
     return true;
 }
 
