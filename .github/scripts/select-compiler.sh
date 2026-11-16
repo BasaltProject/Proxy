@@ -28,6 +28,7 @@ Darwin)
         cross="-DCMAKE_OSX_ARCHITECTURES=x86_64"
     fi
     version="$(brew list --versions llvm | awk '{ print $2 }')"
+    version="${version%%_*}"
     prefix="$HOME/libcxx-$arch"
     if [ ! -f "$prefix/built-$version-$target" ]; then
         rm -rf "$prefix" "$HOME/src-llvm"
