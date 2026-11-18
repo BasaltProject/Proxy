@@ -7,7 +7,7 @@ Linux)
     installed=0
     for attempt in 1 2 3; do
         if sudo timeout 300 apt-get update &&
-            sudo timeout 300 apt-get install -y clang-19 clang-tools-19 lld-19 libclang-rt-19-dev; then
+            sudo timeout 900 apt-get install -y clang-19 clang-tools-19 lld-19 libclang-rt-19-dev; then
             installed=1
             break
         fi
@@ -50,16 +50,18 @@ Darwin)
     ;;
 MINGW* | MSYS* | CYGWIN*)
     args=""
+    major="$(clang --version 2>/dev/null | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -1)"
+    # The MSVC STL refuses a Clang older than the one it was released with.
+    if [ "${major:-0}" -lt 22 ]; then
+        choco upgrade llvm --no-progress -y
+        echo "C:\\Program Files\\LLVM\\bin" >>"$GITHUB_PATH"
+        export PATH="/c/Program Files/LLVM/bin:$PATH"
+    fi
+    if ! command -v ninja >/dev/null; then
+        choco install ninja --no-progress -y
+    fi
     if [ "${PROCESSOR_ARCHITECTURE:-}" = ARM64 ] || [ "${PROCESSOR_ARCHITEW6432:-}" = ARM64 ]; then
         # An emulated x64 Clang targets x64 unless told otherwise.
-        if ! command -v clang >/dev/null; then
-            choco install llvm --no-progress -y
-            echo "C:\\Program Files\\LLVM\\bin" >>"$GITHUB_PATH"
-            export PATH="/c/Program Files/LLVM/bin:$PATH"
-        fi
-        if ! command -v ninja >/dev/null; then
-            choco install ninja --no-progress -y
-        fi
         args="-DCMAKE_C_COMPILER_TARGET=aarch64-pc-windows-msvc -DCMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc"
     fi
     echo "BASALT_CMAKE_ARGS=$args" >>"$GITHUB_ENV"
