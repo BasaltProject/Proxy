@@ -280,6 +280,12 @@ jobs:
       - name: Select the cross-compiler
         if: matrix.cross
         run: .github/scripts/select-compiler.sh
+      - name: Restore the FreeBSD arm64 sysroot
+        if: matrix.cross
+        uses: actions/cache@v4
+        with:
+          path: build/freebsd-sysroot
+          key: freebsd-sysroot-${{ hashFiles('.github/scripts/setup-freebsd-sysroot.sh') }}
       - name: Extract the FreeBSD arm64 sysroot
         if: matrix.cross
         run: .github/scripts/setup-freebsd-sysroot.sh
