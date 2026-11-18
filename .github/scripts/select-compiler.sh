@@ -5,13 +5,16 @@ case "$(uname -s)" in
 Linux)
     echo 'Acquire::http::Timeout "30"; Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99basalt >/dev/null
     installed=0
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4; do
         if sudo timeout 300 apt-get update &&
-            sudo timeout 900 apt-get install -y clang-19 clang-tools-19 lld-19 libclang-rt-19-dev; then
+            sudo timeout 600 apt-get install -y clang-19 clang-tools-19 lld-19 libclang-rt-19-dev; then
             installed=1
             break
         fi
-        sudo apt-get clean
+        # Downloaded packages are kept, so a retry resumes on the main archive instead of the slow runner mirror.
+        if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo http://archive.ubuntu.com/ubuntu/ | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+        fi
     done
     [ "$installed" = 1 ]
     echo "BASALT_CMAKE_ARGS=-DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19" >>"$GITHUB_ENV"
