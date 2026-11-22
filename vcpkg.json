@@ -6,7 +6,6 @@
   "dependencies": [
     "c-ares",
     "doctest",
-    "lua",
     "mbedtls",
     "monocypher",
     "simdjson",

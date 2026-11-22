@@ -315,7 +315,7 @@ score = 100
 
 [verified]
 # Hours a player that passed the limbo is trusted from the same origin, so they pass straight through next time.
-# 0 verifies nobody. A Lua plugin can add players to and remove them from this list.
+# 0 verifies nobody. A plugin can add players to and remove them from this list.
 ttl-hours = 24
 max-entries = 100000
 # Keep the list in players.db so it survives a restart. Expired rows are deleted in batches of purge-batch every

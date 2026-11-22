@@ -201,13 +201,9 @@ std::expected<ProxyConfig, std::string> fromToml(const detail::TomlTable& proxy,
         reader.fail("translation.mode", "must be auto, proxy, server or off");
 
     const auto* plugins = reader.child(proxy, "plugins");
-    reader.keys(plugins,
-                {"enabled", "instructions-per-turn", "memory-mb", "queue-size", "packet-max-kib", "packet-timeout-ms",
-                 "allow", "java-platform"},
+    reader.keys(plugins, {"enabled", "queue-size", "allow", "packet-max-kib", "packet-timeout-ms", "java-platform"},
                 "plugins.");
     reader.scalar(plugins, "enabled", result.plugins.enabled, "plugins.");
-    reader.integer(plugins, "instructions-per-turn", result.plugins.instructionsPerTurn, 1000, 1000000000, "plugins.");
-    reader.integer(plugins, "memory-mb", result.plugins.memoryMb, 1, 1024, "plugins.");
     reader.integer(plugins, "queue-size", result.plugins.queueSize, 1, 65536, "plugins.");
     reader.integer(plugins, "packet-max-kib", result.plugins.packetMaxKib, 1, 2048, "plugins.");
     reader.integer(plugins, "packet-timeout-ms", result.plugins.packetTimeoutMs, 1, 1000, "plugins.");

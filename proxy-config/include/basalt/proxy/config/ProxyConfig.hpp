@@ -139,15 +139,13 @@ struct PluginsConfig {
     static constexpr std::string_view kDatabase = ".basalt/players.db";
 
     bool enabled = true;
-    std::int64_t instructionsPerTurn = 250000;
-    std::size_t memoryMb = 32;
     std::size_t queueSize = 256;
+    /// Plugin id to the permissions the operator grants it beyond its capabilities: commands, network, packets.
+    std::map<std::string, std::vector<std::string>> allow;
     /// Packets larger than this go past plugin packet listeners untouched.
     std::size_t packetMaxKib = 256;
-    /// How long a relayed packet waits for the plugin interpreter before it goes on untouched.
+    /// How long a relayed packet waits for the plugin thread, and how long its listener may run.
     std::int64_t packetTimeoutMs = 25;
-    /// Plugin id to the permissions the operator grants it; a plugin asking for more loads without the rest.
-    std::map<std::string, std::vector<std::string>> allow;
     /// Plugin id (or jar file name) to the facade that loads a jar carrying both Java descriptors; Velocity otherwise.
     std::map<std::string, JavaPlatform, std::less<>> javaPlatform;
 

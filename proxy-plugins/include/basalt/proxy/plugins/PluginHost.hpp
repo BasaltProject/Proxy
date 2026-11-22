@@ -3,9 +3,6 @@
 #include <basalt/proxy/plugins/ForeignAdapter.hpp>
 #include <basalt/proxy/runtime/CommandDispatcher.hpp>
 #include <basalt/proxy/runtime/ProxyRuntime.hpp>
-#include <basalt/wire/lua/LuaArgs.hpp>
-#include <basalt/wire/lua/LuaRef.hpp>
-#include <basalt/wire/lua/LuaSandbox.hpp>
 #include <basalt/wire/plugins/PacketRegistry.hpp>
 #include <basalt/wire/plugins/PluginPackage.hpp>
 #include <basalt/wire/sql/Sqlite.hpp>
@@ -55,6 +52,7 @@ struct ProxyInfo {
 };
 
 struct PluginHooks;
+class WasmHost;
 
 /// Builds a foreign adapter from the hooks; null when the operator has nothing for it to load.
 using AdapterFactory = std::function<std::unique_ptr<ForeignAdapter>(const PluginHooks&)>;
@@ -62,17 +60,16 @@ using AdapterFactory = std::function<std::unique_ptr<ForeignAdapter>(const Plugi
 struct PluginSettings {
     std::string directory = "plugins";
     std::string database;
-    wire::lua::LuaLimits limits;
     std::size_t queueSize = 256;
     /// Plugin id to permission names (commands, network, packets) the operator grants.
     std::map<std::string, std::vector<std::string>> allow;
+    std::vector<AdapterFactory> adapters;
     /// Where packet listeners register; the runtime delivers relayed packets to it. Unset disables the packets API.
     std::shared_ptr<wire::plugins::PacketRegistry> packets;
-    /// How long a relayed packet waits for the plugin interpreter before it goes on untouched.
+    /// How long a relayed packet waits for the plugin thread, and how long its listener may run.
     std::chrono::milliseconds packetTimeout{25};
-    /// The most bytes a listener may set as a body or send.
+    /// Packets larger than this go past listeners untouched.
     std::size_t packetMaxBytes = 256 * 1024;
-    std::vector<AdapterFactory> adapters;
 };
 
 /// What a plugin may reach. Every callback runs on the plugin thread and must not block on session owners.
@@ -141,7 +138,7 @@ struct PluginHooks {
     std::function<bool(std::string_view address, bool ban)> antibotBan;
 };
 
-/// One thread runs every plugin's Lua, so no Lua state is entered twice and no I/O owner waits on a plugin.
+/// One thread runs every plugin, so no instance is entered twice and no I/O owner waits on a plugin.
 class PluginHost {
 public:
     [[nodiscard]] static std::expected<std::unique_ptr<PluginHost>, std::string> start(PluginSettings settings,
@@ -152,6 +149,17 @@ public:
 
     /// Never blocks: a full queue drops the event and counts it.
     void post(runtime::PlayerEvent event);
+
+    /// From any thread: runs `run` on the plugin thread with the WebAssembly host; false when the queue is full.
+    bool postCompletion(std::function<void(WasmHost&)> run);
+
+    /// Runs `work` on the plugin thread, ahead of the queued events when urgent; false when the queue is full.
+    [[nodiscard]] bool runOnPluginThread(std::function<void()> work, bool urgent = false);
+
+    [[nodiscard]] bool onPluginThread() const noexcept { return pluginThread_.load() == std::this_thread::get_id(); }
+
+    /// Whether the operator granted the plugin the permission (commands, network, packets) under [plugins.allow].
+    [[nodiscard]] bool granted(std::string_view plugin, std::string_view permission) const;
 
     /// True when the first word names a command a plugin registered, which is then queued for the plugin thread.
     [[nodiscard]] bool command(std::string_view line);
@@ -172,6 +180,15 @@ public:
     [[nodiscard]] bool message(std::string_view player, std::string_view channel, std::span<const std::uint8_t> data,
                                bool fromBackend);
 
+    /// Runs one packet listener on the calling thread, a session owner; false when it did not get to run in time.
+    [[nodiscard]] bool deliverPacket(const void* owner, std::int64_t token, wire::plugins::PluginPacket& packet);
+
+    /// Relayed packets that went on untouched, or were cancelled by a fail-closed listener, because the plugin
+    /// thread was busy for longer than the timeout.
+    [[nodiscard]] std::size_t packetTimeouts() const noexcept {
+        return packetTimeouts_.load(std::memory_order_relaxed);
+    }
+
     /// Drops every plugin, reads the packages again and resumes; queued events and per-plugin data are kept.
     [[nodiscard]] std::size_t reload();
 
@@ -179,24 +196,10 @@ public:
 
     [[nodiscard]] std::size_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
-    /// Runs one Lua packet listener on the calling thread, a session owner; false when it timed out waiting to run.
-    [[nodiscard]] bool deliverPacket(const void* owner, const wire::lua::LuaRef& function,
-                                     wire::plugins::PluginPacket& packet);
-
-    /// Relayed packets that went on untouched because the plugin interpreter was busy for longer than the timeout.
-    [[nodiscard]] std::size_t packetTimeouts() const noexcept {
-        return packetTimeouts_.load(std::memory_order_relaxed);
-    }
-
     [[nodiscard]] std::size_t delivered() const noexcept { return delivered_.load(std::memory_order_relaxed); }
 
 private:
-    friend struct PluginApi;
-    struct Plugin;
-    struct Entry;
-    struct Timer;
-    struct PermissionSlot;
-    struct PermissionSlots;
+    friend class WasmHost;
 
     PluginHost(PluginSettings settings, PluginHooks hooks);
 
@@ -206,11 +209,6 @@ private:
     void run(std::stop_token stop);
     void shutdown();
     void dropPacketListeners();
-    void dropPermissionProviders();
-    /// Runs a Lua provider from any thread; a meta answer comes back, a check answer goes in `answer`.
-    std::optional<std::string> callProvider(PermissionSlot& slot, bool meta, const wire::permissions::Subject& subject,
-                                            std::string_view text, const wire::permissions::Context& context,
-                                            wire::permissions::Tristate& answer);
     void listPlugins();
 
     struct ConsoleCall {
@@ -236,10 +234,17 @@ private:
 
     struct DecisionRun;
 
-    using Task = std::variant<runtime::PlayerEvent, ConsoleCall, PlayerCommandCall, MessageCall, DecisionCall>;
+    struct CompletionCall {
+        std::function<void(WasmHost&)> run;
+    };
+
+    using Work = std::function<void()>;
+    using Task = std::variant<runtime::PlayerEvent, ConsoleCall, PlayerCommandCall, MessageCall, DecisionCall,
+                              CompletionCall, Work>;
 
     void deliverDecision(const DecisionCall& call);
-    void stepDecision(const std::shared_ptr<DecisionRun>& run, std::size_t index);
+    void finishDecision(DecisionRun& run);
+    void decideWasm(DecisionRun& run);
 
     struct Player {
         std::string name;
@@ -256,19 +261,8 @@ private:
 
     void deliver(const runtime::PlayerEvent& event);
     void invoke(const std::vector<std::string>& words, const std::optional<Player>& source);
-    void callLogin(Plugin& plugin, const std::string& player, const std::string& uuid);
-    void callAntibot(Plugin& plugin, const runtime::PlayerEvent& event);
-    void callResourcePack(Plugin& plugin, const Player& subject, const std::string& pack, std::string_view status);
-    void callPing(Plugin& plugin, const std::string& host, const std::string& protocol);
-    void callEvent(Plugin& plugin, const std::string& name, const Player* subject, const std::string& from);
-    void call(Plugin& plugin, const wire::lua::LuaRef& function,
-              const std::function<std::int32_t(wire::lua::LuaArgs&)>& pushArguments, std::string_view why,
-              std::function<void(bool)> after = {});
-    void report(Plugin& plugin, const wire::lua::LuaFailure& failure, std::string_view why);
     void runTimers(std::chrono::steady_clock::time_point now);
     [[nodiscard]] bool enqueue(Task task);
-    /// Adds a timer from any thread and wakes the plugin thread to look at it.
-    void addTimer(std::unique_ptr<Timer> timer);
     [[nodiscard]] bool allowed(const Player& player, const std::optional<std::string>& permission) const;
     [[nodiscard]] const Player* findPlayer(std::string_view name) const;
 
@@ -277,7 +271,6 @@ private:
     std::map<std::string, std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>>
         installed_;
     std::optional<wire::sql::Database> database_;
-    std::vector<std::unique_ptr<Plugin>> plugins_;
     std::vector<std::unique_ptr<ForeignAdapter>> adapters_;
     std::set<std::string, std::less<>> foreignCommands_;
     std::atomic<std::size_t> loaded_{0};
@@ -288,20 +281,17 @@ private:
     std::mutex reloadMutex_;
     std::mutex foreignMutex_;
     std::vector<std::string> foreignNames_;
-    /// Held while any Lua of any plugin runs, on the plugin thread or on a session owner delivering a packet.
-    std::recursive_timed_mutex luaMutex_;
-    std::atomic<std::size_t> packetTimeouts_{0};
     mutable std::shared_mutex channelsMutex_;
     std::set<std::string, std::less<>> channels_;
-    std::map<std::string, std::vector<std::unique_ptr<Entry>>, std::less<>> commands_;
-    std::vector<std::unique_ptr<Timer>> timers_;
-    bool timerAdded_ = false;
     std::map<std::string, Player, std::less<>> roster_;
     std::map<std::string, runtime::ClientSettings, std::less<>> clientSettings_;
     bool loading_ = true;
     std::atomic<unsigned> deciders_{0};
+    std::atomic<std::size_t> packetTimeouts_{0};
     std::atomic<std::size_t> dropped_{0};
     std::atomic<std::size_t> delivered_{0};
+    std::unique_ptr<WasmHost> wasm_;
+    std::atomic<std::thread::id> pluginThread_{};
     std::jthread thread_;
 };
 

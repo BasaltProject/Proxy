@@ -227,9 +227,9 @@ int run(const cliCommand::Run& command) {
     std::shared_ptr<wire::plugins::PacketRegistry> packetRegistry;
     if (configuration->plugins.enabled) {
         packetRegistry = std::make_shared<wire::plugins::PacketRegistry>(
-            [&pluginHost](const void* owner, const wire::lua::LuaRef& function, wire::plugins::PluginPacket& packet) {
+            [&pluginHost](const void* owner, std::int64_t token, wire::plugins::PluginPacket& packet) {
                 auto* host = pluginHost.load(std::memory_order_acquire);
-                return host == nullptr || host->deliverPacket(owner, function, packet);
+                return host == nullptr || host->deliverPacket(owner, token, packet);
             },
             [](const wire::plugins::PacketAddress& address) { return wire::plugins::packetNaming::of(address); });
         services.packets = packetRegistry;

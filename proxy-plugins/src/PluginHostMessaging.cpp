@@ -49,6 +49,8 @@ void PluginHost::deliverMessage(const MessageCall& call) {
     for (auto& adapter : adapters_)
         if (adapter->message(call.player, call.channel, call.data, call.fromBackend))
             return;
+    if (!isBungeeChannel(call.channel) && wasm_)
+        wasm_->deliverMessage(call.player, call.channel, call.data, call.fromBackend);
     if (isBungeeChannel(call.channel) && call.fromBackend) {
         BungeeContext context;
         context.player = [this](std::string_view name) -> std::optional<BungeePlayer> {
@@ -91,35 +93,10 @@ void PluginHost::deliverMessage(const MessageCall& call) {
         if (!handleBungeeMessage(context, call.player, call.data) && hooks_.log)
             hooks_.log("bungeecord", "ignored a message from " + call.player + " that names no known subchannel");
     }
-    const Player* known = findPlayer(call.player);
-    const Player subject = known ? *known : Player{call.player, {}, {}};
-    for (auto& plugin : plugins_) {
-        if (plugin->broken)
-            continue;
-        const auto found = plugin->handlers.find(std::string{kMessageEvent});
-        if (found == plugin->handlers.end())
-            continue;
-        for (const Plugin::Handler& handler : found->second) {
-            const auto wanted = handler.filters.find("channel");
-            if (wanted != handler.filters.end() && wanted->second != call.channel)
-                continue;
-            this->call(
-                *plugin, handler.function,
-                [&](wire::lua::LuaArgs& lua) {
-                    lua.pushTable();
-                    PluginApi::pushPlayer(lua, *plugin, subject);
-                    lua.setField("player");
-                    lua.pushString(call.channel);
-                    lua.setField("channel");
-                    lua.pushString(std::string{reinterpret_cast<const char*>(call.data.data()), call.data.size()});
-                    lua.setField("data");
-                    lua.pushString(call.fromBackend ? "backend" : "client");
-                    lua.setField("source");
-                    return 1;
-                },
-                std::string{kMessageEvent});
-        }
-    }
+}
+
+bool PluginHost::deliverPacket(const void* owner, std::int64_t token, wire::plugins::PluginPacket& packet) {
+    return wasm_ == nullptr || wasm_->deliverPacket(owner, token, packet);
 }
 
 const PluginHost::Player* PluginHost::findPlayer(std::string_view name) const {
@@ -136,35 +113,6 @@ bool PluginHost::allowed(const Player& player, const std::optional<std::string>&
     if (!permission)
         return true;
     return hooks_.hasPermission && hooks_.hasPermission(player.name, *permission);
-}
-
-void PluginHost::callResourcePack(Plugin& plugin, const Player& subject, const std::string& pack,
-                                  std::string_view status) {
-    const auto found = plugin.handlers.find(std::string{kResourcePackEvent});
-    if (found == plugin.handlers.end())
-        return;
-    for (const Plugin::Handler& handler : found->second) {
-        if (plugin.broken)
-            return;
-        const auto wanted = handler.filters.find("player_name");
-        if (wanted != handler.filters.end() && !sameName(wanted->second, subject.name))
-            continue;
-        call(
-            plugin, handler.function,
-            [&](wire::lua::LuaArgs& lua) {
-                lua.pushTable();
-                PluginApi::pushPlayer(lua, plugin, subject);
-                lua.setField("player");
-                lua.pushString(subject.name);
-                lua.setField("player_name");
-                lua.pushString(pack);
-                lua.setField("id");
-                lua.pushString(status);
-                lua.setField("status");
-                return 1;
-            },
-            std::string{kResourcePackEvent});
-    }
 }
 
 } // namespace basalt::proxy::plugins

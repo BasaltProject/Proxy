@@ -34,7 +34,7 @@ vanilla, Paper, Spigot, Fabric or [Basalt Server](https://github.com/BasaltProje
 
 - **Native and light.** One binary and a `config/` folder. No JVM to install.
 - **Built-in protection.** Antibot, secure forwarding to backends, rate limits and a remote administration API.
-- **Lua plugins.** The native API, sandboxed and packaged as `.bppkg`.
+- **WebAssembly plugins.** The native API, sandboxed and packaged as `.bppkg`.
 - **BungeeCord and Velocity plugins (early).** Optional adapters on top of [Shim](https://github.com/BasaltProject/Shim),
   a JVM built into the binary that only starts when a jar is present.
 

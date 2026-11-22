@@ -1,4 +1,5 @@
 #include "PluginInternal.hpp"
+#include "WasmHost.hpp"
 
 #include <basalt/wire/common/Base64.hpp>
 
@@ -45,15 +46,8 @@ unsigned decisionBit(std::string_view event) {
 unsigned decisionBit(runtime::DecisionKind kind) { return infoOf(kind).bit; }
 
 struct PluginHost::DecisionRun {
-    struct Step {
-        Plugin* plugin;
-        const Plugin::Handler* handler;
-    };
-
     runtime::DecisionRequest request;
     std::chrono::steady_clock::time_point received;
-    std::vector<Step> steps;
-    Player subject;
     bool cancelled = false;
     std::string reason;
     std::string server;
@@ -88,261 +82,160 @@ bool PluginHost::decide(runtime::DecisionRequest request) {
 }
 
 void PluginHost::deliverDecision(const DecisionCall& call) {
-    const std::string name{infoOf(call.request.kind).event};
-    auto run = std::make_shared<DecisionRun>();
-    run->request = call.request;
-    run->received = call.received;
+    DecisionRun run;
+    run.request = call.request;
+    run.received = call.received;
     const Kind kind = call.request.kind;
     if (kind == Kind::kPreConnect)
-        run->server = call.request.backend;
+        run.server = call.request.backend;
     if (kind == Kind::kChat || kind == Kind::kCommand || kind == Kind::kPing)
-        run->text = call.request.text;
+        run.text = call.request.text;
     if (kind == Kind::kKick)
-        run->reason = call.request.text;
-    const Player* known = findPlayer(call.request.player);
-    run->subject = known ? *known
-                         : Player{call.request.player, call.request.uuid, call.request.from, call.request.address,
-                                  call.request.port};
-    for (auto& plugin : plugins_) {
-        if (plugin->broken)
-            continue;
-        const auto found = plugin->handlers.find(name);
-        if (found == plugin->handlers.end())
-            continue;
-        for (const Plugin::Handler& handler : found->second)
-            if (!handler.observer)
-                run->steps.push_back({plugin.get(), &handler});
-    }
-    std::ranges::stable_sort(run->steps, {}, [](const DecisionRun::Step& step) { return step.handler->priority; });
-    stepDecision(run, 0);
+        run.reason = call.request.text;
+    if (wasm_)
+        decideWasm(run);
+    finishDecision(run);
 }
 
-void PluginHost::stepDecision(const std::shared_ptr<DecisionRun>& run, std::size_t index) {
-    const Kind kind = run->request.kind;
-    if (index >= run->steps.size()) {
-        const auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - run->received);
-        if (elapsed.count() >= run->request.deadlineMs) {
-            if (hooks_.log)
-                hooks_.log("decisions", "a decision for " + run->request.player + " took " +
-                                            std::to_string(elapsed.count()) + " ms; the proxy already went on");
-            return;
+void PluginHost::decideWasm(DecisionRun& run) {
+    const Kind kind = run.request.kind;
+    WasmDecision wasm;
+    wasm.kind = kind;
+    wasm.player = run.request.player;
+    wasm.uuid = run.request.uuid;
+    wasm.address = run.request.address;
+    wasm.port = run.request.port;
+    wasm.host = run.request.host;
+    wasm.from = run.request.from;
+    wasm.protocol = kind == Kind::kPing ? std::string_view{run.request.text} : std::string_view{};
+    wasm.cancelled = run.cancelled;
+    wasm.signedContent = run.request.signedContent;
+    wasm.text = kind == Kind::kChat || kind == Kind::kCommand ? run.text : std::string{};
+    wasm.reasonJson = run.reasonJson;
+    wasm.motdJson = run.textJson;
+    wasm.reason = run.reason;
+    wasm.server = run.server;
+    wasm.motd = run.text == run.request.text ? std::string{} : run.text;
+    wasm.version = run.versionName.value_or("");
+    wasm.versionProtocol = run.versionProtocol.value_or(-1);
+    wasm.maxPlayers = run.maxPlayers;
+    wasm.online = run.online;
+    wasm_->decide(wasm);
+    if (kind != Kind::kPing)
+        run.cancelled = wasm.cancelled;
+    if (wasm.touched & (WasmDecision::kReason | WasmDecision::kReasonJson)) {
+        run.reason = wasm.reason;
+        run.reasonJson = wasm.reasonJson;
+    }
+    if (wasm.touched & WasmDecision::kText)
+        run.text = wasm.text;
+    if (wasm.touched & WasmDecision::kServer)
+        run.server = wasm.server;
+    if (wasm.touched & (WasmDecision::kMotd | WasmDecision::kMotdJson)) {
+        run.text = wasm.motd;
+        run.textJson = wasm.motdJson;
+    }
+    if ((wasm.touched & WasmDecision::kVersion) && !wasm.version.empty())
+        run.versionName = wasm.version;
+    if (wasm.touched & WasmDecision::kVersionProtocol)
+        run.versionProtocol = static_cast<std::int32_t>(std::min<std::int64_t>(wasm.versionProtocol, INT32_MAX));
+    if (wasm.touched & WasmDecision::kMaxPlayers)
+        run.maxPlayers = wasm.maxPlayers;
+    if (wasm.touched & WasmDecision::kOnline)
+        run.online = wasm.online;
+    if (wasm.touched & WasmDecision::kSample) {
+        std::vector<std::string> lines;
+        for (std::string_view rest = wasm.sample; !rest.empty() && lines.size() < kMaxSampleLines;) {
+            const auto end = rest.find('\n');
+            lines.emplace_back(rest.substr(0, std::min(end, kMaxSampleLine)));
+            rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
         }
-        for (auto& adapter : adapters_) {
-            if (!adapter->decides(kind))
-                continue;
-            runtime::DecisionRequest asked = run->request;
-            if (kind == Kind::kPreConnect)
-                asked.backend = run->server;
-            else if (kind == Kind::kChat || kind == Kind::kCommand)
-                asked.text = run->text;
-            else if (kind == Kind::kKick)
-                asked.text = run->reason;
-            const auto answer = adapter->decide(asked);
-            if (!answer)
-                continue;
-            if (answer->deny) {
-                run->cancelled = true;
-                run->reason = answer->reason;
-                run->reasonJson = answer->reasonJson;
-            }
-            if (!answer->redirect.empty())
-                run->server = answer->redirect;
-            if (!answer->text.empty()) {
-                (kind == Kind::kKick ? run->reason : run->text) = answer->text;
-                (kind == Kind::kKick ? run->reasonJson : run->textJson) = answer->textJson;
-            }
-            if (answer->versionName)
-                run->versionName = answer->versionName;
-            if (answer->versionProtocol)
-                run->versionProtocol = answer->versionProtocol;
-            if (answer->sample)
-                run->sample = answer->sample;
-            if (answer->favicon)
-                run->favicon = answer->favicon;
-            if (answer->maxPlayers)
-                run->maxPlayers = *answer->maxPlayers;
-            if (answer->online)
-                run->online = *answer->online;
-        }
-        if (hooks_.resolveDecision) {
-            runtime::DecisionResult result;
-            result.deny = run->cancelled;
-            result.reason = run->reason;
-            result.reasonJson = run->reasonJson;
-            if (kind == Kind::kPreConnect && !run->cancelled && run->server != run->request.backend)
-                result.redirect = run->server;
-            if (kind == Kind::kKick) {
-                result.deny = false;
-                result.redirect = run->server;
-                result.reason.clear();
-                if (run->reason != run->request.text) {
-                    result.text = run->reason;
-                    result.textJson = run->reasonJson;
-                }
-            } else if (kind == Kind::kCommand || kind == Kind::kChat) {
-                if (run->text != run->request.text)
-                    result.text = run->text;
-            } else if (kind == Kind::kPing) {
-                result.text = run->text == run->request.text ? std::string{} : run->text;
-                result.textJson = run->textJson;
-                result.versionName = run->versionName;
-                result.versionProtocol = run->versionProtocol;
-                result.sample = run->sample;
-                result.favicon = run->favicon;
-                if (run->maxPlayers >= 0)
-                    result.maxPlayers = static_cast<std::int32_t>(run->maxPlayers);
-                if (run->online >= 0)
-                    result.online = static_cast<std::int32_t>(run->online);
-            }
-            hooks_.resolveDecision(run->request.player, run->request.token, std::move(result));
-        }
+        run.sample = std::move(lines);
+    }
+    if (wasm.touched & WasmDecision::kFavicon)
+        if (auto icon = faviconOf(wasm.favicon))
+            run.favicon = std::move(icon);
+}
+
+void PluginHost::finishDecision(DecisionRun& run) {
+    const Kind kind = run.request.kind;
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - run.received);
+    if (elapsed.count() >= run.request.deadlineMs) {
+        if (hooks_.log)
+            hooks_.log("decisions", "a decision for " + run.request.player + " took " +
+                                        std::to_string(elapsed.count()) + " ms; the proxy already went on");
         return;
     }
-    const auto step = run->steps[index];
-    if (step.plugin->broken) {
-        stepDecision(run, index + 1);
-        return;
+    for (auto& adapter : adapters_) {
+        if (!adapter->decides(kind))
+            continue;
+        runtime::DecisionRequest asked = run.request;
+        if (kind == Kind::kPreConnect)
+            asked.backend = run.server;
+        else if (kind == Kind::kChat || kind == Kind::kCommand)
+            asked.text = run.text;
+        else if (kind == Kind::kKick)
+            asked.text = run.reason;
+        const auto answer = adapter->decide(asked);
+        if (!answer)
+            continue;
+        if (answer->deny) {
+            run.cancelled = true;
+            run.reason = answer->reason;
+            run.reasonJson = answer->reasonJson;
+        }
+        if (!answer->redirect.empty())
+            run.server = answer->redirect;
+        if (!answer->text.empty()) {
+            (kind == Kind::kKick ? run.reason : run.text) = answer->text;
+            (kind == Kind::kKick ? run.reasonJson : run.textJson) = answer->textJson;
+        }
+        if (answer->versionName)
+            run.versionName = answer->versionName;
+        if (answer->versionProtocol)
+            run.versionProtocol = answer->versionProtocol;
+        if (answer->sample)
+            run.sample = answer->sample;
+        if (answer->favicon)
+            run.favicon = answer->favicon;
+        if (answer->maxPlayers)
+            run.maxPlayers = *answer->maxPlayers;
+        if (answer->online)
+            run.online = *answer->online;
     }
-    const auto table = std::make_shared<wire::lua::LuaRef>();
-    Plugin* plugin = step.plugin;
-    call(
-        *plugin, step.handler->function,
-        [&, table](wire::lua::LuaArgs& lua) {
-            lua.pushTable();
-            const auto text = [&](std::string_view key, const std::string& value) {
-                lua.pushString(value);
-                lua.setField(key);
-            };
-            if (kind != Kind::kPing) {
-                PluginApi::pushPlayer(lua, *plugin, run->subject);
-                lua.setField("player");
-                text("player_name", run->request.player);
-                text("player_uuid", run->request.uuid);
-                text("address", run->request.address);
-                lua.pushInteger(run->request.port);
-                lua.setField("port");
+    if (hooks_.resolveDecision) {
+        runtime::DecisionResult result;
+        result.deny = run.cancelled;
+        result.reason = run.reason;
+        result.reasonJson = run.reasonJson;
+        if (kind == Kind::kPreConnect && !run.cancelled && run.server != run.request.backend)
+            result.redirect = run.server;
+        if (kind == Kind::kKick) {
+            result.deny = false;
+            result.redirect = run.server;
+            result.reason.clear();
+            if (run.reason != run.request.text) {
+                result.text = run.reason;
+                result.textJson = run.reasonJson;
             }
-            text("host", run->request.host);
-            if (kind == Kind::kPreConnect || kind == Kind::kKick) {
-                text("server", run->server);
-                text("from_server", run->request.from);
-            }
-            if (kind == Kind::kChat) {
-                text("message", run->text);
-                lua.pushBoolean(run->request.signedContent);
-                lua.setField("signed");
-            }
-            if (kind == Kind::kCommand) {
-                text("command", run->text);
-                lua.pushBoolean(run->request.signedContent);
-                lua.setField("signed");
-            }
-            if (kind == Kind::kKick)
-                text("reason", run->reason);
-            if (kind == Kind::kPing) {
-                text("protocol", run->request.text);
-                text("motd", run->text == run->request.text ? std::string{} : run->text);
-                lua.pushInteger(-1);
-                lua.setField("max_players");
-                lua.pushInteger(-1);
-                lua.setField("online");
-                text("version", run->versionName.value_or(""));
-                lua.pushInteger(run->versionProtocol.value_or(-1));
-                lua.setField("version_protocol");
-            }
-            if (kind != Kind::kKick && kind != Kind::kPing) {
-                lua.pushBoolean(run->cancelled);
-                lua.setField("cancelled");
-                text("reason", run->reason);
-            }
-            *table = wire::lua::LuaRef::of(lua.state(), -1);
-            return 1;
-        },
-        infoOf(kind).event,
-        [this, run, index, plugin, table, kind](bool ok) {
-            if (ok) {
-                wire::lua::LuaArgs lua{plugin->sandbox->state()};
-                table->push(lua);
-                const auto readText = [&](std::string_view key, std::string& into) {
-                    lua.pushField(-1, key);
-                    if (lua.isString(-1))
-                        into = lua.toText(-1);
-                    lua.pop(1);
-                };
-                const auto readNumber = [&](std::string_view key, std::int64_t& into) {
-                    lua.pushField(-1, key);
-                    if (lua.isNumber(-1))
-                        into = lua.toInteger(-1);
-                    lua.pop(1);
-                };
-                const auto readJson = [&](std::string_view key, std::string& into, bool& json) {
-                    lua.pushField(-1, key);
-                    if (lua.isString(-1)) {
-                        into = lua.toText(-1);
-                        json = true;
-                    }
-                    lua.pop(1);
-                };
-                const auto readMini = [&](std::string_view key, std::string& into, bool& json) {
-                    lua.pushField(-1, key);
-                    if (lua.isString(-1) && lua.toText(-1) != into) {
-                        into = lua.toText(-1);
-                        json = false;
-                    }
-                    lua.pop(1);
-                };
-                if (kind != Kind::kPing) {
-                    if (kind != Kind::kKick) {
-                        lua.pushField(-1, "cancelled");
-                        run->cancelled = lua.toBoolean(-1);
-                        lua.pop(1);
-                    }
-                    readMini("reason", run->reason, run->reasonJson);
-                    readJson("reason_json", run->reason, run->reasonJson);
-                }
-                if (kind == Kind::kPreConnect || kind == Kind::kKick)
-                    readText("server", run->server);
-                if (kind == Kind::kChat)
-                    readText("message", run->text);
-                if (kind == Kind::kCommand)
-                    readText("command", run->text);
-                if (kind == Kind::kPing) {
-                    readMini("motd", run->text, run->textJson);
-                    readJson("motd_json", run->text, run->textJson);
-                    readNumber("max_players", run->maxPlayers);
-                    readNumber("online", run->online);
-                    lua.pushField(-1, "version");
-                    if (lua.isString(-1) && !lua.toText(-1).empty())
-                        run->versionName = lua.toText(-1).substr(0, kMaxSampleLine);
-                    lua.pop(1);
-                    std::int64_t protocol = run->versionProtocol.value_or(-1);
-                    readNumber("version_protocol", protocol);
-                    if (protocol >= 0 && protocol <= std::numeric_limits<std::int32_t>::max())
-                        run->versionProtocol = static_cast<std::int32_t>(protocol);
-                    lua.pushField(-1, "sample");
-                    if (lua.isTable(-1)) {
-                        std::vector<std::string> lines;
-                        const auto count = std::min<std::int64_t>(lua.length(-1), kMaxSampleLines);
-                        for (std::int64_t at = 1; at <= count; ++at) {
-                            lua.pushIndex(-1, at);
-                            if (lua.isString(-1))
-                                lines.push_back(lua.toText(-1).substr(0, kMaxSampleLine));
-                            lua.pop(1);
-                        }
-                        run->sample = std::move(lines);
-                    }
-                    lua.pop(1);
-                    lua.pushField(-1, "favicon");
-                    if (lua.isString(-1))
-                        if (auto icon = faviconOf(lua.toText(-1)))
-                            run->favicon = std::move(icon);
-                    lua.pop(1);
-                }
-                lua.pop(1);
-            }
-            stepDecision(run, index + 1);
-        });
+        } else if (kind == Kind::kCommand || kind == Kind::kChat) {
+            if (run.text != run.request.text)
+                result.text = run.text;
+        } else if (kind == Kind::kPing) {
+            result.text = run.text == run.request.text ? std::string{} : run.text;
+            result.textJson = run.textJson;
+            result.versionName = run.versionName;
+            result.versionProtocol = run.versionProtocol;
+            result.sample = run.sample;
+            result.favicon = run.favicon;
+            if (run.maxPlayers >= 0)
+                result.maxPlayers = static_cast<std::int32_t>(run.maxPlayers);
+            if (run.online >= 0)
+                result.online = static_cast<std::int32_t>(run.online);
+        }
+        hooks_.resolveDecision(run.request.player, run.request.token, std::move(result));
+    }
 }
 
 } // namespace basalt::proxy::plugins

@@ -53,7 +53,7 @@ when a check was not run. Documentation-only changes do not require a native bui
   handling as security boundaries. Never weaken verification to make a test pass.
 - Record client edition/version, backend topology and the connection or transfer
   phase involved. Distinguish bot tests from tests with a graphical client.
-- Keep Lua/plugin compatibility changes generic rather than adding behavior for a
+- Keep plugin compatibility changes generic rather than adding behavior for a
   named plugin. Do not claim support for a planned adapter without implementation
   and tests. Keep compatibility code out of unrelated native routing paths.
 

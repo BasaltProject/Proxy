@@ -1,12 +1,12 @@
 #pragma once
 
 #include "PluginInternal.hpp"
+#include "WasmHost.hpp"
 
 #include <basalt/proxy/plugins/BungeeMessaging.hpp>
 #include <basalt/wire/common/ByteView.hpp>
 #include <basalt/wire/io/FileIO.hpp>
 #include <basalt/wire/plugins/CommandArguments.hpp>
-#include <basalt/wire/plugins/PacketView.hpp>
 #include <basalt/wire/plugins/PluginFolder.hpp>
 #include <basalt/wire/plugins/PluginOrder.hpp>
 #include <basalt/wire/storage/Schema.hpp>
@@ -20,8 +20,6 @@
 
 namespace basalt::proxy::plugins {
 namespace impl {
-
-constexpr int kStrikeLimit = 5;
 
 [[nodiscard]] inline std::vector<std::string> wordsOf(std::string_view line, std::size_t limit) {
     std::vector<std::string> words;

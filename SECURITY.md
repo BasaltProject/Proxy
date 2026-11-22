@@ -30,7 +30,7 @@ Report the exact affected release or commit even if you cannot test a newer buil
 Potential vulnerabilities include authentication or player-identity bypasses,
 forged or incorrectly validated forwarding data, exposure of forwarding secrets,
 unauthorized backend access or transfers, unsafe packet handling, memory-safety
-failures, and Lua sandbox or permission-boundary escapes.
+failures, and WebAssembly sandbox or permission-boundary escapes.
 
 Include whether the affected backend is Basalt Server, vanilla, Paper or another
 implementation. Proxy security must not depend on every backend being Basalt.

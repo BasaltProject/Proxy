@@ -60,10 +60,8 @@ PluginSetup makePluginSetup(const std::expected<config::ProxyConfig, std::string
     proxy::plugins::PluginSettings settings;
     settings.directory = config::PluginsConfig::kDirectory;
     settings.database = config::PluginsConfig::kDatabase;
-    settings.allow = configuration->plugins.allow;
-    settings.limits.instructionsPerTurn = configuration->plugins.instructionsPerTurn;
-    settings.limits.memoryBytes = configuration->plugins.memoryMb * 1024 * 1024;
     settings.queueSize = configuration->plugins.queueSize;
+    settings.allow = configuration->plugins.allow;
     settings.packets = packetRegistry;
     settings.packetTimeout = std::chrono::milliseconds{configuration->plugins.packetTimeoutMs};
     settings.packetMaxBytes = configuration->plugins.packetMaxKib * 1024;

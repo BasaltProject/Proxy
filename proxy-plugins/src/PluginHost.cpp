@@ -6,17 +6,12 @@ PluginHost::PluginHost(PluginSettings settings, PluginHooks hooks)
 
 PluginHost::~PluginHost() {
     shutdown();
-    const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
     dropPacketListeners();
-    dropPermissionProviders();
 }
 
 void PluginHost::dropPacketListeners() {
-    for (auto& plugin : plugins_) {
-        for (auto& handle : plugin->packetHandles)
-            handle.remove();
-        plugin->packetHandles.clear();
-    }
+    if (wasm_)
+        wasm_->dropPacketListeners();
     if (settings_.packets)
         settings_.packets->drain();
 }
@@ -26,12 +21,8 @@ void PluginHost::shutdown() {
     wake_.notify_all();
     if (thread_.joinable())
         thread_.join();
-    const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
-    for (auto& plugin : plugins_)
-        if (!plugin->broken)
-            for (const wire::lua::LuaRef& handler : plugin->onDisable)
-                call(*plugin, handler, {}, "plugin.disable");
-    timers_.clear();
+    if (wasm_)
+        wasm_->disable();
 }
 
 std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(PluginSettings settings, PluginHooks hooks) {
@@ -48,10 +39,7 @@ std::expected<std::unique_ptr<PluginHost>, std::string> PluginHost::start(Plugin
         if (!host->database_->exec(wire::storage::schema::pluginDdl()))
             return std::unexpected("plugin database " + host->settings_.database + ": could not create its tables");
     }
-    {
-        const std::lock_guard<std::recursive_timed_mutex> turn{host->luaMutex_};
-        host->loadPackages();
-    }
+    host->loadPackages();
     for (const AdapterFactory& factory : host->settings_.adapters) {
         if (!factory)
             continue;
@@ -119,126 +107,15 @@ void PluginHost::loadPackages() {
 void PluginHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& package,
                       const wire::plugins::PluginManifest& manifest) {
     const std::string& id = manifest.id;
-    const auto report = [this, &id](std::string_view line) {
-        if (hooks_.log)
-            hooks_.log(id, line);
-    };
-    auto source = package->read(manifest.main);
-    if (!source || source->size() > kMaxSourceBytes) {
-        report(manifest.main + " is missing or larger than 1 MiB; plugin skipped");
-        return;
-    }
-    const auto granted = settings_.allow.find(id);
-    wire::plugins::PluginManifest effective = manifest;
-    std::string missing;
-    std::string quoted;
-    for (const wire::plugins::PluginPermission asked : manifest.capabilities.asks()) {
-        const std::string_view label = wire::plugins::permissionName(asked);
-        if (granted != settings_.allow.end() && std::ranges::find(granted->second, label) != granted->second.end())
-            continue;
-        missing += (missing.empty() ? "" : ", ") + std::string{label};
-        quoted += (quoted.empty() ? "\"" : ", \"") + std::string{label} + "\"";
-        if (asked == wire::plugins::PluginPermission::Packets)
-            effective.capabilities.packets = false;
-        else if (asked == wire::plugins::PluginPermission::Network)
-            effective.capabilities.network.clear();
-        else
-            effective.capabilities.commands = false;
-    }
-    const auto& warn = hooks_.warn ? hooks_.warn : hooks_.log;
-    if (!missing.empty() && warn)
-        warn(id, "asks for " + missing + " and the operator has not granted it, so it loads without it. Add " + id +
-                     " = [" + quoted + "] under [plugins.allow] in proxy.toml to allow it.");
-    wire::common::toml::TomlTable config;
     {
-        const wire::plugins::PluginFolder folder{*package, manifest, settings_.directory + "/" + id};
-        folder.materialize([&report](std::string_view line) { report(line); });
-        const auto index = folder.index();
-        if (!index) {
-            report("did not load: " + index.error().message);
-            return;
-        }
-        for (const auto& [relative, path] : *index) {
-            if (!relative.ends_with(".toml"))
-                continue;
-            const auto text = wire::io::fileIO::readText(path);
-            if (!text)
-                continue;
-            auto parsed = wire::common::toml::parse(*text);
-            if (!parsed) {
-                report("did not load: " + path +
-                       " is malformed: " + std::string{wire::common::toml::tomlErrorMessage(parsed.error())});
-                return;
-            }
-            if (relative == "config.toml") {
-                for (const std::string& key : parsed->keys())
-                    if (const auto* value = parsed->find(key))
-                        config.set(key, *value);
-            } else {
-                std::string name =
-                    relative.substr(relative.rfind('/') == std::string::npos ? 0 : relative.rfind('/') + 1);
-                name.resize(name.size() - 5);
-                config.set(name, wire::common::toml::TomlValue{std::move(*parsed)});
-            }
-        }
-    }
-    // A plugin sees its own modules first, then those a dependency that loaded before it chose to export.
-    std::vector<std::pair<std::shared_ptr<wire::plugins::PluginPackage>, wire::plugins::PluginManifest>> lenders;
-    for (const wire::plugins::PluginDependency& dependency : manifest.dependencies)
-        if (const auto lender = installed_.find(dependency.id); lender != installed_.end())
-            lenders.push_back(lender->second);
-    auto plugin = std::make_unique<Plugin>();
-    plugin->id = id;
-    plugin->name = manifest.name.empty() ? id : manifest.name;
-    plugin->version = manifest.version;
-    plugin->host = this;
-    plugin->storage = manifest.capabilities.storage;
-    plugin->playersData = manifest.capabilities.playersData;
-    plugin->text = std::make_unique<wire::plugins::PluginText>(settings_.directory + "/" + id, "en_us");
-    plugin->text->load();
-    plugin->sandbox = wire::lua::LuaSandbox::create(
-        id, settings_.limits, 0,
-        [package, lenders](std::string_view module) -> std::optional<std::vector<std::uint8_t>> {
-            const auto file = wire::plugins::packageLayout::moduleFile(module);
-            if (!file)
-                return std::nullopt;
-            auto bytes = package->read(*file);
-            for (std::size_t i = 0; !bytes && i < lenders.size(); ++i)
-                if (lenders[i].second.exports.exportsModule(module))
-                    bytes = lenders[i].first->read(*file);
-            if (bytes && bytes->size() > kMaxSourceBytes)
-                return std::nullopt;
-            return bytes;
-        },
-        [report](std::string_view line) { report(line); });
-    if (!plugin->sandbox) {
-        report("could not create the Lua state; plugin skipped");
-        return;
-    }
-    PluginApi::install(*this, *plugin, effective, config);
-    PluginApi::installMessaging(*this, *plugin);
-    PluginApi::installHud(*this, *plugin);
-    PluginApi::installPermissions(*this, *plugin);
-    auto chunk = plugin->sandbox->compile(wire::common::asText(*source), "@" + id + "/" + manifest.main);
-    if (!chunk) {
-        report("compile failed: " + chunk.error().message);
-        return;
-    }
-    plugin->sandbox->refill();
-    if (auto ran = plugin->sandbox->run(*chunk); !ran) {
-        report("failed while loading: " + ran.error().message);
-        if (hooks_.commands)
-            hooks_.commands->removeOwners("plugin:" + id + "/");
         std::unique_lock lock{commandsMutex_};
-        for (auto& [root, entries] : commands_)
-            std::erase_if(entries, [&](const auto& entry) { return entry->plugin == plugin.get(); });
-        std::erase_if(commands_, [](const auto& entry) { return entry.second.empty(); });
-        std::erase_if(timers_, [&](const auto& timer) { return timer->plugin == plugin.get(); });
-        return;
+        if (!wasm_)
+            wasm_ = std::make_unique<WasmHost>(*this);
     }
-    installed_.emplace(id, std::make_pair(package, manifest));
-    plugins_.push_back(std::move(plugin));
-    ++loaded_;
+    if (wasm_->load(package, manifest)) {
+        installed_.emplace(id, std::make_pair(package, manifest));
+        ++loaded_;
+    }
 }
 
 std::size_t PluginHost::reload() {
@@ -246,27 +123,22 @@ std::size_t PluginHost::reload() {
     shutdown();
     if (hooks_.commands)
         hooks_.commands->removeOwners("plugin:");
+    dropPacketListeners();
     {
-        const std::lock_guard<std::recursive_timed_mutex> turn{luaMutex_};
-        dropPacketListeners();
-        dropPermissionProviders();
-        {
-            std::unique_lock lock{commandsMutex_};
-            commands_.clear();
-        }
-        plugins_.clear();
-        deciders_.store(0);
-        {
-            std::unique_lock lock{channelsMutex_};
-            channels_.clear();
-        }
-        installed_.clear();
-        roster_.clear();
-        loaded_.store(0, std::memory_order_relaxed);
-        loading_ = true;
-        loadPackages();
-        loading_ = false;
+        std::unique_lock lock{commandsMutex_};
+        wasm_.reset();
     }
+    deciders_.store(0);
+    {
+        std::unique_lock lock{channelsMutex_};
+        channels_.clear();
+    }
+    installed_.clear();
+    roster_.clear();
+    loaded_.store(0, std::memory_order_relaxed);
+    loading_ = true;
+    loadPackages();
+    loading_ = false;
     thread_ = std::jthread{[this](std::stop_token stop) { run(stop); }};
     return loaded();
 }
@@ -286,12 +158,35 @@ bool PluginHost::enqueue(Task task) {
 
 void PluginHost::post(runtime::PlayerEvent event) { static_cast<void>(enqueue(std::move(event))); }
 
+bool PluginHost::postCompletion(std::function<void(WasmHost&)> run) { return enqueue(CompletionCall{std::move(run)}); }
+
+bool PluginHost::runOnPluginThread(std::function<void()> work, bool urgent) {
+    {
+        std::lock_guard lock{mutex_};
+        if (queue_.size() >= settings_.queueSize * (urgent ? 2 : 1)) {
+            dropped_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        if (urgent)
+            queue_.push_front(std::move(work));
+        else
+            queue_.push_back(std::move(work));
+    }
+    wake_.notify_one();
+    return true;
+}
+
+bool PluginHost::granted(std::string_view plugin, std::string_view permission) const {
+    const auto found = settings_.allow.find(std::string{plugin});
+    return found != settings_.allow.end() && std::ranges::find(found->second, permission) != found->second.end();
+}
+
 bool PluginHost::command(std::string_view line) {
     auto words = wordsOf(line, 32);
     {
         std::shared_lock lock{commandsMutex_};
-        if (words.empty() || (!commands_.contains(words.front()) && !foreignCommands_.contains(words.front()) &&
-                              words.front() != "plugins"))
+        if (words.empty() || (!foreignCommands_.contains(words.front()) && words.front() != "plugins" &&
+                              !(wasm_ && wasm_->hasRoot(words.front()))))
             return false;
     }
     static_cast<void>(enqueue(ConsoleCall{std::move(words)}));
@@ -302,7 +197,7 @@ bool PluginHost::playerCommand(std::string_view player, std::string_view line) {
     auto words = wordsOf(line, 32);
     {
         std::shared_lock lock{commandsMutex_};
-        if (words.empty() || !commands_.contains(words.front()))
+        if (words.empty() || !(wasm_ && wasm_->hasRoot(words.front())))
             return false;
     }
     static_cast<void>(enqueue(PlayerCommandCall{std::string{player}, std::move(words)}));

@@ -1,17 +1,29 @@
+basalt_wasm_host_registry(_wasm_imports
+    DIR ${CMAKE_CURRENT_SOURCE_DIR}/src
+    PREFIX WasmImports
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/WasmImportsRegistry.cpp
+    INCLUDES WasmImports.hpp
+    NAMESPACE basalt::proxy::plugins::wasmimport
+    ENTRY "void addAllImports(std::vector<Entry>& out)"
+    DECLARE "void add@Area@Imports(std::vector<Entry>& out)"
+    CALL "add@Area@Imports(out)")
+
 basalt_module(proxy-plugins
     SOURCES
         src/BungeeMessaging.cpp
         src/JarDetector.cpp
-        src/PluginApi.cpp
         src/PluginDecisions.cpp
-        src/PluginMessagingApi.cpp
-        src/PluginHudApi.cpp
-        src/PluginPermissionsApi.cpp
+        src/PluginSupport.cpp
         src/PluginHost.cpp
         src/PluginHostEvents.cpp
         src/PluginHostMessaging.cpp
-    DEPENDS basalt::proxy-runtime-core basalt::wire-lua basalt::wire-permissions basalt::wire-plugins basalt::wire-sqlite basalt::wire-storage
-    PRIVATE_DEPENDS basalt::lua
+        src/WasmEventFields.cpp
+        src/WasmHost.cpp
+        src/WasmImports.cpp
+        ${_wasm_imports}
+        src/WasmLoad.cpp
+        src/WasmNetwork.cpp
+    DEPENDS basalt::proxy-runtime-core basalt::wire-wasm basalt::wire-permissions basalt::wire-plugins basalt::wire-sqlite basalt::wire-storage
 )
 
 if(TARGET basalt::wire-shim)
