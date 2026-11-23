@@ -90,7 +90,7 @@ jobs:
         with:
           submodules: true
           ref: ${{ inputs.ref }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/musl-ccache
           key: ccache-${{ matrix.target }}-clang20-${{ github.sha }}
@@ -282,7 +282,7 @@ jobs:
         run: .github/scripts/select-compiler.sh
       - name: Restore the FreeBSD arm64 sysroot
         if: matrix.cross
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/freebsd-sysroot
           key: freebsd-sysroot-${{ hashFiles('.github/scripts/setup-freebsd-sysroot.sh') }}
@@ -316,7 +316,7 @@ jobs:
               readelf -l "$binary" | grep -F /libexec/ld-elf.so.1
               if readelf -d "$binary" | grep NEEDED | grep -E 'libc\+\+|libcxxrt'; then exit 1; fi
           done
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         if: ${{ !matrix.cross }}
         with:
           path: build/freebsd-ccache
