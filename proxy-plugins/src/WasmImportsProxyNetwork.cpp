@@ -19,7 +19,7 @@ constexpr std::string_view kNetwork = "network";
            std::ranges::all_of(channel, [](unsigned char c) { return c > 32 && c < 127; });
 }
 
-[[nodiscard]] bool denied(WasmPlugin& plugin) { return !plugin.capable(kNetwork); }
+[[nodiscard]] bool denied(WasmPlugin& plugin) { return !plugin.permitted(kNetwork); }
 
 // ---- channels
 

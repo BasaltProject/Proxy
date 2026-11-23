@@ -50,7 +50,7 @@ bool WasmHost::load(const std::shared_ptr<wire::plugins::PluginPackage>& package
     plugin->capabilities = manifest.capabilities;
     plugin->authors = manifest.authors;
     plugin->dependencies = manifest.dependencies;
-    const std::string folderPath = host_.settings_.directory + "/" + id;
+    const std::string folderPath = package->workingFolder().value_or(host_.settings_.directory + "/" + id);
     {
         const wire::plugins::PluginFolder folder{*package, manifest, folderPath};
         folder.materialize([&report](std::string_view line) { report(line); });

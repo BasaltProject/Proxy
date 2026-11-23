@@ -19,7 +19,7 @@ constexpr std::array<std::string_view, 5> kPhases{"handshake", "status", "login"
 
 [[nodiscard]] std::string_view phaseName(PacketPhase phase) { return kPhases[static_cast<std::size_t>(phase)]; }
 
-[[nodiscard]] bool denied(WasmPlugin& plugin) { return !plugin.capable(kPackets); }
+[[nodiscard]] bool denied(WasmPlugin& plugin) { return !plugin.permitted(kPackets); }
 
 [[nodiscard]] std::span<const std::uint8_t> bytesOf(std::string_view text) {
     return {reinterpret_cast<const std::uint8_t*>(text.data()), text.size()};

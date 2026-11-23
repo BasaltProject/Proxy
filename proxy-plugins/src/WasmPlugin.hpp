@@ -28,7 +28,11 @@ struct WasmPlugin {
     std::vector<std::string> authors;
     std::vector<wire::plugins::PluginDependency> dependencies;
 
-    [[nodiscard]] bool capable(std::string_view name) const { return capabilities.has(name); }
+    [[nodiscard]] bool capable(std::string_view capability) const { return capabilities.has(capability); }
+
+    [[nodiscard]] bool permitted(std::string_view capability) const {
+        return capable(capability) && host->host().granted(id, capability);
+    }
 
     std::optional<wire::wasm::Module> module;
     std::optional<wire::wasm::Instance> instance;

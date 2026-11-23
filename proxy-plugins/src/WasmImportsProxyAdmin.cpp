@@ -25,9 +25,7 @@ constexpr std::int32_t kDefaultTop = 10;
 constexpr std::int32_t kMaxTop = 1000;
 constexpr std::string_view kServerScope = "server";
 
-[[nodiscard]] bool pluginMayRun(const WasmPlugin& plugin) {
-    return plugin.capable("commands") && plugin.host->host().granted(plugin.id, "commands");
-}
+[[nodiscard]] bool pluginMayRun(const WasmPlugin& plugin) { return plugin.permitted("commands"); }
 
 void writeReason(Call& call, std::size_t ptrIndex, std::string_view reason) {
     const std::int32_t cap = call.i32(ptrIndex + 1);

@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
 #include "WasmDemoGuest.hpp"
+#include "WasmNetworkGuest.hpp"
 
 #include <basalt/proxy/plugins/JarDetector.hpp>
 #include <basalt/proxy/plugins/PluginHost.hpp>
@@ -17,10 +18,11 @@ using namespace std::chrono_literals;
 
 namespace {
 
-void manifest(const std::filesystem::path& folder, std::string_view id) {
+void manifest(const std::filesystem::path& folder, std::string_view id, std::string_view capabilities = "") {
     std::filesystem::create_directories(folder);
     std::ofstream{folder / "plugin.toml"} << "id = \"" << id << "\"\nversion = \"1.0.0\"\napi = 1\nabi = 1\n"
-                                          << "main = \"plugin.wasm\"\n";
+                                          << "main = \"plugin.wasm\"\n"
+                                          << capabilities;
 }
 
 void write(const std::filesystem::path& path, std::string_view text) {
@@ -94,4 +96,35 @@ TEST_CASE("a WebAssembly plugin greets, decides a login and is disabled alone wh
     (*host)->post({runtime::PlayerEventKind::kJoin, "Bob", "lobby", "uuid-b", ""});
     std::lock_guard lock{mutex};
     CHECK(std::ranges::count(lines, "tell Bob: <green>Hello Bob, you are on lobby (wasm proxy plugin)") == 0);
+}
+
+TEST_CASE("a plugin needs the operator grant as well as the capability to use the network") {
+    const std::filesystem::path root = std::filesystem::path{BASALT_TEST_SCRATCH_DIR} / "wasm-grants";
+    std::filesystem::remove_all(root);
+    manifest(root / "netplugin", "netplugin", "[capabilities]\nnetwork = [\"example.org\"]\n");
+    {
+        std::ofstream guest{root / "netplugin" / "plugin.wasm", std::ios::binary};
+        guest.write(reinterpret_cast<const char*>(kNetworkGuest), sizeof kNetworkGuest);
+    }
+    const auto answer = [&](plugins::PluginSettings settings) {
+        std::mutex mutex;
+        std::condition_variable ready;
+        std::optional<std::string> line;
+        plugins::PluginHooks hooks;
+        hooks.log = [&](std::string_view, std::string_view text) {
+            std::lock_guard lock{mutex};
+            line = std::string{text};
+            ready.notify_all();
+        };
+        settings.directory = root.string();
+        auto host = plugins::PluginHost::start(settings, hooks);
+        REQUIRE(host);
+        std::unique_lock lock{mutex};
+        REQUIRE(ready.wait_for(lock, 10s, [&] { return line.has_value(); }));
+        return *line;
+    };
+    CHECK(answer({}) == "denied");
+    plugins::PluginSettings granted;
+    granted.allow["netplugin"] = {"network"};
+    CHECK(answer(granted) == "allowed");
 }

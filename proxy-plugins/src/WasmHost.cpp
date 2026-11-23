@@ -1,5 +1,8 @@
+#include "PluginHostSupport.hpp"
 #include "WasmPlugin.hpp"
 #include "WasmValues.hpp"
+
+#include <basalt/wire/common/placeholder/Placeholders.hpp>
 
 #include <algorithm>
 
@@ -209,10 +212,12 @@ void WasmHost::decide(WasmDecision& decision) {
         }
 }
 
-bool WasmHost::hasRoot(std::string_view root) const { return commands_.contains(root); }
+bool WasmHost::hasRoot(std::string_view root) const {
+    return commands_.contains(wire::common::placeholder::lowercaseAscii(root));
+}
 
 bool WasmHost::invoke(const std::vector<std::string>& words, const PluginHost::Player* source) {
-    const auto roots = commands_.find(words.front());
+    const auto roots = commands_.find(wire::common::placeholder::lowercaseAscii(words.front()));
     if (roots == commands_.end())
         return false;
     const WasmCommand* best = nullptr;
@@ -220,7 +225,7 @@ bool WasmHost::invoke(const std::vector<std::string>& words, const PluginHost::P
         const auto& literals = entry.spec.literals;
         if (literals.size() > words.size() || entry.plugin->broken)
             continue;
-        if (!std::equal(literals.begin(), literals.end(), words.begin()))
+        if (!std::equal(literals.begin(), literals.end(), words.begin(), sameName))
             continue;
         if (best == nullptr || literals.size() > best->spec.literals.size())
             best = &entry;
