@@ -18,9 +18,9 @@ jobs:
           fetch-depth: 0
           submodules: true
       - name: Install the toolchain
-        uses: lukka/get-cmake@latest
+        uses: lukka/get-cmake@16e8153a8b4918849d92aad131befe67a3705daa # latest
       - name: Install ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1
         with:
           job-summary: ''
           max-size: 1200M

@@ -13,7 +13,7 @@ Linux)
         fi
         # Downloaded packages are kept, so a retry resumes on the main archive instead of the slow runner mirror.
         if [ -f /etc/apt/apt-mirrors.txt ]; then
-            echo http://archive.ubuntu.com/ubuntu/ | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            echo https://archive.ubuntu.com/ubuntu/ | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
         fi
     done
     [ "$installed" = 1 ]
@@ -73,7 +73,7 @@ MINGW* | MSYS* | CYGWIN*)
         if [ "$arm64" = 1 ]; then
             installer="LLVM-$version-woa64.exe"
         fi
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$RUNNER_TEMP/llvm.exe" \
+        curl -fsSL --proto "=https" --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 10 -o "$RUNNER_TEMP/llvm.exe" \
             "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$installer"
         powershell -NoProfile -Command "Start-Process -FilePath '$(cygpath -w "$RUNNER_TEMP/llvm.exe")' -ArgumentList '/S','/D=C:\\LLVM' -Wait"
         export PATH="/c/LLVM/bin:$PATH"
